@@ -319,17 +319,15 @@ Shortcut** or **Open App**, while thumb-wheel browser switching is unchanged. On
 installed apps on Klik PRO's small, human-tested list are shown; there is no general
 app search, unsupported-app list, Browse flow, or Convert action.
 
-## Coming soon
+## Roadmap
 
-Planned for a future update:
+Planned for future releases — not yet available, and subject to change:
 
-- **Durable data folder for App Profiles.** Choose a folder — for example in
-  Documents or on an external drive — where a profile keeps its login and settings,
-  so they **survive uninstalling and reinstalling Klik PRO, or moving to a new Mac**.
-  On reinstall, Klik PRO locates the folder and re-adopts your profiles
-  automatically, regenerating their launchers and links. Today a profile's data lives
-  inside Klik PRO's Application Support folder (which an uninstaller can remove); the
-  durable folder is opt-in and applies to newly generated profiles.
+- **More apps for App Profiles.** Extend isolated App Profiles beyond ChatGPT and
+  Claude to additional supported apps.
+- **Built-in system controls.** Preconfigured actions you can assign to a mouse button
+  — brightness, volume, media playback, and the like — without recording a keyboard
+  shortcut yourself.
 
 ## Building
 
