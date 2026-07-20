@@ -319,15 +319,41 @@ Shortcut** or **Open App**, while thumb-wheel browser switching is unchanged. On
 installed apps on Klik PRO's small, human-tested list are shown; there is no general
 app search, unsupported-app list, Browse flow, or Convert action.
 
+### How the durable data folder works
+
+The Advanced tab keeps its data-location controls behind a lock and a risk
+confirmation. Once you choose a durable folder, new App Profiles are stored there —
+outside Klik PRO's Application Support — so their logins **survive uninstalling,
+reinstalling, or moving to a new Mac**. Existing profiles are never moved.
+
+```mermaid
+flowchart TD
+    L["Advanced tab — locked"] -->|click the lock| C{"Risk confirmation"}
+    C -->|Cancel| L
+    C -->|Unlock| U["Data-folder options unlocked"]
+    U --> Ch["Choose a durable data folder"]
+    Ch --> V[("Durable data folder<br/>vault.json manifest · no absolute paths")]
+    V --> P["New App Profiles keep their login + settings here"]
+    V --> S["Discovery symlink created in your home folder"]
+    P --> Un["Uninstall Klik PRO<br/>(Application Support cache removed)"]
+    Un -. "folder + symlink survive" .-> V
+    Un --> Re["Reinstall Klik PRO"]
+    Re --> D["Discovery locates the folder<br/>via the surviving symlink"]
+    D --> Ad["Scan and Adopt / auto-adopt<br/>regenerates launchers + links"]
+    Ad --> Done["Profiles restored — logins intact"]
+```
+
 ## Roadmap
 
-Planned for future releases — not yet available, and subject to change:
+Possible directions for future releases — not committed, and subject to change:
 
 - **More apps for App Profiles.** Extend isolated App Profiles beyond ChatGPT and
   Claude to additional supported apps.
 - **Built-in system controls.** Preconfigured actions you can assign to a mouse button
   — brightness, volume, media playback, and the like — without recording a keyboard
   shortcut yourself.
+
+Have a request? [Open an issue](https://github.com/AminudinMurad/klik-pro/issues).
 
 ## Building
 
