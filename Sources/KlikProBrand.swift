@@ -164,7 +164,7 @@ final class KlikProAboutContentView: NSView {
         versionLabel.textColor = .secondaryLabelColor
 
         let descriptionLabel = NSTextField(
-            wrappingLabelWithString: "Open-source mouse shortcuts and configurable horizontal thumb-wheel tab switching for macOS."
+            wrappingLabelWithString: "Open-source mouse shortcuts and App Profiles for macOS, with thumb-wheel tab switching."
         )
         descriptionLabel.frame = NSRect(x: 30, y: 66, width: width - 60, height: 36)
         descriptionLabel.alignment = .center

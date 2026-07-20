@@ -2336,7 +2336,7 @@ final class PreferencesContentView: NSView {
             y: PreferencesContentView.supportCard.minY + 12
         )
 
-        ("Open-source mouse shortcuts for macOS." as NSString).draw(
+        ("Open-source mouse shortcuts and App Profiles for macOS." as NSString).draw(
             at: NSPoint(
                 x: rxi,
                 y: PreferencesContentView.aboutCard.minY
@@ -2613,6 +2613,22 @@ func confirmEnableMenuBarIconForCaffeinate() -> Bool {
     return alert.runModal() == .alertFirstButtonReturn
 }
 
+/// Confirms unlocking the Advanced tab. Its options change where App Profile data
+/// is stored on disk, so unlocking is gated behind an explicit acknowledgement of
+/// the risk. Returns true only if the user chose to proceed.
+func confirmUnlockAdvancedSettings() -> Bool {
+    guard !previewRenderingIsActive else { return false }
+    let alert = NSAlert()
+    alert.alertStyle = .warning
+    alert.messageText = "Unlock Advanced settings?"
+    alert.informativeText = "These options change where your App Profile data is stored on disk. "
+        + "Choosing the wrong folder can leave profiles unfindable or split across locations, and "
+        + "existing profiles are never moved. Only continue if you understand the consequences."
+    alert.addButton(withTitle: "Unlock")
+    alert.addButton(withTitle: "Cancel")
+    return alert.runModal() == .alertFirstButtonReturn
+}
+
 func makeOnboardingAlert(
     step: OnboardingStep,
     accessibilityGranted: Bool,
@@ -2781,7 +2797,9 @@ final class ToggleView: NSView {
     private let mappingsTabRect = NSRect(x: 38, y: 84, width: 86, height: 26)
     private let settingsTabRect = NSRect(x: 138, y: 84, width: 78, height: 26)
     private let appProfilesTabRect = NSRect(x: 230, y: 84, width: 76, height: 26)
-    private let advancedTabRect = NSRect(x: 322, y: 84, width: 82, height: 26)
+    // x=346 keeps the gap before "Advanced" even with the other tabs (App Profiles
+    // ends ~307); width covers the label plus its locked-state glyph for hit-testing.
+    private let advancedTabRect = NSRect(x: 346, y: 84, width: 100, height: 26)
     private var appActivationObserver: NSObjectProtocol?
 
     override var isFlipped: Bool { true }
@@ -3133,7 +3151,9 @@ final class ToggleView: NSView {
             self.refreshAppProfileHealth()
         }
         advancedView.onUnlock = { [weak self] in
-            self?.advancedView.setLocked(false)
+            guard let self = self, confirmUnlockAdvancedSettings() else { return }
+            self.advancedView.setLocked(false)
+            self.needsDisplay = true // clear the tab's lock glyph
         }
         advancedView.onChooseFolder = { [weak self] in
             self?.chooseVaultDataFolder()
@@ -5153,8 +5173,25 @@ final class ToggleView: NSView {
                 .foregroundColor: active ? NSColor.controlAccentColor : NSColor.appTextSecondary
             ]
             (label as NSString).draw(at: NSPoint(x: rect.minX, y: rect.minY + 4), withAttributes: tAttrs)
+            let w = (label as NSString).size(withAttributes: tAttrs).width
+            // A small lock glyph marks the Advanced tab while its options are locked.
+            if idx == 3, advancedView.locked,
+               let lockGlyph = NSImage(
+                   systemSymbolName: "lock.fill",
+                   accessibilityDescription: "Locked"
+               )?.withSymbolConfiguration(
+                   NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
+                       .applying(.init(paletteColors: [active ? .controlAccentColor : .appTextSecondary]))
+               ) {
+                let gh = lockGlyph.size.height
+                lockGlyph.draw(in: NSRect(
+                    x: rect.minX + w + 5,
+                    y: rect.minY + 4 + (13 - gh) / 2 + 1,
+                    width: lockGlyph.size.width,
+                    height: gh
+                ))
+            }
             if active {
-                let w = (label as NSString).size(withAttributes: tAttrs).width
                 NSColor.controlAccentColor.setFill()
                 NSBezierPath(rect: NSRect(x: rect.minX, y: rect.minY + 24, width: w, height: 2)).fill()
             }

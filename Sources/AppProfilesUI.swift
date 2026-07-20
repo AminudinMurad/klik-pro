@@ -830,14 +830,17 @@ final class AppProfilesContentView: NSView {
 /// changed by accident; unlocking reveals two sections — choose/clear the folder
 /// new profiles are stored in, and scan/adopt an existing Klik PRO data folder.
 final class AdvancedSettingsContentView: NSView {
-    // Locked-state views.
-    private let lockIcon = NSImageView()
+    // Locked-state views. The lock icon itself is the control — pressing it asks
+    // for an explicit risk confirmation before the data-location options appear.
+    private let lockButton = NSButton()
     private let lockTitle = NSTextField(labelWithString: "Advanced settings are locked")
     private let lockBody = NSTextField(wrappingLabelWithString:
-        "These settings change where your App Profile data is stored on disk. "
-        + "Unlock to choose a durable data folder or recover profiles from one."
+        "Advanced options change where App Profile data is stored on disk. Pointing "
+        + "at the wrong folder can leave profiles unfindable or split across locations, "
+        + "and existing profiles are never moved. Only continue if you understand the "
+        + "consequences."
     )
-    private let unlockButton = AppProfileButton(title: "Unlock", frame: .zero)
+    private let lockHint = NSTextField(labelWithString: "Click the lock to unlock")
 
     // Unlocked-state views — "Data folder for new profiles".
     private let dataRootLabel = NSTextField(labelWithString: "DATA FOLDER FOR NEW PROFILES")
@@ -865,7 +868,9 @@ final class AdvancedSettingsContentView: NSView {
     var onScanAndAdopt: (() -> Void)?
 
     private var isLocked = true
-    private var lockedViews: [NSView] { [lockIcon, lockTitle, lockBody, unlockButton] }
+    /// Whether the tab is currently locked — read by the tab bar to show a lock glyph.
+    var locked: Bool { isLocked }
+    private var lockedViews: [NSView] { [lockButton, lockTitle, lockBody, lockHint] }
     private var unlockedViews: [NSView] {
         [dataRootLabel, dataRootBody, dataRootValueField, chooseButton, clearButton,
          recoverLabel, recoverBody, scanButton, statusField]
@@ -876,23 +881,30 @@ final class AdvancedSettingsContentView: NSView {
     init(dataRoot: String?, width: CGFloat) {
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: 702))
 
-        // Locked state, centred.
+        // Locked state, centred. The lock icon is a pressable button.
         let iconConfig = NSImage.SymbolConfiguration(pointSize: 40, weight: .regular)
-        lockIcon.image = NSImage(systemSymbolName: "lock.fill", accessibilityDescription: "Locked")?
+        lockButton.isBordered = false
+        lockButton.imagePosition = .imageOnly
+        lockButton.title = ""
+        lockButton.setButtonType(.momentaryChange)
+        lockButton.image = NSImage(systemSymbolName: "lock.fill", accessibilityDescription: "Locked")?
             .withSymbolConfiguration(iconConfig)
-        lockIcon.contentTintColor = .appTextSecondary
-        lockIcon.imageScaling = .scaleProportionallyUpOrDown
-        lockIcon.frame = NSRect(x: width / 2 - 24, y: 176, width: 48, height: 48)
-        lockTitle.frame = NSRect(x: 0, y: 240, width: width, height: 24)
+        lockButton.contentTintColor = .appTextSecondary
+        lockButton.frame = NSRect(x: width / 2 - 28, y: 150, width: 56, height: 56)
+        lockButton.target = self
+        lockButton.action = #selector(lockPressed)
+        lockTitle.frame = NSRect(x: 0, y: 220, width: width, height: 24)
         lockTitle.font = .systemFont(ofSize: 16, weight: .semibold)
         lockTitle.textColor = .appTextPrimary
         lockTitle.alignment = .center
-        lockBody.frame = NSRect(x: width / 2 - 240, y: 272, width: 480, height: 48)
+        lockBody.frame = NSRect(x: width / 2 - 270, y: 252, width: 540, height: 72)
         lockBody.font = .systemFont(ofSize: 12)
         lockBody.textColor = .appTextSecondary
         lockBody.alignment = .center
-        unlockButton.frame = NSRect(x: width / 2 - 70, y: 336, width: 140, height: 32)
-        unlockButton.onPress = { [weak self] in self?.onUnlock?() }
+        lockHint.frame = NSRect(x: 0, y: 338, width: width, height: 18)
+        lockHint.font = .systemFont(ofSize: 12, weight: .medium)
+        lockHint.textColor = .controlAccentColor
+        lockHint.alignment = .center
 
         // Section 1 — Data folder.
         styleSectionLabel(dataRootLabel, frame: NSRect(x: 28, y: 34, width: width - 56, height: 16))
@@ -923,6 +935,13 @@ final class AdvancedSettingsContentView: NSView {
 
     required init?(coder: NSCoder) { nil }
 
+    @objc private func lockPressed() { onUnlock?() }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        if isLocked { addCursorRect(lockButton.frame, cursor: .pointingHand) }
+    }
+
     private func styleSectionLabel(_ field: NSTextField, frame: NSRect) {
         field.frame = frame
         field.font = .boldSystemFont(ofSize: 12)
@@ -942,6 +961,7 @@ final class AdvancedSettingsContentView: NSView {
         lockedViews.forEach { $0.isHidden = !locked }
         unlockedViews.forEach { $0.isHidden = locked }
         if locked { statusField.stringValue = "" }
+        window?.invalidateCursorRects(for: self)
         needsDisplay = true
     }
 

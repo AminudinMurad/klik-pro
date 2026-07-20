@@ -2,6 +2,15 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.1.1
+
+- **Advanced tab is lock-gated with a risk warning** — the Advanced tab now
+  shows a lock in the tab bar while locked. The padlock on the tab is itself the
+  control: clicking it opens a confirmation that spells out the risk (these
+  options change where App Profile data is stored on disk; the wrong folder can
+  leave profiles unfindable or split across locations) before the data-location
+  options are revealed. Cancelling leaves everything locked.
+
 ## 1.1.0
 
 - **Durable data folder (Advanced settings)** — a new, unlock-gated **Advanced**

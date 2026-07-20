@@ -168,6 +168,13 @@ grep -q 'func recoverVaultOnLaunchIfNeeded()' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'defaultCandidatePaths: \[\]' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'advancedTabRect' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'final class AdvancedSettingsContentView' "$ROOT/Sources/AppProfilesUI.swift"
+# Advanced tab: the lock icon is the pressable control, gated by a risk confirmation.
+grep -q '@objc private func lockPressed()' "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'var locked: Bool { isLocked }' "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'func confirmUnlockAdvancedSettings()' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'Only continue if you understand the consequences' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'confirmUnlockAdvancedSettings() else { return }' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'idx == 3, advancedView.locked' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'appProfileManager.adoptVault(config:' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'NSOpenPanel()' "$ROOT/Sources/KlikProApp.swift"
 # The vault UI must reuse the fail-closed location gate before persisting a path,
@@ -462,7 +469,7 @@ if grep -q 'addButton(withTitle: "View Mappings")' "$ROOT/Sources/KlikProApp.swi
   exit 1
 fi
 grep -q 'onboardingCompleted = schemaVersion < 8' "$ROOT/Sources/KlikProConfig.swift"
-grep -q 'Open-source mouse shortcuts for macOS.' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'Open-source mouse shortcuts and App Profiles for macOS.' "$ROOT/Sources/KlikProApp.swift"
 grep -A4 'openAccessibilityLink = URLLinkView' "$ROOT/Sources/KlikProApp.swift" | grep -q 'style: .outline'
 grep -A4 'openAccessibilityLink = URLLinkView' "$ROOT/Sources/KlikProApp.swift" | grep -q 'Privacy_Accessibility'
 if grep -Eq 'title: "(Input Monitoring|Screen Recording|Automation)"|statusText: "Not required"' "$ROOT/Sources/KlikProApp.swift"; then
