@@ -145,6 +145,36 @@ grep -q 'throw AppProfileManagerError.vaultManifestInvalid' \
   "$ROOT/Sources/Duplication/AppProfileManager.swift"
 grep -q 'VaultManifest.read(vaultRoot: vaultRoot)' \
   "$ROOT/Sources/Duplication/AppProfileManager.swift"
+
+# Durable Data Vault (Phase 2) pins: the dormant backend is wired in through a
+# single testable factory, and the locked Advanced tab drives it. The factory
+# must fail safe to a no-vault generator (byte-for-byte the pre-vault app) for a
+# nil/invalid/Application-Support data root — the guard is the vaultPathRejection
+# gate, mirrored in the test suite.
+grep -q 'func makeLauncherGenerator(forDataRoot' \
+  "$ROOT/Sources/Duplication/AppProfileManager.swift"
+grep -q 'func makeAppProfileManager(forDataRoot' \
+  "$ROOT/Sources/Duplication/AppProfileManager.swift"
+grep -q 'vaultPathRejectionReason(dataRoot) == nil else' \
+  "$ROOT/Sources/Duplication/AppProfileManager.swift"
+grep -q 'testDataRootWiringFactorySelectsGenerator' \
+  "$ROOT/Tests/AppProfilesFoundationTests.swift"
+# The production manager is rebuilt from config.dataRoot (never left on the
+# default no-vault generator) and the on-launch recovery + Advanced tab are wired.
+grep -q 'appProfileManager = makeAppProfileManager(forDataRoot:' \
+  "$ROOT/Sources/KlikProApp.swift"
+grep -q 'func rebuildAppProfileManager()' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'func recoverVaultOnLaunchIfNeeded()' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'defaultCandidatePaths: \[\]' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'advancedTabRect' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'final class AdvancedSettingsContentView' "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'appProfileManager.adoptVault(config:' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'NSOpenPanel()' "$ROOT/Sources/KlikProApp.swift"
+# The vault UI must reuse the fail-closed location gate before persisting a path,
+# never invent its own validation.
+adopt_block="$(sed -n '/private func chooseVaultDataFolder/,/private func createManagedAppProfile/p' \
+  "$ROOT/Sources/KlikProApp.swift")"
+grep -q 'vaultPathRejectionReason(path)' <<<"$adopt_block"
 grep -q 'where instance.pinToMenuBar' \
   "$ROOT/Sources/KlikProInput.swift"
 grep -q 'updateCheckRequestedNotification' "$ROOT/Sources/KlikProConfig.swift"
@@ -394,7 +424,17 @@ grep -q 'guard ensureLaunchAgentSetup() else { return }' "$ROOT/Sources/KlikProA
 grep -q 'alert.messageText = "Background services could not be installed"' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'self?.beginAccessibilitySetup()' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'final class OnboardingChecklistView' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'func makeOnboardingAlert(accessibilityGranted: Bool)' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'enum OnboardingStep: Int' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'final class OnboardingWelcomePageView' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'final class OnboardingAccessibilityPageView' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'func makeOnboardingAlert(' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'step: OnboardingStep,' "$ROOT/Sources/KlikProApp.swift"
+# The stepped flow must offer Back on later steps and never offer a Cancel/skip.
+grep -q 'alert.addButton(withTitle: "Back")' "$ROOT/Sources/KlikProApp.swift"
+if grep -qE 'addButton\(withTitle: (accessibilityGranted \? "Close" : )?"Not Now"\)' "$ROOT/Sources/KlikProApp.swift"; then
+  echo "Onboarding must not offer a Not Now/Cancel escape" >&2
+  exit 1
+fi
 grep -q 'forResource: "OnboardingPreviewIcon"' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'OnboardingPreviewIcon.png' "$ROOT/tools/render-previews.sh"
 grep -q 'prefix: "Welcome to "' "$ROOT/Sources/KlikProApp.swift"
@@ -409,13 +449,18 @@ fi
 onboardingHoverBlock="$(sed -n '/final class ButtonHoverOutlineView/,/^}/p' "$ROOT/Sources/KlikProApp.swift")"
 grep -q 'options: \[.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect\]' <<<"$onboardingHoverBlock"
 grep -q 'NSColor.controlAccentColor.withAlphaComponent(0.82).setStroke()' <<<"$onboardingHoverBlock"
-grep -q 'closeButton.addSubview(closeHoverOutline)' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'backButton.addSubview(backHoverOutline)' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'showFirstLaunchOnboardingIfNeeded()' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'presentOnboarding(force: true)' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'accessibilityGranted ? "Start Using Klik PRO" : "Set Up Accessibility…"' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'alert.addButton(withTitle: "Start Using Klik PRO")' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'alert.addButton(withTitle: "Set Up Accessibility…")' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'KLIK_PRO_PREVIEW_ACCESSIBILITY_GRANTED' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'title: "Back to Welcome"' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'self.onboardingReviewInProgress = true' "$ROOT/Sources/KlikProApp.swift"
+# Step 3 is opt-in: grant now, or "Skip for Now" (completes onboarding, grant later).
+grep -q 'alert.addButton(withTitle: "Skip for Now")' "$ROOT/Sources/KlikProApp.swift"
+if grep -q 'addButton(withTitle: "View Mappings")' "$ROOT/Sources/KlikProApp.swift"; then
+  echo "Onboarding step 3 no longer offers View Mappings" >&2
+  exit 1
+fi
 grep -q 'onboardingCompleted = schemaVersion < 8' "$ROOT/Sources/KlikProConfig.swift"
 grep -q 'Open-source mouse shortcuts for macOS.' "$ROOT/Sources/KlikProApp.swift"
 grep -A4 'openAccessibilityLink = URLLinkView' "$ROOT/Sources/KlikProApp.swift" | grep -q 'style: .outline'
@@ -524,7 +569,7 @@ grep -q 'x: ShortcutRowLayout.dormantLinkX,' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'respectFlipped: true' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'permCard    = NSRect(x: rightX, y: 20, width: cardW, height: 132)' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'aboutCard   = NSRect(x: rightX, y: 168, width: cardW, height: 126)' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'title: "Open source · GPL-3.0 License"' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'title: "© 2026 Aminudin Murad · GPL-3.0"' "$ROOT/Sources/KlikProApp.swift"
 grep -A5 'openLogsLink = URLLinkView' "$ROOT/Sources/KlikProApp.swift" | grep -q 'style: .outline'
 grep -q 'supportCard = NSRect(x: rightX, y: 310, width: cardW, height: 92)' "$ROOT/Sources/KlikProApp.swift"
 grep -q '"Support open-source development"' "$ROOT/Sources/KlikProApp.swift"
@@ -607,7 +652,7 @@ grep -q 'unsaved-changes.png' "$ROOT/tools/render-previews.sh"
 grep -q 'save-hover.png' "$ROOT/tools/render-previews.sh"
 grep -q 'update-hover.png' "$ROOT/tools/render-previews.sh"
 grep -q 'close-hover.png' "$ROOT/tools/render-previews.sh"
-grep -q 'onboarding-close-hover.png' "$ROOT/tools/render-previews.sh"
+grep -q 'onboarding-back-hover.png' "$ROOT/tools/render-previews.sh"
 grep -q 'about.png' "$ROOT/tools/render-previews.sh"
 grep -q 'screenshot-onboarding.png' "$ROOT/README.md"
 grep -Eq 'screenshot-onboarding\.png[^\"]*" width="462"' "$ROOT/README.md"
@@ -655,13 +700,27 @@ do
   cmp "$firstFixture" "$secondFixture"
 done
 
+# Step pages have different heights; each fixture pins its own expected height.
+onboardingFixtureHeight() {
+  case "$(basename "$1")" in
+    onboarding.png) echo "576" ;;
+    onboarding-toggles.png) echo "832" ;;
+    onboarding-access.png|onboarding-back-hover.png) echo "736" ;;
+    onboarding-granted.png) echo "668" ;;
+    *) echo "0" ;;
+  esac
+}
 for onboardingFixture in \
   "$previewRunOne/fixtures/onboarding.png" \
   "$previewRunTwo/fixtures/onboarding.png" \
+  "$previewRunOne/fixtures/onboarding-toggles.png" \
+  "$previewRunTwo/fixtures/onboarding-toggles.png" \
+  "$previewRunOne/fixtures/onboarding-access.png" \
+  "$previewRunTwo/fixtures/onboarding-access.png" \
   "$previewRunOne/fixtures/onboarding-granted.png" \
   "$previewRunTwo/fixtures/onboarding-granted.png" \
-  "$previewRunOne/fixtures/onboarding-close-hover.png" \
-  "$previewRunTwo/fixtures/onboarding-close-hover.png"
+  "$previewRunOne/fixtures/onboarding-back-hover.png" \
+  "$previewRunTwo/fixtures/onboarding-back-hover.png"
 do
   [[ -f "$onboardingFixture" ]] || {
     echo "Missing rendered onboarding fixture" >&2
@@ -675,8 +734,8 @@ do
     echo "Unexpected onboarding preview width" >&2
     exit 1
   }
-  [[ "$(sips -g pixelHeight "$onboardingFixture" 2>/dev/null | awk '/pixelHeight/ { print $2 }')" == "960" ]] || {
-    echo "Unexpected onboarding preview height" >&2
+  [[ "$(sips -g pixelHeight "$onboardingFixture" 2>/dev/null | awk '/pixelHeight/ { print $2 }')" == "$(onboardingFixtureHeight "$onboardingFixture")" ]] || {
+    echo "Unexpected onboarding preview height: $onboardingFixture" >&2
     exit 1
   }
 done
@@ -684,11 +743,17 @@ cmp \
   "$previewRunOne/fixtures/onboarding.png" \
   "$previewRunTwo/fixtures/onboarding.png"
 cmp \
+  "$previewRunOne/fixtures/onboarding-toggles.png" \
+  "$previewRunTwo/fixtures/onboarding-toggles.png"
+cmp \
+  "$previewRunOne/fixtures/onboarding-access.png" \
+  "$previewRunTwo/fixtures/onboarding-access.png"
+cmp \
   "$previewRunOne/fixtures/onboarding-granted.png" \
   "$previewRunTwo/fixtures/onboarding-granted.png"
 cmp \
-  "$previewRunOne/fixtures/onboarding-close-hover.png" \
-  "$previewRunTwo/fixtures/onboarding-close-hover.png"
+  "$previewRunOne/fixtures/onboarding-back-hover.png" \
+  "$previewRunTwo/fixtures/onboarding-back-hover.png"
 
 for aboutFixture in \
   "$previewRunOne/fixtures/about.png" \
@@ -708,10 +773,10 @@ cmp \
   "$previewRunTwo/fixtures/about.png"
 
 if cmp -s \
-  "$previewRunOne/fixtures/onboarding-granted.png" \
-  "$previewRunOne/fixtures/onboarding-close-hover.png"
+  "$previewRunOne/fixtures/onboarding-access.png" \
+  "$previewRunOne/fixtures/onboarding-back-hover.png"
 then
-  echo "Onboarding Close hover fixture must differ from its normal state" >&2
+  echo "Onboarding Back hover fixture must differ from its normal state" >&2
   exit 1
 fi
 
@@ -750,7 +815,7 @@ echo "Unsaved-configuration indicator check passed"
 echo "Save-button hover check passed"
 echo "Check-for-Updates hover check passed"
 echo "Close-button hover check passed"
-echo "Onboarding Close-button hover check passed"
+echo "Onboarding Back-button hover check passed"
 
 for arch in arm64 x86_64; do
   compile "$arch" KlikProInput.swift "$OUT/klik-pro-input-$arch"

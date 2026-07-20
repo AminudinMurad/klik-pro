@@ -42,8 +42,8 @@ private struct PreviewMain {
         let outputPath = CommandLine.arguments[1]
         let tab = CommandLine.arguments[2]
         guard tab == "onboarding" || tab == "mappings" || tab == "settings"
-                || tab == "profiles" || tab == "about" else {
-            fputs("Preview must be onboarding, mappings, settings, profiles, or about\n", stderr)
+                || tab == "profiles" || tab == "about" || tab == "advanced" else {
+            fputs("Preview must be onboarding, mappings, settings, profiles, about, or advanced\n", stderr)
             exit(64)
         }
 
@@ -62,7 +62,18 @@ private struct PreviewMain {
                 let accessibilityGranted = ProcessInfo.processInfo.environment[
                     "KLIK_PRO_PREVIEW_ACCESSIBILITY_GRANTED"
                 ] == "1"
-                alert = makeOnboardingAlert(accessibilityGranted: accessibilityGranted)
+                let stepRaw = ProcessInfo.processInfo.environment[
+                    "KLIK_PRO_PREVIEW_ONBOARDING_STEP"
+                ] ?? "1"
+                guard let step = Int(stepRaw).flatMap(OnboardingStep.init(rawValue:)) else {
+                    fputs("KLIK_PRO_PREVIEW_ONBOARDING_STEP must be 1, 2, or 3\n", stderr)
+                    exit(64)
+                }
+                alert = makeOnboardingAlert(
+                    step: step,
+                    accessibilityGranted: accessibilityGranted,
+                    checklist: OnboardingChecklistView()
+                )
             } else {
                 let previewIcon = Bundle.main.url(
                     forResource: "OnboardingPreviewIcon",
@@ -108,6 +119,11 @@ private struct PreviewMain {
                 }
                 if tab == "settings" {
                     toggleView.selectTab(1)
+                } else if tab == "advanced" {
+                    toggleView.selectTab(3)
+                    if ProcessInfo.processInfo.environment["KLIK_PRO_PREVIEW_ADVANCED_UNLOCKED"] == "1" {
+                        toggleView.showUnlockedAdvancedPreview()
+                    }
                 } else if tab == "profiles" {
                     toggleView.selectTab(2)
                     if ProcessInfo.processInfo.environment[

@@ -62,12 +62,14 @@ render_preview() {
   local installed_targets="${3:-}"
   local use_installed_icons="${4:-0}"
   local app_profiles_empty="${5:-0}"
+  local advanced_unlocked="${6:-0}"
 
   local launch=(
     /usr/bin/open -W -n -g
     --env "KLIK_PRO_CONFIG_DIRECTORY=$CONFIG"
     --env "KLIK_PRO_PREVIEW_USE_INSTALLED_APP_ICONS=$use_installed_icons"
     --env "KLIK_PRO_PREVIEW_APP_PROFILES_EMPTY=$app_profiles_empty"
+    --env "KLIK_PRO_PREVIEW_ADVANCED_UNLOCKED=$advanced_unlocked"
   )
   if [[ -n "$installed_targets" ]]; then
     launch+=(--env "KLIK_PRO_PREVIEW_INSTALLED_TARGETS=$installed_targets")
@@ -82,19 +84,28 @@ if [[ "$MODE" == "all" ]]; then
   render_preview "$ROOT/assets/screenshot-mappings.png" mappings "" 1
   render_preview "$ROOT/assets/screenshot-app-profiles.png" profiles "" 1
   render_preview "$ROOT/assets/screenshot-settings.png" settings
+  render_preview "$ROOT/assets/screenshot-advanced.png" advanced "" 0 0 1
 fi
 
-# The onboarding fixture is the actual first-run state: permission still required.
+# Onboarding fixtures cover all three steps. Step 3 renders the actual first-run
+# state (permission still required) plus the granted variant.
 render_preview "$FIXTURES/onboarding.png" onboarding
-# A matched pair verifies the hover outline on the Close state independently of
-# the permission-status copy and primary action.
 KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
+  KLIK_PRO_PREVIEW_ONBOARDING_STEP=2 \
+  "$EXECUTABLE" "$FIXTURES/onboarding-toggles.png" onboarding
+KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
+  KLIK_PRO_PREVIEW_ONBOARDING_STEP=3 \
+  "$EXECUTABLE" "$FIXTURES/onboarding-access.png" onboarding
+KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
+  KLIK_PRO_PREVIEW_ONBOARDING_STEP=3 \
   KLIK_PRO_PREVIEW_ACCESSIBILITY_GRANTED=1 \
   "$EXECUTABLE" "$FIXTURES/onboarding-granted.png" onboarding
+# A matched pair verifies the hover outline on the Back button independently of
+# the permission-status copy and primary action.
 KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
-  KLIK_PRO_PREVIEW_ACCESSIBILITY_GRANTED=1 \
-  KLIK_PRO_PREVIEW_ONBOARDING_CLOSE_HOVER=1 \
-  "$EXECUTABLE" "$FIXTURES/onboarding-close-hover.png" onboarding
+  KLIK_PRO_PREVIEW_ONBOARDING_STEP=3 \
+  KLIK_PRO_PREVIEW_ONBOARDING_BACK_HOVER=1 \
+  "$EXECUTABLE" "$FIXTURES/onboarding-back-hover.png" onboarding
 # Menu-bar About uses the same shared wordmark and badge metrics.
 render_preview "$FIXTURES/about.png" about
 # The longer permission badge is retained as a regression fixture so the nearby
@@ -128,8 +139,10 @@ KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
 echo "Rendered v$VERSION previews (working directory: $WORK)"
 echo "UI fixtures:"
 echo "  $FIXTURES/onboarding.png"
+echo "  $FIXTURES/onboarding-toggles.png"
+echo "  $FIXTURES/onboarding-access.png"
 echo "  $FIXTURES/onboarding-granted.png"
-echo "  $FIXTURES/onboarding-close-hover.png"
+echo "  $FIXTURES/onboarding-back-hover.png"
 echo "  $FIXTURES/about.png"
 echo "  $FIXTURES/settings-needs-permission.png"
 echo "  $FIXTURES/app-profiles.png"

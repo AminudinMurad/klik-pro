@@ -2180,14 +2180,14 @@ final class PreferencesContentView: NSView {
             )
         )
         openSourceLink = URLLinkView(
-            title: "Open source · GPL-3.0 License",
+            title: "© 2026 Aminudin Murad · GPL-3.0",
             urlString: "https://github.com/AminudinMurad/klik-pro/blob/main/LICENSE",
             style: .link,
             alignRight: false,
             frame: NSRect(
                 x: rxi,
                 y: 248 + PreferencesContentView.headingContentGap,
-                width: 200,
+                width: 260,
                 height: 24
             )
         )
@@ -2424,6 +2424,94 @@ final class ButtonHoverOutlineView: NSView {
 /// what they want (or skips) and `ToggleView` applies and persists those choices when
 /// the sheet is confirmed. Kept to one screen at a fixed 430×252 size so the rendered
 /// onboarding fixtures stay dimensionally stable across releases.
+/// The three first-launch pages. Toggles and actions never share a page: Welcome
+/// introduces the app, Preferences holds only the four setting toggles, and
+/// Accessibility holds the one macOS permission plus the finishing actions. Steps
+/// can always go Back; there is no Cancel — the flow completes on the last page.
+enum OnboardingStep: Int {
+    case welcome = 1
+    case preferences = 2
+    case accessibility = 3
+}
+
+private func makeOnboardingStepLabel(_ step: OnboardingStep, y: CGFloat, width: CGFloat) -> NSTextField {
+    let label = NSTextField(labelWithString: "Step \(step.rawValue) of 3")
+    label.frame = NSRect(x: 0, y: y, width: width, height: 16)
+    label.alignment = .center
+    label.font = .systemFont(ofSize: 11)
+    label.textColor = .tertiaryLabelColor
+    return label
+}
+
+final class OnboardingWelcomePageView: NSView {
+    override var isFlipped: Bool { true }
+
+    init() {
+        let contentWidth: CGFloat = 430
+        super.init(frame: NSRect(x: 0, y: 0, width: contentWidth, height: 128))
+
+        let welcome = KlikProWordmarkView(
+            prefix: "Welcome to ",
+            centered: true,
+            frame: NSRect(x: 0, y: 0, width: contentWidth, height: 30)
+        )
+        let introduction = NSTextField(
+            wrappingLabelWithString: "Klik PRO remaps the extra buttons on a pro mouse to recordable shortcuts, switches browser tabs with the thumb wheel, and generates isolated App Profiles."
+        )
+        introduction.frame = NSRect(x: 28, y: 38, width: contentWidth - 56, height: 52)
+        introduction.font = .systemFont(ofSize: 13)
+        introduction.alignment = .center
+        introduction.textColor = .appTextSecondary
+        introduction.maximumNumberOfLines = 3
+
+        addSubview(welcome)
+        addSubview(introduction)
+        addSubview(makeOnboardingStepLabel(.welcome, y: 102, width: contentWidth))
+    }
+
+    required init?(coder: NSCoder) { nil }
+}
+
+final class OnboardingAccessibilityPageView: NSView {
+    override var isFlipped: Bool { true }
+
+    init(accessibilityGranted: Bool) {
+        let contentWidth: CGFloat = 430
+        super.init(frame: NSRect(x: 0, y: 0, width: contentWidth, height: 140))
+
+        let heading = NSTextField(labelWithString: "One macOS permission")
+        heading.frame = NSRect(x: 0, y: 0, width: contentWidth, height: 22)
+        heading.alignment = .center
+        heading.font = .boldSystemFont(ofSize: 15)
+
+        let body = NSTextField(
+            wrappingLabelWithString: "Klik PRO uses the Accessibility permission to read the mouse's extra buttons and wheel. Grant it now, or any time later from Settings."
+        )
+        body.frame = NSRect(x: 28, y: 30, width: contentWidth - 56, height: 52)
+        body.font = .systemFont(ofSize: 13)
+        body.alignment = .center
+        body.textColor = .appTextSecondary
+        body.maximumNumberOfLines = 3
+
+        let status = NSTextField(
+            labelWithString: accessibilityGranted
+                ? "Accessibility: Granted"
+                : "Accessibility: Needs permission"
+        )
+        status.frame = NSRect(x: 0, y: 88, width: contentWidth, height: 20)
+        status.alignment = .center
+        status.font = .systemFont(ofSize: 13, weight: .semibold)
+        status.textColor = accessibilityGranted ? .systemGreen : .systemOrange
+
+        addSubview(heading)
+        addSubview(body)
+        addSubview(status)
+        addSubview(makeOnboardingStepLabel(.accessibility, y: 114, width: contentWidth))
+    }
+
+    required init?(coder: NSCoder) { nil }
+}
+
 final class OnboardingChecklistView: NSView {
     override var isFlipped: Bool { true }
 
@@ -2439,11 +2527,11 @@ final class OnboardingChecklistView: NSView {
     var showMenuBarIconOn: Bool { showMenuBarIconRow.toggle.isOn }
     var caffeinateOn: Bool { showMenuBarIconRow.toggle.isOn && caffeinateRow.toggle.isOn }
 
-    init(accessibilityGranted: Bool) {
+    init() {
         let contentWidth: CGFloat = 430
         let rowX: CGFloat = 20
         let rowWidth = contentWidth - rowX * 2
-        let firstRowY: CGFloat = 68
+        let firstRowY: CGFloat = 44
         let rowHeight: CGFloat = 46
 
         launchAtLoginRow = ToggleOnlyRowView(
@@ -2472,24 +2560,19 @@ final class OnboardingChecklistView: NSView {
             frame: NSRect(x: rowX, y: firstRowY + rowHeight * 3, width: rowWidth, height: rowHeight)
         )
 
-        super.init(frame: NSRect(x: 0, y: 0, width: contentWidth, height: 252))
+        super.init(frame: NSRect(x: 0, y: 0, width: contentWidth, height: 256))
 
-        let welcome = KlikProWordmarkView(
-            prefix: "Welcome to ",
-            centered: true,
-            frame: NSRect(x: 0, y: 0, width: contentWidth, height: 30)
-        )
         let introduction = NSTextField(
             wrappingLabelWithString: "Turn on what you'd like now — you can change any of these later in Settings."
         )
-        introduction.frame = NSRect(x: 28, y: 32, width: contentWidth - 56, height: 34)
+        introduction.frame = NSRect(x: 28, y: 0, width: contentWidth - 56, height: 34)
         introduction.font = .systemFont(ofSize: 13)
         introduction.alignment = .center
         introduction.textColor = .appTextSecondary
         introduction.maximumNumberOfLines = 2
 
-        addSubview(welcome)
         addSubview(introduction)
+        addSubview(makeOnboardingStepLabel(.preferences, y: 234, width: contentWidth))
 
         // Caffeinate is only reachable through the menu-bar icon's menu. It stays
         // tappable, but turning it on while the icon is off asks the user to enable the
@@ -2530,7 +2613,11 @@ func confirmEnableMenuBarIconForCaffeinate() -> Bool {
     return alert.runModal() == .alertFirstButtonReturn
 }
 
-func makeOnboardingAlert(accessibilityGranted: Bool) -> NSAlert {
+func makeOnboardingAlert(
+    step: OnboardingStep,
+    accessibilityGranted: Bool,
+    checklist: OnboardingChecklistView
+) -> NSAlert {
     let alert = NSAlert()
     alert.alertStyle = .informational
     // With no native message fields, NSAlert centers its app icon above the custom
@@ -2550,17 +2637,35 @@ func makeOnboardingAlert(accessibilityGranted: Bool) -> NSAlert {
     }
     alert.messageText = ""
     alert.informativeText = ""
-    alert.accessoryView = OnboardingChecklistView(accessibilityGranted: accessibilityGranted)
-    alert.addButton(
-        withTitle: accessibilityGranted ? "Start Using Klik PRO" : "Set Up Accessibility…"
-    )
-    alert.addButton(withTitle: "View Mappings")
-    let closeButton = alert.addButton(withTitle: accessibilityGranted ? "Close" : "Not Now")
-    let closeHoverOutline = ButtonHoverOutlineView(frame: closeButton.bounds)
-    closeHoverOutline.autoresizingMask = [.width, .height]
-    closeButton.addSubview(closeHoverOutline)
-    if ProcessInfo.processInfo.environment["KLIK_PRO_PREVIEW_ONBOARDING_CLOSE_HOVER"] == "1" {
-        closeHoverOutline.showHoverPreview()
+    // Toggles and finishing actions never share a page, steps can go Back, and
+    // there is deliberately no Cancel: the flow completes on the last page.
+    switch step {
+    case .welcome:
+        alert.accessoryView = OnboardingWelcomePageView()
+        alert.addButton(withTitle: "Continue")
+    case .preferences:
+        alert.accessoryView = checklist
+        alert.addButton(withTitle: "Continue")
+        alert.addButton(withTitle: "Back")
+    case .accessibility:
+        alert.accessoryView = OnboardingAccessibilityPageView(
+            accessibilityGranted: accessibilityGranted
+        )
+        if accessibilityGranted {
+            alert.addButton(withTitle: "Start Using Klik PRO")
+        } else {
+            // Opt-in: grant now, or "Skip for Now" to finish and grant later in
+            // Settings. Skipping still completes onboarding — it is not a Cancel.
+            alert.addButton(withTitle: "Set Up Accessibility…")
+            alert.addButton(withTitle: "Skip for Now")
+        }
+        let backButton = alert.addButton(withTitle: "Back")
+        let backHoverOutline = ButtonHoverOutlineView(frame: backButton.bounds)
+        backHoverOutline.autoresizingMask = [.width, .height]
+        backButton.addSubview(backHoverOutline)
+        if ProcessInfo.processInfo.environment["KLIK_PRO_PREVIEW_ONBOARDING_BACK_HOVER"] == "1" {
+            backHoverOutline.showHoverPreview()
+        }
     }
     return alert
 }
@@ -2630,12 +2735,6 @@ final class ToggleView: NSView {
     private var appProfileLifecycleInProgress = false
     private var appProfileInteractionShield: NSView?
     private var unsavedChangesPreviewOverride = false
-    private var onboardingReviewInProgress = false {
-        didSet {
-            onboardingReturnButton.isHidden = !onboardingReviewInProgress
-            needsDisplay = true
-        }
-    }
     private let headerWordmark: KlikProWordmarkView = {
         let scale: CGFloat = 2
         let size = KlikProBrand.wordmarkSize(prefix: "", scale: scale)
@@ -2649,7 +2748,13 @@ final class ToggleView: NSView {
     private let contentView: SettingsContentView
     private let preferencesView: PreferencesContentView
     private let appProfilesView: AppProfilesContentView
-    private let appProfileManager = AppProfileManager()
+    private let advancedView: AdvancedSettingsContentView
+    // Rebuilt whenever `config.dataRoot` changes (Advanced tab pick/clear, or an
+    // on-launch adopt), so the generator's wired vault root and `config.dataRoot`
+    // never drift apart — the equality `newInstanceStorage` requires before it
+    // will ever create a `.vault` instance. `nil`/invalid dataRoot ⇒ no-vault
+    // generator ⇒ byte-for-byte the pre-vault app.
+    private var appProfileManager = AppProfileManager()
     private let appProfileRuntime = AppProfileRuntime()
     private let appProfileQueue = DispatchQueue(
         label: "local.klik-pro.settings.app-profiles",
@@ -2661,14 +2766,6 @@ final class ToggleView: NSView {
         title: "Save",
         frame: NSRect(x: 48, y: 854, width: 120, height: 42)
     )
-    private lazy var onboardingReturnButton: FooterActionButton = {
-        let button = FooterActionButton(
-            title: "Back to Welcome",
-            frame: NSRect(x: 624, y: 858, width: 164, height: 34)
-        )
-        button.isHidden = true
-        return button
-    }()
     // Check-for-updates button, top-right of the header (where the status pill used to be).
     private let updateButtonRect = NSRect(x: 714, y: 30, width: 174, height: 30)
     private var updateButtonTrackingArea: NSTrackingArea?
@@ -2679,11 +2776,12 @@ final class ToggleView: NSView {
     // Set by a successful check when a newer release exists; lights up the header button.
     private var updateAvailableURL: URL?
     static let autoCheckKey = "klikpro.autoCheckUpdates"
-    // Mappings | Settings | App Profiles tabs (below the title).
+    // Mappings | Settings | App Profiles | Advanced tabs (below the title).
     private var activeTab = 0
     private let mappingsTabRect = NSRect(x: 38, y: 84, width: 86, height: 26)
     private let settingsTabRect = NSRect(x: 138, y: 84, width: 78, height: 26)
     private let appProfilesTabRect = NSRect(x: 230, y: 84, width: 76, height: 26)
+    private let advancedTabRect = NSRect(x: 322, y: 84, width: 82, height: 26)
     private var appActivationObserver: NSObjectProtocol?
 
     override var isFlipped: Bool { true }
@@ -2715,6 +2813,7 @@ final class ToggleView: NSView {
             && helperRunning
         config = loadedConfig
         persistedConfig = loadedConfig
+        appProfileManager = makeAppProfileManager(forDataRoot: loadedConfig.dataRoot)
         controlState = AppControlState(
             launchAtLogin: launchAtLoginEnabled,
             automaticUpdateChecks: autoCheckEnabled,
@@ -2722,13 +2821,24 @@ final class ToggleView: NSView {
         )
         persistedControlState = controlState
         browserExtensionShortcuts = detectedBrowserExtensionShortcuts
+        // `self.appProfileRuntime` is unreachable during phase-1 initialization, so probe
+        // managed launchability through a locally constructed runtime (it is stateless).
+        // Preview rendering must stay off the filesystem, so it never consults health.
+        let initialRuntime = AppProfileRuntime()
+        let initialLaunchableInstanceIDs = launchableAppProfileInstanceIDs(
+            in: loadedConfig,
+            instanceIsLaunchable: { instance in
+                !previewRenderingIsActive && initialRuntime.health(for: instance) == .ready
+            }
+        )
         let statuses = evaluateShortcutConflicts(
             candidate: loadedConfig,
             persisted: loadedConfig,
             browserExtensionShortcuts: detectedBrowserExtensionShortcuts,
             specialFeatureActive: menuRunning,
             chatGPTAvailable: quickLaunchTargetIsAvailable(.chatGPT),
-            claudeAvailable: quickLaunchTargetIsAvailable(.claude)
+            claudeAvailable: quickLaunchTargetIsAvailable(.claude),
+            activeInstanceIDs: initialLaunchableInstanceIDs
         )
         contentView = SettingsContentView(
             config: loadedConfig,
@@ -2745,6 +2855,7 @@ final class ToggleView: NSView {
             caffeinateMenu: loadedConfig.caffeinateMenuEnabled,
             width: 872)
         appProfilesView = AppProfilesContentView(instances: loadedConfig.instances, width: 872)
+        advancedView = AdvancedSettingsContentView(dataRoot: loadedConfig.dataRoot, width: 872)
 
         super.init(frame: frameRect)
         wantsLayer = true
@@ -2761,14 +2872,6 @@ final class ToggleView: NSView {
             self?.saveConfiguration()
         }
         addSubview(saveButton)
-        if !previewRenderingIsActive {
-            onboardingReturnButton.onPress = { [weak self] in
-                guard let self = self else { return }
-                self.onboardingReviewInProgress = false
-                self.presentOnboarding(force: true)
-            }
-            addSubview(onboardingReturnButton)
-        }
 
         wireRowCallbacks()
         recomputeConflictBadges()   // badges correct on first paint
@@ -2784,6 +2887,7 @@ final class ToggleView: NSView {
         refreshAppProfileHealth()
         refreshSupportedAppCandidates()
         healManagedAppProfilesIfNeeded()
+        recoverVaultOnLaunchIfNeeded()
 
         // Launch at login controls only the next login. The helper may still be
         // running now to provide mouse shortcuts and menu-bar icons.
@@ -2837,7 +2941,7 @@ final class ToggleView: NSView {
         }
     }
 
-    /// Switch between Mappings (0), Settings (1), and App Profiles (2).
+    /// Switch between Mappings (0), Settings (1), App Profiles (2), Advanced (3).
     func selectTab(_ index: Int) {
         let previousTab = activeTab
         activeTab = index
@@ -2856,6 +2960,12 @@ final class ToggleView: NSView {
         case 2:
             scrollView.documentView = appProfilesView
             refreshSupportedAppCandidates(showLoading: supportedAppCandidateCache == nil)
+        case 3:
+            // Always re-lock and re-sync the shown data folder on entry, so the
+            // controls can't be reached without a deliberate unlock each visit.
+            advancedView.setDataRoot(persistedConfig.dataRoot)
+            advancedView.setLocked(true)
+            scrollView.documentView = advancedView
         default: scrollView.documentView = contentView
         }
         needsDisplay = true
@@ -2882,6 +2992,11 @@ final class ToggleView: NSView {
     func showCloseButtonHoverPreview() {
         guard previewRenderingIsActive else { return }
         setCloseButtonHovered(true)
+    }
+
+    func showUnlockedAdvancedPreview() {
+        guard previewRenderingIsActive else { return }
+        advancedView.setLocked(false)
     }
 
     func showSupportedAppProfilesPreview() {
@@ -3016,6 +3131,18 @@ final class ToggleView: NSView {
             self.refreshSupportedAppCandidates(showLoading: true, force: true)
             self.appProfilesView.setInstances(self.persistedConfig.instances)
             self.refreshAppProfileHealth()
+        }
+        advancedView.onUnlock = { [weak self] in
+            self?.advancedView.setLocked(false)
+        }
+        advancedView.onChooseFolder = { [weak self] in
+            self?.chooseVaultDataFolder()
+        }
+        advancedView.onClearFolder = { [weak self] in
+            self?.clearVaultDataFolder()
+        }
+        advancedView.onScanAndAdopt = { [weak self] in
+            self?.scanAndAdoptVaultFolder()
         }
         contentView.mappingProfilesView.onOpen = { [weak self] instance in
             self?.launchAppProfile(instance)
@@ -3285,6 +3412,208 @@ final class ToggleView: NSView {
         guard healed != persistedConfig else { return }
         persistedConfig = healed
         config.instances = healed.instances
+    }
+
+    /// Rebuilds the App Profile manager for the current `config.dataRoot` so the
+    /// generator's wired vault root stays in lockstep with the config. Called
+    /// after the user picks/clears the vault folder in the Advanced tab and after
+    /// an on-launch adopt. `nil`/invalid dataRoot ⇒ a no-vault generator (new
+    /// profiles stay in Application Support, byte-for-byte the pre-vault app).
+    private func rebuildAppProfileManager() {
+        appProfileManager = makeAppProfileManager(forDataRoot: config.dataRoot)
+    }
+
+    /// On-launch durable-vault recovery (RFC §5.3–5.4; owner decision: auto-adopt
+    /// only when a single valid vault is located). Runs the discovery ladder using
+    /// **positive evidence of prior configuration only** — the remembered
+    /// `dataRoot` pointer and surviving `~` dot-symlinks that resolve into a
+    /// vault — with the default-location probe disabled, so an abandoned vault the
+    /// user never configured is never silently adopted. When exactly one valid
+    /// vault is found it is wired and `adoptVault` merges any of its instances
+    /// missing from the config (existing rows untouched, matched by id). Zero or
+    /// multiple candidates change nothing and surface a note on the Advanced tab.
+    private func recoverVaultOnLaunchIfNeeded() {
+        guard !previewRenderingIsActive else { return }
+        let candidates = discoverVaultRootCandidates(
+            rememberedPath: persistedConfig.dataRoot,
+            homeSymlinkRootURL: URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true),
+            defaultCandidatePaths: []
+        )
+        guard !candidates.isEmpty else { return }
+        guard candidates.count == 1, let vaultRoot = candidates.first else {
+            advancedView.setStatus(
+                "Multiple Klik PRO data folders were found. Open Advanced to pick the one to recover from.",
+                color: .appTextSecondary
+            )
+            return
+        }
+        let previousDataRoot = persistedConfig.dataRoot
+        var working = persistedConfig
+        working.dataRoot = vaultRoot.path
+        config.dataRoot = vaultRoot.path
+        rebuildAppProfileManager()
+        do {
+            let result = try appProfileManager.adoptVault(config: working)
+            persistedConfig = result.config
+            config.instances = result.config.instances
+            config.dataRoot = result.config.dataRoot
+            // adoptVault persists only when it adopted at least one instance. If
+            // it adopted none but the remembered pointer changed (e.g. the vault
+            // moved, or a reinstall wiped the config), persist the pointer so the
+            // recovery survives the next launch without re-scanning symlinks.
+            if result.adopted.isEmpty, previousDataRoot != result.config.dataRoot {
+                _ = KlikProConfigStore.save(result.config)
+            }
+            appProfilesView.setInstances(result.config.instances)
+            advancedView.setDataRoot(result.config.dataRoot)
+            if !result.adopted.isEmpty {
+                let noun = result.adopted.count == 1 ? "App Profile" : "App Profiles"
+                advancedView.setStatus(
+                    "Recovered \(result.adopted.count) \(noun) from the data folder.",
+                    color: KlikProBrand.green
+                )
+            }
+            refreshAppProfileHealth()
+        } catch {
+            // Discovery found a vault but adopt refused it (invalid manifest,
+            // unavailable root). Leave the config as loaded and note it.
+            config.dataRoot = previousDataRoot
+            rebuildAppProfileManager()
+            let message = (error as? AppProfileManagerError).map(appProfileErrorMessage)
+                ?? "The data folder could not be recovered."
+            advancedView.setStatus(message, color: .systemRed)
+        }
+    }
+
+    // MARK: - Advanced tab: data folder actions
+
+    /// Advanced tab → "Choose Folder…". Picks a directory, runs the fail-closed
+    /// location gate, and stages it as `config.dataRoot`. It becomes an unsaved
+    /// edit applied by the normal Save flow; the manager is rebuilt now so the
+    /// wired vault root and config stay in lockstep before the next create.
+    private func chooseVaultDataFolder() {
+        guard !saveInProgress, !appProfileLifecycleInProgress else {
+            showAppProfileAlert(
+                title: "Please wait",
+                message: "Finish the current Save or App Profile change before changing the data folder."
+            )
+            return
+        }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        panel.message = "Choose a folder to store new App Profiles. "
+            + "Pick a location outside the app, such as Documents or an external disk."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let path = url.standardizedFileURL.path
+        if let reason = vaultPathRejectionReason(path) {
+            advancedView.setStatus(reason, color: .systemRed)
+            return
+        }
+        config.dataRoot = path
+        rebuildAppProfileManager()
+        advancedView.setDataRoot(path)
+        advancedView.setStatus(
+            "Data folder set. Save to apply — new App Profiles will be stored here.",
+            color: .appTextSecondary
+        )
+        configurationDidChange()
+    }
+
+    /// Advanced tab → "Clear". Reverts new-profile storage to the default
+    /// Application Support layout. Existing profiles (vault or otherwise) are
+    /// never moved — only where future profiles are created changes.
+    private func clearVaultDataFolder() {
+        guard !saveInProgress, !appProfileLifecycleInProgress else {
+            showAppProfileAlert(
+                title: "Please wait",
+                message: "Finish the current Save or App Profile change before changing the data folder."
+            )
+            return
+        }
+        guard config.dataRoot != nil else { return }
+        config.dataRoot = nil
+        rebuildAppProfileManager()
+        advancedView.setDataRoot(nil)
+        advancedView.setStatus(
+            "Cleared. Save to apply — new App Profiles will use the default location. "
+            + "Existing profiles are unchanged.",
+            color: .appTextSecondary
+        )
+        configurationDidChange()
+    }
+
+    /// Advanced tab → "Scan & Adopt…". Picks an existing Klik PRO data folder and
+    /// re-adopts the App Profiles its `vault.json` describes, regenerating every
+    /// ephemeral artifact from the folder's CURRENT path. A folder without a valid
+    /// manifest is refused by `adoptVault`. Existing rows are merged untouched.
+    private func scanAndAdoptVaultFolder() {
+        guard !saveInProgress, !appProfileLifecycleInProgress else {
+            showAppProfileAlert(
+                title: "Please wait",
+                message: "Finish the current Save or App Profile change before adopting a data folder."
+            )
+            return
+        }
+        guard !hasUnsavedConfigurationChanges else {
+            showAppProfileAlert(
+                title: "Save current changes first",
+                message: "Save or restore your current changes before adopting a data folder."
+            )
+            return
+        }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Scan"
+        panel.message = "Choose an existing Klik PRO data folder to re-adopt the App Profiles it holds."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let path = url.standardizedFileURL.path
+        if let reason = vaultPathRejectionReason(path) {
+            advancedView.setStatus(reason, color: .systemRed)
+            return
+        }
+        let previousDataRoot = config.dataRoot
+        var working = persistedConfig
+        working.dataRoot = path
+        config.dataRoot = path
+        rebuildAppProfileManager()
+        do {
+            let result = try appProfileManager.adoptVault(config: working)
+            persistedConfig = result.config
+            config = result.config
+            advancedView.setDataRoot(result.config.dataRoot)
+            appProfilesView.setInstances(result.config.instances)
+            refreshAppProfileHealth()
+            needsDisplay = true
+            let skippedSuffix = result.skippedInstanceIDs.isEmpty
+                ? ""
+                : " \(result.skippedInstanceIDs.count) could not be adopted."
+            if result.adopted.isEmpty {
+                // adoptVault only persists when it adopts something; persist the
+                // now-set data folder pointer so the choice survives relaunch.
+                _ = KlikProConfigStore.save(result.config)
+                advancedView.setStatus(
+                    "Data folder set. No new App Profiles were found to adopt." + skippedSuffix,
+                    color: .appTextSecondary
+                )
+            } else {
+                let noun = result.adopted.count == 1 ? "App Profile" : "App Profiles"
+                advancedView.setStatus(
+                    "Adopted \(result.adopted.count) \(noun) from the data folder." + skippedSuffix,
+                    color: KlikProBrand.green
+                )
+            }
+        } catch {
+            config.dataRoot = previousDataRoot
+            rebuildAppProfileManager()
+            let message = (error as? AppProfileManagerError).map(appProfileErrorMessage)
+                ?? "That folder could not be adopted."
+            advancedView.setStatus(message, color: .systemRed)
+        }
     }
 
     private func createManagedAppProfile(from candidate: AppProfileCandidate) {
@@ -4292,48 +4621,70 @@ final class ToggleView: NSView {
               let window = window,
               window.attachedSheet == nil else { return }
 
+        // One checklist instance carries the toggle choices across Back/Continue.
+        presentOnboardingStep(.welcome, selections: OnboardingChecklistView())
+    }
+
+    /// One sheet per step. Welcome has a single Continue; later steps offer Back;
+    /// no step offers Cancel. Choices apply only from the last page, so backing
+    /// up and changing a toggle never leaves a half-applied state.
+    private func presentOnboardingStep(
+        _ step: OnboardingStep,
+        selections: OnboardingChecklistView
+    ) {
+        guard let window = window, window.attachedSheet == nil else { return }
+
         let granted = helperAccessibilityGranted()
-        let alert = makeOnboardingAlert(accessibilityGranted: granted)
-        let selections = alert.accessoryView as? OnboardingChecklistView
+        let alert = makeOnboardingAlert(
+            step: step,
+            accessibilityGranted: granted,
+            checklist: selections
+        )
 
         alert.beginSheetModal(for: window) { [weak self] response in
             guard let self = self else { return }
-            switch response {
-            case .alertFirstButtonReturn:
-                // The user confirmed their choices. Apply and persist the four toggles.
-                // When Accessibility still needs granting the helper is started by the
-                // accessibility setup below, so this call skips its own helper pass.
-                self.onboardingReviewInProgress = false
-                self.applyOnboardingSelections(
-                    launchAtLogin: selections?.launchAtLoginOn ?? false,
-                    autoUpdate: selections?.autoUpdateOn ?? false,
-                    showMenuBarIcon: selections?.showMenuBarIconOn ?? false,
-                    caffeinate: selections?.caffeinateOn ?? false,
-                    startHelper: granted
-                )
-                if granted {
-                    self.selectTab(0)
-                } else {
-                    self.selectTab(1)
-                    self.beginAccessibilitySetup()
+            let advance: (OnboardingStep) -> Void = { next in
+                DispatchQueue.main.async {
+                    self.presentOnboardingStep(next, selections: selections)
                 }
-            case .alertSecondButtonReturn:
-                // Reviewing is not completion. Keep a clear route back in the footer,
-                // and leave a fresh installation pending if the app closes here.
-                self.onboardingReviewInProgress = true
-                self.selectTab(0)
-            default:
-                // Skip / Close: leave every toggle OFF, but still record the concrete
-                // choice so a later launch never falls back to the pre-onboarding
-                // defaults.
-                self.onboardingReviewInProgress = false
-                self.applyOnboardingSelections(
-                    launchAtLogin: false,
-                    autoUpdate: false,
-                    showMenuBarIcon: false,
-                    caffeinate: false,
-                    startHelper: false
-                )
+            }
+            switch step {
+            case .welcome:
+                advance(.preferences)
+            case .preferences:
+                response == .alertFirstButtonReturn
+                    ? advance(.accessibility)
+                    : advance(.welcome)
+            case .accessibility:
+                // Finishing always completes onboarding and applies the toggles. When
+                // opening Accessibility setup, that flow starts the helper, so the apply
+                // pass skips its own start to avoid a second, churning launchd pass.
+                let finish: (_ openAccessibilitySetup: Bool) -> Void = { openSetup in
+                    self.applyOnboardingSelections(
+                        launchAtLogin: selections.launchAtLoginOn,
+                        autoUpdate: selections.autoUpdateOn,
+                        showMenuBarIcon: selections.showMenuBarIconOn,
+                        caffeinate: selections.caffeinateOn,
+                        startHelper: !openSetup
+                    )
+                    if openSetup {
+                        self.selectTab(1)
+                        self.beginAccessibilitySetup()
+                    } else {
+                        self.selectTab(0)
+                    }
+                }
+                if granted {
+                    // Buttons: [Start Using Klik PRO, Back]
+                    response == .alertFirstButtonReturn ? finish(false) : advance(.preferences)
+                } else {
+                    // Buttons: [Set Up Accessibility…, Skip for Now, Back]
+                    switch response {
+                    case .alertFirstButtonReturn: finish(true)   // opt in now
+                    case .alertSecondButtonReturn: finish(false) // Skip for Now — grant later
+                    default: advance(.preferences)               // Back
+                    }
+                }
             }
         }
     }
@@ -4582,13 +4933,20 @@ final class ToggleView: NSView {
     }
 
     private func recomputeConflictBadges() {
+        let launchableInstanceIDs = launchableAppProfileInstanceIDs(
+            in: config,
+            instanceIsLaunchable: { [appProfileRuntime] instance in
+                !previewRenderingIsActive && appProfileRuntime.health(for: instance) == .ready
+            }
+        )
         let statuses = evaluateShortcutConflicts(
             candidate: config,
             persisted: persistedConfig,
             browserExtensionShortcuts: browserExtensionShortcuts,
             specialFeatureActive: menuRunning,
             chatGPTAvailable: quickLaunchTargetIsAvailable(.chatGPT),
-            claudeAvailable: quickLaunchTargetIsAvailable(.claude)
+            claudeAvailable: quickLaunchTargetIsAvailable(.claude),
+            activeInstanceIDs: launchableInstanceIDs
         )
         contentView.middleButtonRow.badge.status = statuses[.middleButton] ?? .ok
         contentView.gestureButtonRow.badge.status = statuses[.gestureButton] ?? .ok
@@ -4709,6 +5067,7 @@ final class ToggleView: NSView {
         if mappingsTabRect.contains(point) { selectTab(0); return }
         if settingsTabRect.contains(point) { selectTab(1); return }
         if appProfilesTabRect.contains(point) { selectTab(2); return }
+        if advancedTabRect.contains(point) { selectTab(3); return }
 
         if closeButtonRect.contains(point) {
             if saveInProgress {
@@ -4781,11 +5140,12 @@ final class ToggleView: NSView {
         let cfuSize = cfu.size(withAttributes: cfuAttrs)
         cfu.draw(at: NSPoint(x: updateButtonRect.midX - cfuSize.width / 2, y: updateButtonRect.midY - cfuSize.height / 2), withAttributes: cfuAttrs)
 
-        // Tabs: Mappings | Settings | App Profiles
+        // Tabs: Mappings | Settings | App Profiles | Advanced
         for (label, rect, idx) in [
             ("Mappings", mappingsTabRect, 0),
             ("Settings", settingsTabRect, 1),
             ("App Profiles", appProfilesTabRect, 2),
+            ("Advanced", advancedTabRect, 3),
         ] {
             let active = activeTab == idx
             let tAttrs: [NSAttributedString.Key: Any] = [

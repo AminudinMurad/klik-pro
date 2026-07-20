@@ -43,21 +43,25 @@ assigned buttons remain active. Actual button and wheel support varies by hardwa
 direct path to Mappings:
 
 <p align="center">
-  <img src="assets/screenshot-onboarding.png?v=1.0.0-b1" width="462" alt="Klik PRO first-launch welcome guide with Accessibility setup and Mappings review actions">
+  <img src="assets/screenshot-onboarding.png?v=1.1.0-b2" width="462" alt="Klik PRO first-launch welcome — step 1 of a 3-step guided setup">
 </p>
 
 **Supported controls** — configure compatible mouse controls and see live conflict
 checks:
 
-<img src="assets/screenshot-mappings.png?v=1.0.0-b1" width="940" alt="Klik PRO Mappings tab with supported mouse controls and shortcut settings">
+<img src="assets/screenshot-mappings.png?v=1.1.0-b2" width="940" alt="Klik PRO Mappings tab with supported mouse controls and shortcut settings">
 
 **App Profiles** — generate isolated extra instances of ChatGPT or Claude, each with its own login; open, assign to a mouse button, or manage each one:
 
-<img src="assets/screenshot-app-profiles.png?v=1.0.0-b1" width="940" alt="Klik PRO App Profiles tab with ChatGPT and Claude generators and a managed list of profiles offering Open, Assign Button, and per-profile menu-bar toggles">
+<img src="assets/screenshot-app-profiles.png?v=1.1.0-b2" width="940" alt="Klik PRO App Profiles tab with ChatGPT and Claude generators and a managed list of profiles offering Open, Assign Button, and per-profile menu-bar toggles">
 
 **Settings** — launch-at-login, menu-icon visibility, update-check, and guided Accessibility setup/reset controls:
 
-<img src="assets/screenshot-settings.png?v=1.0.0-b1" width="940" alt="Klik PRO Settings tab with separated Recheck control and outlined Granted permission status">
+<img src="assets/screenshot-settings.png?v=1.1.0-b2" width="940" alt="Klik PRO Settings tab with separated Recheck control and outlined Granted permission status">
+
+**Durable data folder** — an unlock-gated Advanced tab: point new App Profiles at a data folder so their logins survive uninstalling Klik PRO, or scan an existing folder to recover profiles after a reinstall (existing profiles are never moved):
+
+<img src="assets/screenshot-advanced.png?v=1.1.0-b2" width="940" alt="Klik PRO Advanced tab with a durable data folder picker for new App Profiles and a Scan and Adopt control to recover profiles from an existing Klik PRO data folder">
 
 ## Features
 
@@ -101,10 +105,10 @@ checks:
 
 ## Install (pre-built release)
 
-The current release is **Klik PRO v1.0.0 (build 1)**, provided as one universal
+The current release is **Klik PRO v1.1.0 (build 2)**, provided as one universal
 macOS app for Apple Silicon and Intel Macs. The DMG is the recommended download;
 the ZIP contains the same app as an alternative.
-**[Download Klik PRO v1.0.0](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.0.0).**
+**[Download Klik PRO v1.1.0](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.1.0).**
 
 Klik PRO is **not notarized or signed with an Apple Developer ID** — it's an
 ad-hoc-signed, self-built utility — so a downloaded copy is quarantined and
@@ -361,7 +365,7 @@ setups Klik PRO has been tested against:
 | | |
 |---|---|
 | macOS | 26.5.2 (build 25F84) |
-| Klik PRO | v1.0.0 (build 1), universal Apple Silicon + Intel build |
+| Klik PRO | v1.1.0 (build 2), universal Apple Silicon + Intel build |
 | Primary mouse | Logitech MX Master 3 (Mac edition), firmware `MPM19.01_0015`, connected over Bluetooth (BLE) |
 | Additional tested mouse | Logi M650, firmware `RBM16.10_0014` |
 | Vendor software / driver | None — no mouse driver or manufacturer software installed |

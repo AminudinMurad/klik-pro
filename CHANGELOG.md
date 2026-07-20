@@ -2,6 +2,27 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.1.0
+
+- **Durable data folder (Advanced settings)** — a new, unlock-gated **Advanced**
+  tab lets you choose a data folder where new App Profiles are stored so their
+  logins survive uninstalling Klik PRO, and scan an existing folder to re-adopt
+  the profiles it holds. On launch, if a previously configured data folder is
+  located, its profiles are recovered automatically. Existing profiles are never
+  moved; leaving the folder unset keeps the default behaviour unchanged.
+- **Three-step onboarding** — first launch is now a guided flow: Welcome,
+  Preferences (the four setting toggles on their own page), and an opt-in
+  Accessibility step with **Set Up Accessibility…**, **Skip for Now**, and
+  **Back**. Skipping still completes onboarding; the permission can be granted
+  any time later from Settings.
+- **About copyright** — the Settings About card now shows the project
+  copyright line (© 2026 Aminudin Murad · GPL-3.0).
+- **Fixed: phantom Duplicate badge** — a mouse button whose shortcut matched
+  the stale keyboard combo of a button assigned to open a managed App Profile
+  no longer shows a false Duplicate warning. The conflict checker now mirrors
+  the runtime: a button that launches a profile owns no keyboard shortcut. A
+  button whose target genuinely cannot launch still reports the conflict.
+
 ## 1.0.0 — Initial release
 
 Klik PRO remaps the extra buttons on a "pro" mouse to recordable keyboard

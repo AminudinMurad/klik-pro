@@ -52,6 +52,7 @@ private struct AppProfilesFoundationTests {
         testHomeSymlinkNamingAndLifecycle()
         testHealingUpgradesExistingInstancesInPlace()
         testRealAdHocLauncherMaterialization()
+        testManagedInstanceReleasesPhantomDuplicateBadge()
         testVaultPathDerivationAndDefaultGolden()
         testVaultLocationValidationFailsClosed()
         testSchema11VaultMigrationRoundTrip()
@@ -59,6 +60,7 @@ private struct AppProfilesFoundationTests {
         testVaultHealParityAndPortability()
         testVaultAdoptionRegeneratesFromManifest()
         testVaultInstanceRemovalAndManifestWriteFailSafe()
+        testDataRootWiringFactorySelectsGenerator()
         print("App Profiles foundation tests passed")
     }
 
@@ -2434,5 +2436,160 @@ private struct AppProfilesFoundationTests {
             [.posixPermissions: 0o700],
             ofItemAtPath: fixture.vault.path
         )
+    }
+
+    /// Phase 2 wiring decision: `makeLauncherGenerator(forDataRoot:)` is the one
+    /// switch that turns the dormant vault backend on. It must wire the vault root
+    /// only for a data root that passes the fail-closed location gate, and
+    /// otherwise return a no-vault generator so behavior stays byte-for-byte the
+    /// pre-vault app. A no-vault generator must never be able to derive a vault
+    /// path (it fails closed), which is what keeps `dataRoot = nil` inert.
+    private static func testDataRootWiringFactorySelectsGenerator() {
+        let id = UUID()
+
+        // nil → no vault wired, and vault derivation fails closed.
+        let none = makeLauncherGenerator(forDataRoot: nil)
+        expect(none.vaultRootURL == nil,
+               "a nil dataRoot must produce a generator with no wired vault root")
+        do {
+            _ = try none.profileURL(for: id, storage: .vault)
+            expect(false, "a no-vault generator must never derive a vault path")
+        } catch let error as LauncherGeneratorError {
+            expect(error == .vaultUnavailable,
+                   "a nil dataRoot must fail closed, never fall back to Application Support")
+        } catch {
+            expect(false, "unexpected derivation error: \(error)")
+        }
+
+        // A valid, writable folder outside Application Support → wired at exactly
+        // that (standardized) path, the equality newInstanceStorage requires.
+        let validRoot = temporaryDirectory("wiring-valid")
+        defer { try? FileManager.default.removeItem(at: validRoot) }
+        let vaultPath = validRoot.appendingPathComponent("Klik PRO Data", isDirectory: true).path
+        let wired = makeLauncherGenerator(forDataRoot: vaultPath)
+        let expectedPath = URL(fileURLWithPath: vaultPath, isDirectory: true).standardizedFileURL.path
+        expect(wired.vaultRootURL?.path == expectedPath,
+               "a valid dataRoot must wire the vault root at exactly that path")
+        expect(vaultPathRejectionReason(vaultPath) == nil,
+               "the chosen fixture path must itself pass the location gate")
+
+        // A non-absolute path is rejected by the gate → fail-safe to no-vault.
+        expect(makeLauncherGenerator(forDataRoot: "relative/data").vaultRootURL == nil,
+               "a non-absolute dataRoot must fail safe to a no-vault generator")
+
+        // A path inside Application Support is rejected by the gate → no-vault,
+        // so a hand-edited config can never smuggle the vault into the wiped tree.
+        let insideSupport = NSHomeDirectory()
+            + "/Library/Application Support/Klik PRO Vault Wiring Test"
+        expect(makeLauncherGenerator(forDataRoot: insideSupport).vaultRootURL == nil,
+               "a dataRoot inside Application Support must fail safe to a no-vault generator")
+    }
+
+    // Regression: the mouse-shortcut conflict checker only recognised the legacy
+    // chatGPTMouseButton / claudeMouseButton mirrors via `activeQuickLaunchTarget`. A
+    // managed App Profile instance owns its mouse slot directly on the instance, so a
+    // Gesture button bound to a launchable managed Claude instance ("Claude T") fell
+    // through to the Gesture slot's stored base combo and flagged Middle=Gesture-base as
+    // a phantom Duplicate — even though the runtime launches the instance and never fires
+    // that combo. The fix mirrors the input helper: a slot served by a launchable managed
+    // instance is a pure launch action, so the checker resolves it to .ok and excludes it
+    // from the keyboard-combo duplicate comparison (never leaking its base combo).
+    private static func testManagedInstanceReleasesPhantomDuplicateBadge() {
+        var config = KlikProConfig.default
+        config.specialFeatureEnabled = true
+        // The managed instance owns the Gesture slot on the instance itself; the legacy
+        // mouse mirrors stay unassigned, exactly as in the reported configuration.
+        config.chatGPTMouseButton = nil
+        config.claudeMouseButton = nil
+        // Reproduce the report: Middle carries the Gesture slot's default base combo.
+        config.middleButton.combo = config.gestureButton.combo
+        expect(config.middleButton.combo.signature == config.gestureButton.combo.signature,
+               "fixture must pit Middle against the Gesture slot's stale base combo")
+
+        // Placeholder hotkey shared by managed instances that have no assigned hotkey —
+        // the disabled default. Two managed rows carrying it must NOT duplicate each other.
+        let placeholderHotkey = ShortcutMapping(
+            enabled: false,
+            combo: KeyCombo(
+                keyCode: 0,
+                keyDisplay: "A",
+                command: false,
+                option: false,
+                control: true,
+                shift: false
+            )
+        )
+        func makeManagedClaude(
+            id: UUID,
+            label: String,
+            mouseButton: QuickLaunchMouseButton
+        ) -> AppProfileInstance {
+            AppProfileInstance(
+                id: id,
+                label: label,
+                launcherKind: .managed,
+                launcherPath: "/tmp/Launchers/\(id.uuidString).app",
+                profileDirectory: "/tmp/Profiles/\(id.uuidString)",
+                profileOwnership: .managed,
+                source: AppProfileSource(
+                    bundleIdentifier: "com.anthropic.claudefordesktop",
+                    bundleURL: "/Applications/Claude.app"
+                ),
+                pinToMenuBar: false,
+                hotkey: placeholderHotkey,
+                mouseButton: mouseButton
+            )
+        }
+        let gestureInstanceID = UUID()
+        let forwardInstanceID = UUID()
+        config.instances = [
+            makeManagedClaude(id: gestureInstanceID, label: "Claude T", mouseButton: .gesture),
+            makeManagedClaude(id: forwardInstanceID, label: "Claude G", mouseButton: .forward),
+        ]
+
+        // Launchable managed instances ⇒ the runtime launches them, so each mouse slot
+        // releases its base combo. Middle must no longer read as a Duplicate, and the two
+        // managed rows must not duplicate each other via their shared placeholder hotkey.
+        let launchableIDs = launchableAppProfileInstanceIDs(
+            in: config,
+            legacyTargetIsAvailable: { _ in false },
+            instanceIsLaunchable: { _ in true }
+        )
+        expect(launchableIDs == [gestureInstanceID, forwardInstanceID],
+               "launchable managed instances must be treated as active launch sources")
+        let launchableStatuses = evaluateShortcutConflicts(
+            candidate: config,
+            persisted: config,
+            browserExtensionShortcuts: [],
+            specialFeatureActive: true,
+            activeInstanceIDs: launchableIDs
+        )
+        expect(launchableStatuses[.middleButton] == .ok,
+               "Middle must not be a phantom Duplicate when the Gesture launches Claude T")
+        expect(launchableStatuses[.gestureButton] == .ok,
+               "the Gesture row must follow its managed launcher, not leak its stale base combo")
+        expect(launchableStatuses[.forwardButton] == .ok,
+               "two managed launch rows must not duplicate each other via a shared placeholder hotkey")
+
+        // Negative control: a genuinely unlaunchable instance leaves nothing active, so
+        // the runtime reverts the Gesture to its base combo and the real Duplicate stands.
+        let unavailableIDs = launchableAppProfileInstanceIDs(
+            in: config,
+            legacyTargetIsAvailable: { _ in false },
+            instanceIsLaunchable: { _ in false }
+        )
+        expect(unavailableIDs.isEmpty,
+               "an unlaunchable managed instance must not be treated as an active launch source")
+        let unavailableStatuses = evaluateShortcutConflicts(
+            candidate: config,
+            persisted: config,
+            browserExtensionShortcuts: [],
+            specialFeatureActive: true,
+            activeInstanceIDs: unavailableIDs
+        )
+        expect(unavailableStatuses[.middleButton] == .duplicate,
+               "a genuinely unlaunchable Gesture must still surface the Middle Duplicate")
+        expect(unavailableStatuses[.gestureButton] == .duplicate,
+               "the reverted Gesture base combo must also report the real conflict")
     }
 }

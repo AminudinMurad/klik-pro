@@ -822,3 +822,159 @@ final class AppProfilesContentView: NSView {
         NSBezierPath(rect: NSRect(x: 327.5, y: 0, width: 1, height: bounds.height)).fill()
     }
 }
+
+/// The locked "Advanced" tab (Durable Data Vault, Phase 2). A dumb view in the
+/// same mould as `AppProfilesContentView`: chrome in `draw(_:)`, everything else
+/// a subview, and all real work driven by the owner through closures + setters.
+/// Locked behind a padlock by default so the data-location controls can't be
+/// changed by accident; unlocking reveals two sections — choose/clear the folder
+/// new profiles are stored in, and scan/adopt an existing Klik PRO data folder.
+final class AdvancedSettingsContentView: NSView {
+    // Locked-state views.
+    private let lockIcon = NSImageView()
+    private let lockTitle = NSTextField(labelWithString: "Advanced settings are locked")
+    private let lockBody = NSTextField(wrappingLabelWithString:
+        "These settings change where your App Profile data is stored on disk. "
+        + "Unlock to choose a durable data folder or recover profiles from one."
+    )
+    private let unlockButton = AppProfileButton(title: "Unlock", frame: .zero)
+
+    // Unlocked-state views — "Data folder for new profiles".
+    private let dataRootLabel = NSTextField(labelWithString: "DATA FOLDER FOR NEW PROFILES")
+    private let dataRootBody = NSTextField(wrappingLabelWithString:
+        "New App Profiles are stored here so their logins survive uninstalling Klik PRO. "
+        + "Existing profiles are never moved."
+    )
+    private let dataRootValueField = NSTextField(labelWithString: "")
+    private let chooseButton = AppProfileButton(title: "Choose Folder…", frame: .zero)
+    private let clearButton = AppProfileButton(title: "Clear", frame: .zero)
+
+    // Unlocked-state views — "Recover from an existing folder".
+    private let recoverLabel = NSTextField(labelWithString: "RECOVER FROM AN EXISTING FOLDER")
+    private let recoverBody = NSTextField(wrappingLabelWithString:
+        "Already have a Klik PRO data folder from a reinstall or another Mac? "
+        + "Scan it to re-adopt the App Profiles it holds. Existing profiles are left untouched."
+    )
+    private let scanButton = AppProfileButton(title: "Scan & Adopt…", frame: .zero)
+
+    private let statusField = NSTextField(wrappingLabelWithString: "")
+
+    var onUnlock: (() -> Void)?
+    var onChooseFolder: (() -> Void)?
+    var onClearFolder: (() -> Void)?
+    var onScanAndAdopt: (() -> Void)?
+
+    private var isLocked = true
+    private var lockedViews: [NSView] { [lockIcon, lockTitle, lockBody, unlockButton] }
+    private var unlockedViews: [NSView] {
+        [dataRootLabel, dataRootBody, dataRootValueField, chooseButton, clearButton,
+         recoverLabel, recoverBody, scanButton, statusField]
+    }
+
+    override var isFlipped: Bool { true }
+
+    init(dataRoot: String?, width: CGFloat) {
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 702))
+
+        // Locked state, centred.
+        let iconConfig = NSImage.SymbolConfiguration(pointSize: 40, weight: .regular)
+        lockIcon.image = NSImage(systemSymbolName: "lock.fill", accessibilityDescription: "Locked")?
+            .withSymbolConfiguration(iconConfig)
+        lockIcon.contentTintColor = .appTextSecondary
+        lockIcon.imageScaling = .scaleProportionallyUpOrDown
+        lockIcon.frame = NSRect(x: width / 2 - 24, y: 176, width: 48, height: 48)
+        lockTitle.frame = NSRect(x: 0, y: 240, width: width, height: 24)
+        lockTitle.font = .systemFont(ofSize: 16, weight: .semibold)
+        lockTitle.textColor = .appTextPrimary
+        lockTitle.alignment = .center
+        lockBody.frame = NSRect(x: width / 2 - 240, y: 272, width: 480, height: 48)
+        lockBody.font = .systemFont(ofSize: 12)
+        lockBody.textColor = .appTextSecondary
+        lockBody.alignment = .center
+        unlockButton.frame = NSRect(x: width / 2 - 70, y: 336, width: 140, height: 32)
+        unlockButton.onPress = { [weak self] in self?.onUnlock?() }
+
+        // Section 1 — Data folder.
+        styleSectionLabel(dataRootLabel, frame: NSRect(x: 28, y: 34, width: width - 56, height: 16))
+        styleBody(dataRootBody, frame: NSRect(x: 28, y: 58, width: width - 56, height: 36))
+        dataRootValueField.frame = NSRect(x: 28, y: 104, width: width - 56, height: 20)
+        dataRootValueField.font = .systemFont(ofSize: 12, weight: .medium)
+        dataRootValueField.textColor = .appTextPrimary
+        dataRootValueField.lineBreakMode = .byTruncatingMiddle
+        chooseButton.frame = NSRect(x: 28, y: 134, width: 150, height: 28)
+        chooseButton.onPress = { [weak self] in self?.onChooseFolder?() }
+        clearButton.frame = NSRect(x: 186, y: 134, width: 90, height: 28)
+        clearButton.onPress = { [weak self] in self?.onClearFolder?() }
+
+        // Section 2 — Recover.
+        styleSectionLabel(recoverLabel, frame: NSRect(x: 28, y: 210, width: width - 56, height: 16))
+        styleBody(recoverBody, frame: NSRect(x: 28, y: 234, width: width - 56, height: 36))
+        scanButton.frame = NSRect(x: 28, y: 282, width: 170, height: 28)
+        scanButton.onPress = { [weak self] in self?.onScanAndAdopt?() }
+
+        statusField.frame = NSRect(x: 28, y: 332, width: width - 56, height: 40)
+        statusField.font = .systemFont(ofSize: 12)
+        statusField.textColor = .appTextSecondary
+
+        (lockedViews + unlockedViews).forEach(addSubview)
+        setDataRoot(dataRoot)
+        setLocked(true)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    private func styleSectionLabel(_ field: NSTextField, frame: NSRect) {
+        field.frame = frame
+        field.font = .boldSystemFont(ofSize: 12)
+        field.textColor = .appTextSecondary
+    }
+
+    private func styleBody(_ field: NSTextField, frame: NSRect) {
+        field.frame = frame
+        field.font = .systemFont(ofSize: 12)
+        field.textColor = .appTextSecondary
+    }
+
+    /// Locks or unlocks the tab. Locking also clears any transient status so a
+    /// stale message never greets the next unlock.
+    func setLocked(_ locked: Bool) {
+        isLocked = locked
+        lockedViews.forEach { $0.isHidden = !locked }
+        unlockedViews.forEach { $0.isHidden = locked }
+        if locked { statusField.stringValue = "" }
+        needsDisplay = true
+    }
+
+    /// Reflects the persisted `config.dataRoot`: the absolute path when a vault is
+    /// configured, or the default Application Support wording when it is nil.
+    func setDataRoot(_ path: String?) {
+        if let path, !path.isEmpty {
+            dataRootValueField.stringValue = path
+            dataRootValueField.textColor = .appTextPrimary
+            clearButton.isEnabled = true
+        } else {
+            dataRootValueField.stringValue = "Default (Application Support)"
+            dataRootValueField.textColor = .appTextSecondary
+            clearButton.isEnabled = false
+        }
+    }
+
+    func setStatus(_ message: String, color: NSColor = .appTextSecondary) {
+        statusField.stringValue = message
+        statusField.textColor = color
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let card = bounds.insetBy(dx: 0.5, dy: 0.5)
+        NSColor.controlBackgroundColor.setFill()
+        NSBezierPath(roundedRect: card, xRadius: 12, yRadius: 12).fill()
+        NSColor.separatorColor.setStroke()
+        let border = NSBezierPath(roundedRect: card, xRadius: 12, yRadius: 12)
+        border.lineWidth = 1; border.stroke()
+        // A hairline divider between the two sections, only while unlocked.
+        if !isLocked {
+            NSColor.separatorColor.setFill()
+            NSBezierPath(rect: NSRect(x: 28, y: 186, width: bounds.width - 56, height: 1)).fill()
+        }
+    }
+}

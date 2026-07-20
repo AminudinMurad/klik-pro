@@ -1979,6 +1979,47 @@ func activeAppProfileInstance(
     return matches.count == 1 ? matches[0] : nil
 }
 
+/// The launchable *managed* instance that owns `slot`, if any. Legacy target mirrors are
+/// handled separately by `activeQuickLaunchTarget`; this covers the schema-10+ managed
+/// App Profiles whose mouse ownership lives on the instance rather than on the legacy
+/// `chatGPTMouseButton` / `claudeMouseButton` fields, so the conflict checker can mirror
+/// the runtime's `activeAppProfileInstance` dispatch for them.
+func activeManagedAppProfileInstance(
+    for slot: ShortcutSlot,
+    in config: KlikProConfig,
+    activeInstanceIDs: Set<UUID>,
+    specialFeatureActive: Bool
+) -> AppProfileInstance? {
+    guard let instance = activeAppProfileInstance(
+        for: slot,
+        in: config,
+        activeInstanceIDs: activeInstanceIDs,
+        specialFeatureActive: specialFeatureActive
+    ), instance.launcherKind == .managed else {
+        return nil
+    }
+    return instance
+}
+
+/// The App Profile instances the runtime would treat as launchable, computed exactly
+/// like the input helper's `activeAppProfileInstanceIDs`: legacy rows defer to their
+/// external launcher wrapper, while managed rows defer to `instanceIsLaunchable` (the
+/// helper passes `AppProfileRuntime.health(for:) == .ready`). Ambiguous assignments fail
+/// closed to an empty set so no phantom launch capability is inferred.
+func launchableAppProfileInstanceIDs(
+    in config: KlikProConfig,
+    legacyTargetIsAvailable: (QuickLaunchTarget) -> Bool = { quickLaunchTargetIsAvailable($0) },
+    instanceIsLaunchable: (AppProfileInstance) -> Bool
+) -> Set<UUID> {
+    guard appProfileAssignmentsAreValid(config) else { return [] }
+    return Set(config.instances.compactMap { instance -> UUID? in
+        if let target = instance.legacyQuickLaunchTarget {
+            return legacyTargetIsAvailable(target) ? instance.id : nil
+        }
+        return instanceIsLaunchable(instance) ? instance.id : nil
+    })
+}
+
 /// Upgrades older decoded files in memory. A hand-edited duplicate assignment is kept
 /// visible for correction, while `assignedQuickLaunchTarget` makes its runtime overlay
 /// fail closed. The on-disk file is not rewritten until the user explicitly saves.
@@ -2130,11 +2171,32 @@ func evaluateShortcutConflicts(
     browserExtensionShortcuts: Set<KeyCombo.Signature> = installedChromeExtensionShortcutSignatures(),
     specialFeatureActive: Bool = true,
     chatGPTAvailable: Bool = true,
-    claudeAvailable: Bool = true
+    claudeAvailable: Bool = true,
+    activeInstanceIDs: Set<UUID> = []
 ) -> [ShortcutSlot: ShortcutConflictStatus] {
     var result: [ShortcutSlot: ShortcutConflictStatus] = [:]
 
+    // Slots served by a launchable managed App Profile instance are pure launch actions,
+    // mirroring the input helper's `.launchInstance` dispatch: the mouse-down opens the
+    // managed app and no keyboard combo is ever synthesized. Such a slot therefore cannot
+    // conflict with, nor be duplicated by, any keyboard combo — so it resolves to `.ok`
+    // and is excluded from the combo-duplicate comparison. Without this, the slot's stored
+    // base combo would leak in and manufacture a phantom Duplicate (and two managed rows
+    // sharing a placeholder hotkey would falsely duplicate each other). A managed instance
+    // that cannot launch is absent from `activeInstanceIDs`, so its slot falls through to
+    // its base combo here and any genuine conflict it produces still surfaces.
+    let managedLaunchSlots = Set(ShortcutSlot.allCases.filter { slot in
+        activeManagedAppProfileInstance(
+            for: slot,
+            in: candidate,
+            activeInstanceIDs: activeInstanceIDs,
+            specialFeatureActive: specialFeatureActive
+        ) != nil
+    })
+
     for slot in ShortcutSlot.allCases {
+        if managedLaunchSlots.contains(slot) { result[slot] = .ok; continue }
+
         let mine = mapping(
             for: slot,
             in: candidate,
@@ -2154,6 +2216,7 @@ func evaluateShortcutConflicts(
         let isDuplicate = ShortcutSlot.allCases.contains { other in
             guard other != slot else { return false }
             guard other != intentionalCounterpart else { return false }
+            guard !managedLaunchSlots.contains(other) else { return false }
             let otherMapping = mapping(
                 for: other,
                 in: candidate,

@@ -871,3 +871,31 @@ struct AppProfileManager {
             && current.buildVersion == selected.buildVersion
     }
 }
+
+// MARK: - Data-root wiring (Durable Data Vault, Phase 2)
+
+/// Builds the launcher generator the production app should use for a given
+/// `config.dataRoot`. This is the single wiring decision that turns the dormant
+/// Phase 1 backend on: a `nil`, malformed, or fail-closed-rejected data root
+/// yields a **no-vault** generator (no `vaultRootURL`), so `newInstanceStorage`
+/// returns `.applicationSupport` and behavior stays byte-for-byte the pre-vault
+/// app. Only a data root that passes `vaultPathRejectionReason` wires the vault
+/// root, and it is wired at exactly `config.dataRoot` — the equality
+/// `newInstanceStorage` requires before it will ever create a `.vault` instance.
+/// Isolated as a free function (no AppKit) so the decision is unit-testable.
+func makeLauncherGenerator(forDataRoot dataRoot: String?) -> LauncherGenerator {
+    guard let dataRoot, vaultPathRejectionReason(dataRoot) == nil else {
+        return LauncherGenerator()
+    }
+    return LauncherGenerator(
+        vaultRootURL: URL(fileURLWithPath: dataRoot, isDirectory: true)
+    )
+}
+
+/// The production `AppProfileManager` for a given `config.dataRoot`, built on the
+/// generator `makeLauncherGenerator(forDataRoot:)` selects. Callers rebuild the
+/// manager through this whenever the user picks or clears the vault folder so the
+/// generator's wired root and `config.dataRoot` never drift apart.
+func makeAppProfileManager(forDataRoot dataRoot: String?) -> AppProfileManager {
+    AppProfileManager(generator: makeLauncherGenerator(forDataRoot: dataRoot))
+}
