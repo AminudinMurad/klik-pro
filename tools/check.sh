@@ -661,8 +661,11 @@ grep -q 'update-hover.png' "$ROOT/tools/render-previews.sh"
 grep -q 'close-hover.png' "$ROOT/tools/render-previews.sh"
 grep -q 'onboarding-back-hover.png' "$ROOT/tools/render-previews.sh"
 grep -q 'about.png' "$ROOT/tools/render-previews.sh"
-grep -q 'screenshot-onboarding.png' "$ROOT/README.md"
-grep -Eq 'screenshot-onboarding\.png[^\"]*" width="462"' "$ROOT/README.md"
+# README shows the animated onboarding flow (GIF) at the same display width.
+grep -q 'onboarding-flow.gif' "$ROOT/README.md"
+grep -Eq 'onboarding-flow\.gif[^\"]*" width="462"' "$ROOT/README.md"
+# The locked-state Advanced screenshot documents the new lock/warning gate.
+grep -q 'screenshot-advanced-locked.png' "$ROOT/README.md"
 grep -q 'roundedRect: borderRect' "$ROOT/tools/PreviewMain.swift"
 grep -q 'let previewScale: CGFloat = 2' "$ROOT/tools/PreviewMain.swift"
 grep -q 'bitmap.size = bounds.size' "$ROOT/tools/PreviewMain.swift"

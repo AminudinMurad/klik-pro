@@ -4,8 +4,8 @@
 
 # Klik PRO
 
-**Remap the extra buttons on a "pro" mouse to keyboard shortcuts — a lightweight,
-native macOS menu-bar utility.**
+**Recordable mouse-button shortcuts and isolated App Profiles for macOS — a lightweight,
+native menu-bar utility, with thumb-wheel tab switching and a keep-awake menu.**
 
 [![Latest release](https://img.shields.io/github/v/release/AminudinMurad/klik-pro?label=release&color=2ec458)](https://github.com/AminudinMurad/klik-pro/releases/latest)
 [![License: GPL v3](https://img.shields.io/github/license/AminudinMurad/klik-pro?color=blue)](LICENSE)
@@ -39,11 +39,11 @@ hotkeys, and can temporarily link either launcher to a supported mouse button wi
 replacing that button's normal mapping. Its icons can be hidden while its hotkeys and
 assigned buttons remain active. Actual button and wheel support varies by hardware.
 
-**Welcome guide** — first-launch Accessibility setup, ready-to-try defaults, and a
-direct path to Mappings:
+**Guided onboarding** — a three-step first-launch flow (Welcome → Preferences →
+an opt-in Accessibility step), with Back navigation and no dead-ends:
 
 <p align="center">
-  <img src="assets/screenshot-onboarding.png?v=1.1.1-b3" width="462" alt="Klik PRO first-launch welcome — step 1 of a 3-step guided setup">
+  <img src="assets/onboarding-flow.gif?v=1.1.1-b3" width="462" alt="Klik PRO first-launch onboarding animation cycling through its three steps: Welcome, Preferences, and an opt-in Accessibility step">
 </p>
 
 **Supported controls** — configure compatible mouse controls and see live conflict
@@ -59,9 +59,13 @@ checks:
 
 <img src="assets/screenshot-settings.png?v=1.1.1-b3" width="940" alt="Klik PRO Settings tab with separated Recheck control and outlined Granted permission status">
 
-**Durable data folder** — an unlock-gated Advanced tab: point new App Profiles at a data folder so their logins survive uninstalling Klik PRO, or scan an existing folder to recover profiles after a reinstall (existing profiles are never moved):
+**Advanced — durable data folder (lock-gated).** The Advanced tab is locked by default. Its options change where App Profile data is stored on disk, so clicking the padlock shows a risk confirmation before anything unlocks:
 
-<img src="assets/screenshot-advanced.png?v=1.1.1-b3" width="940" alt="Klik PRO Advanced tab with a durable data folder picker for new App Profiles and a Scan and Adopt control to recover profiles from an existing Klik PRO data folder">
+<img src="assets/screenshot-advanced-locked.png?v=1.1.1-b3" width="940" alt="Klik PRO Advanced tab locked: a padlock, a warning that these options change where App Profile data is stored on disk and can leave profiles unfindable, and a Click the lock to unlock hint">
+
+Once unlocked, point new App Profiles at a durable data folder so their logins survive uninstalling Klik PRO, or scan an existing folder to recover profiles after a reinstall — existing profiles are never moved:
+
+<img src="assets/screenshot-advanced.png?v=1.1.1-b3" width="940" alt="Klik PRO Advanced tab unlocked, showing a durable data folder picker for new App Profiles and a Scan and Adopt control to recover profiles from an existing Klik PRO data folder">
 
 ## Features
 
