@@ -352,6 +352,9 @@ Possible directions for future releases — not committed, and subject to change
 - **Built-in system controls.** Preconfigured actions you can assign to a mouse button
   — brightness, volume, media playback, and the like — without recording a keyboard
   shortcut yourself.
+- **Custom App Profile icons.** Give a generated profile its own icon — not just a
+  custom name — so each instance is easy to tell apart in the Dock, Spotlight, and
+  the menu bar.
 
 Have a request? [Open an issue](https://github.com/AminudinMurad/klik-pro/issues).
 
