@@ -1,0 +1,18 @@
+.DS_Store
+build/
+releases/
+DerivedData/
+*.xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.log
+*.tmp
+diagnostics/scroll-probe
+diagnostics/hid-report-probe
+
+# Local AI coordination scaffold (absolute machine paths + internal notes — not public)
+00_AI_Agent/
+.claude/
+
+# Per-seat git worktrees for concurrent development work (never committed)
+worktrees/

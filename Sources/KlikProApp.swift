@@ -1,0 +1,4966 @@
+import AppKit
+import Carbon
+import QuartzCore
+import UniformTypeIdentifiers
+
+// NOTE: LaunchAgent identifiers and installer helpers live in KlikProConfig.swift,
+// shared with the combined background helper.
+
+// MARK: - ToggleSwitchView
+
+final class ToggleSwitchView: NSView {
+    var isOn: Bool {
+        didSet {
+            setAccessibilityValue(NSNumber(value: isOn))
+            needsDisplay = true
+        }
+    }
+    var isEnabled: Bool = true {
+        didSet {
+            setAccessibilityEnabled(isEnabled)
+            needsDisplay = true
+            window?.invalidateCursorRects(for: self)
+        }
+    }
+    var onChange: ((Bool) -> Void)?
+
+    init(isOn: Bool, frame: NSRect) {
+        self.isOn = isOn
+        super.init(frame: frame)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.checkBox)
+        setAccessibilityValue(NSNumber(value: isOn))
+        setAccessibilityEnabled(true)
+        setAccessibilityLabel("Toggle")
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override var acceptsFirstResponder: Bool { isEnabled }
+
+    override func resetCursorRects() {
+        if isEnabled { addCursorRect(bounds, cursor: .pointingHand) }
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { needsDisplay = true }
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned { needsDisplay = true }
+        return resigned
+    }
+
+    private func activate() {
+        guard isEnabled else { return }
+        isOn.toggle()
+        onChange?(isOn)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
+        window?.makeFirstResponder(self)
+        activate()
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == UInt16(kVK_Space) || event.keyCode == UInt16(kVK_Return) {
+            activate()
+        } else {
+            super.keyDown(with: event)
+        }
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        guard isEnabled else { return false }
+        activate()
+        return true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let dim: CGFloat = isEnabled ? 1 : 0.30
+        let pill = bounds.insetBy(dx: 1, dy: 1)
+        (isOn ? NSColor.systemGreen : NSColor.tertiaryLabelColor)
+            .withAlphaComponent(dim).setFill()
+        NSBezierPath(roundedRect: pill, xRadius: pill.height / 2, yRadius: pill.height / 2).fill()
+        let knobDiameter = pill.height - 6
+        let knobX = isOn ? pill.maxX - knobDiameter - 3 : pill.minX + 3
+        NSColor.white.withAlphaComponent(dim).setFill()
+        NSBezierPath(ovalIn: NSRect(x: knobX, y: pill.minY + 3, width: knobDiameter, height: knobDiameter)).fill()
+        if isEnabled && window?.firstResponder === self {
+            NSColor.keyboardFocusIndicatorColor.setStroke()
+            let focus = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: bounds.height / 2, yRadius: bounds.height / 2)
+            focus.lineWidth = 2
+            focus.stroke()
+        }
+    }
+}
+
+// MARK: - CheckboxView (compact box + label, for the thumb-wheel row)
+
+final class CheckboxView: NSView {
+    var isOn: Bool { didSet { needsDisplay = true } }
+    // Greyed + non-interactive when false (e.g. browser options while Tab Switching is off).
+    var isEnabled: Bool = true { didSet { needsDisplay = true } }
+    let label: String
+    var onChange: ((Bool) -> Void)?
+
+    init(label: String, isOn: Bool, frame: NSRect) {
+        self.label = label
+        self.isOn = isOn
+        super.init(frame: frame)
+    }
+    required init?(coder: NSCoder) { nil }
+    override var isFlipped: Bool { true }
+
+    override func resetCursorRects() {
+        if isEnabled { addCursorRect(bounds, cursor: .pointingHand) }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
+        isOn.toggle()
+        onChange?(isOn)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let dim: CGFloat = isEnabled ? 1.0 : 0.3
+        let side: CGFloat = 16
+        let box = NSRect(x: 0, y: (bounds.height - side) / 2, width: side, height: side)
+        let path = NSBezierPath(roundedRect: box, xRadius: 4, yRadius: 4)
+        if isOn {
+            NSColor.systemGreen.withAlphaComponent(dim).setFill()
+            path.fill()
+            // checkmark
+            let check = NSBezierPath()
+            check.move(to: NSPoint(x: box.minX + 4, y: box.midY + 0.5))
+            check.line(to: NSPoint(x: box.minX + 7, y: box.maxY - 5))
+            check.line(to: NSPoint(x: box.maxX - 3.5, y: box.minY + 4.5))
+            NSColor.white.withAlphaComponent(dim).setStroke()
+            check.lineWidth = 2
+            check.lineCapStyle = .round
+            check.lineJoinStyle = .round
+            check.stroke()
+        } else {
+            NSColor.tertiaryLabelColor.withAlphaComponent(dim).setStroke()
+            path.lineWidth = 1.5
+            path.stroke()
+        }
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+            .foregroundColor: NSColor.appTextPrimary.withAlphaComponent(dim)
+        ]
+        label.draw(at: NSPoint(x: box.maxX + 6, y: (bounds.height - 15) / 2), withAttributes: attrs)
+    }
+}
+
+// MARK: - ConflictBadgeView
+
+final class ConflictBadgeView: NSView {
+    var status: ShortcutConflictStatus { didSet { needsDisplay = true } }
+
+    init(status: ShortcutConflictStatus, frame: NSRect) {
+        self.status = status
+        super.init(frame: frame)
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let color: NSColor
+        switch status {
+        case .ok: color = .systemGreen
+        case .duplicate: color = .systemRed
+        case .mayConflict: color = .systemOrange
+        case .unavailable: color = .systemGray
+        }
+        // All four statuses are a tinted pill for a consistent column. OK additionally
+        // gets a green checkmark before the label so it reads as "good" at a glance.
+        // The pill hugs its content (checkmark + label) rather than filling the full
+        // slot, so "OK" stays small and only "May Conflict" grows — left-aligned so the
+        // status column lines up.
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.boldSystemFont(ofSize: 11),
+            .foregroundColor: color
+        ]
+        let text = status.badgeText as NSString
+        let textSize = text.size(withAttributes: attrs)
+        let hpad: CGFloat = 9
+        let checkW: CGFloat = 11, gap: CGFloat = 4
+        let contentW = (status == .ok) ? (checkW + gap + textSize.width) : textSize.width
+        let ph = bounds.height
+        let pill = NSRect(x: 0, y: 0, width: contentW + hpad * 2, height: ph)
+        color.withAlphaComponent(0.15).setFill()
+        NSBezierPath(roundedRect: pill, xRadius: ph / 2, yRadius: ph / 2).fill()
+
+        let midY = pill.midY
+        if status == .ok {
+            let cx = hpad
+            let check = NSBezierPath()
+            check.move(to: NSPoint(x: cx, y: midY + checkW * 0.04))
+            check.line(to: NSPoint(x: cx + checkW * 0.36, y: midY - checkW * 0.30))
+            check.line(to: NSPoint(x: cx + checkW, y: midY + checkW * 0.40))
+            color.setStroke()
+            check.lineWidth = 2
+            check.lineCapStyle = .round
+            check.lineJoinStyle = .round
+            check.stroke()
+            text.draw(at: NSPoint(x: cx + checkW + gap, y: midY - textSize.height / 2), withAttributes: attrs)
+        } else {
+            text.draw(at: NSPoint(x: hpad, y: midY - textSize.height / 2), withAttributes: attrs)
+        }
+    }
+}
+
+// MARK: - ShortcutRecorderView
+
+final class ShortcutRecorderView: NSView {
+    var combo: KeyCombo {
+        didSet {
+            setAccessibilityValue(combo.displayString)
+            needsDisplay = true
+        }
+    }
+    private var displayOverride: String?
+    private let displayOverrideResolver: ((KeyCombo) -> String?)?
+    var onChange: ((KeyCombo) -> Void)?
+
+    private var isRecording = false
+    private var localMonitor: Any?
+    private var blinkTimer: Timer?
+    private var caretVisible = true
+    private static weak var activeRecorder: ShortcutRecorderView?
+    var isEnabled: Bool = true {
+        didSet {
+            setAccessibilityEnabled(isEnabled)
+            if !isEnabled {
+                cancelRecording()
+                if window?.firstResponder === self {
+                    window?.makeFirstResponder(nil)
+                }
+            }
+            needsDisplay = true
+            window?.invalidateCursorRects(for: self)
+        }
+    }
+
+    init(
+        combo: KeyCombo,
+        displayOverride: String? = nil,
+        displayOverrideResolver: ((KeyCombo) -> String?)? = nil,
+        frame: NSRect
+    ) {
+        self.combo = combo
+        self.displayOverride = displayOverride
+        self.displayOverrideResolver = displayOverrideResolver
+        super.init(frame: frame)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel("Shortcut recorder")
+        setAccessibilityValue(displayOverride ?? combo.displayString)
+        setAccessibilityEnabled(true)
+        setAccessibilityHelp("Press to record a shortcut, then type a key with at least one modifier.")
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override var acceptsFirstResponder: Bool { isEnabled }
+
+    override func resetCursorRects() {
+        if isEnabled { addCursorRect(bounds, cursor: .pointingHand) }
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { needsDisplay = true }
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned { needsDisplay = true }
+        return resigned
+    }
+
+    deinit {
+        if let monitor = localMonitor { NSEvent.removeMonitor(monitor) }
+        blinkTimer?.invalidate()
+        if ShortcutRecorderView.activeRecorder === self { ShortcutRecorderView.activeRecorder = nil }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
+        window?.makeFirstResponder(self)
+        if isRecording { cancelRecording() } else { beginRecording() }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        guard isEnabled else { return }
+        if !isRecording,
+           event.keyCode == UInt16(kVK_Space) || event.keyCode == UInt16(kVK_Return) {
+            beginRecording()
+        } else {
+            super.keyDown(with: event)
+        }
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        guard isEnabled else { return false }
+        if isRecording { cancelRecording() } else { beginRecording() }
+        return true
+    }
+
+    private func beginRecording() {
+        guard isEnabled else { return }
+        ShortcutRecorderView.activeRecorder?.cancelRecording()
+        ShortcutRecorderView.activeRecorder = self
+        isRecording = true
+        caretVisible = true
+        needsDisplay = true
+        // Blinking caret while recording, in place of any placeholder text.
+        blinkTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            self.caretVisible.toggle()
+            self.needsDisplay = true
+        }
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged, .leftMouseDown, .rightMouseDown]) { [weak self] event in
+            guard let self = self else { return event }
+            return self.handleRecordingEvent(event)
+        }
+    }
+
+    /// Returns the event to let it keep propagating, or nil to swallow it. Swallowing
+    /// keyDown here (returning nil) is what prevents standard menu key equivalents
+    /// (Cmd-Q, Cmd-W, Cmd-Comma, etc.) from firing while a recorder is active — those
+    /// are normally dispatched by NSApplication/NSMenu BEFORE the responder chain's
+    /// keyDown(_:), so overriding keyDown alone would not intercept them.
+    private func handleRecordingEvent(_ event: NSEvent) -> NSEvent? {
+        // A click anywhere outside this recorder cancels recording and tears down the
+        // monitor, then lets the click through — otherwise clicking a footer button or
+        // empty chrome without pressing a key would leave the monitor installed,
+        // swallowing all subsequent keyboard input (including Cmd-Q/Cmd-W) app-wide.
+        if event.type == .leftMouseDown || event.type == .rightMouseDown {
+            let pointInView = convert(event.locationInWindow, from: nil)
+            if !bounds.contains(pointInView) {
+                cancelRecording()
+            }
+            return event
+        }
+        if event.type == .flagsChanged {
+            needsDisplay = true   // live modifier preview while held, still swallowed
+            return nil
+        }
+        guard event.type == .keyDown else { return event }
+
+        if Int(event.keyCode) == kVK_Escape {
+            cancelRecording()
+            return nil
+        }
+
+        let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        guard !flags.isEmpty else {
+            // Bare key with no modifier: reject, stay in recording mode, beep.
+            NSSound.beep()
+            return nil
+        }
+
+        let displayChar = KeyCombo.baseLabel(forKeyCode: event.keyCode)
+            ?? event.charactersIgnoringModifiers.flatMap { $0.isEmpty ? nil : $0.uppercased() }
+            ?? "#\(event.keyCode)"
+
+        let newCombo = KeyCombo(
+            keyCode: event.keyCode,
+            keyDisplay: displayChar,
+            command: flags.contains(.command),
+            option: flags.contains(.option),
+            control: flags.contains(.control),
+            shift: flags.contains(.shift)
+        )
+        combo = newCombo
+        displayOverride = displayOverrideResolver?(newCombo)
+        setAccessibilityValue(displayOverride ?? newCombo.displayString)
+        endRecording()
+        onChange?(newCombo)
+        return nil
+    }
+
+    private func cancelRecording() { endRecording() }
+
+    func setCombo(_ newCombo: KeyCombo) {
+        cancelRecording()
+        combo = newCombo
+        displayOverride = displayOverrideResolver?(newCombo)
+        setAccessibilityValue(displayOverride ?? newCombo.displayString)
+    }
+
+    private func endRecording() {
+        isRecording = false
+        if let monitor = localMonitor {
+            NSEvent.removeMonitor(monitor)
+            localMonitor = nil
+        }
+        blinkTimer?.invalidate()
+        blinkTimer = nil
+        if ShortcutRecorderView.activeRecorder === self { ShortcutRecorderView.activeRecorder = nil }
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        // While recording, show only a blinking caret (no placeholder text). Otherwise
+        // show the current combo.
+        let text = isRecording ? (caretVisible ? "|" : "") : (displayOverride ?? combo.displayString)
+        let dim: CGFloat = isEnabled ? 1 : 0.35
+        let borderColor = isRecording
+            ? NSColor.controlAccentColor
+            : NSColor.controlAccentColor.withAlphaComponent(0.22 * dim)
+        NSColor.controlAccentColor.withAlphaComponent((isRecording ? 0.16 : 0.10) * dim).setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 7, yRadius: 7).fill()
+        borderColor.setStroke()
+        let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 7, yRadius: 7)
+        border.lineWidth = 1
+        border.stroke()
+        if isEnabled && window?.firstResponder === self && !isRecording {
+            NSColor.keyboardFocusIndicatorColor.setStroke()
+            let focus = NSBezierPath(roundedRect: bounds.insetBy(dx: 1.5, dy: 1.5), xRadius: 6, yRadius: 6)
+            focus.lineWidth = 2
+            focus.stroke()
+        }
+        // Proportional font + letter-spacing so the ⌘⌥⌃⇧ glyphs breathe (monospaced
+        // crammed them together), vertically centered with comfortable left padding.
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: displayOverride == nil ? 14 : 13, weight: .medium),
+            .foregroundColor: NSColor.appTextPrimary.withAlphaComponent(dim),
+            .kern: displayOverride == nil ? 2.5 : 0.4
+        ]
+        let ts = (text as NSString).size(withAttributes: attrs)
+        (text as NSString).draw(at: NSPoint(x: bounds.minX + 12, y: bounds.midY - ts.height / 2), withAttributes: attrs)
+    }
+}
+
+// MARK: - Row containers
+
+/// Compact reset affordance placed directly after each shortcut field.
+final class ShortcutResetButton: NSButton {
+    var onPress: (() -> Void)?
+
+    init(title: String, frame: NSRect) {
+        super.init(frame: frame)
+        self.title = ""
+        isBordered = false
+        imagePosition = .imageOnly
+        imageScaling = .scaleProportionallyDown
+        image = NSImage(
+            systemSymbolName: "arrow.counterclockwise",
+            accessibilityDescription: "Reset to default"
+        )?.withSymbolConfiguration(.init(pointSize: 12, weight: .medium))
+        contentTintColor = .appTextSecondary
+        toolTip = "Reset to default shortcut"
+        setAccessibilityLabel("Reset \(title) shortcut to default")
+        setAccessibilityHelp("Restore the original Klik PRO key combination.")
+        target = self
+        action = #selector(pressed)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func resetCursorRects() {
+        if isEnabled { addCursorRect(bounds, cursor: .pointingHand) }
+    }
+
+    @objc private func pressed() {
+        onPress?()
+    }
+}
+
+/// Native footer action used while the user temporarily reviews Mappings from the
+/// welcome sheet. Keeping this as an NSButton provides keyboard/VoiceOver behavior
+/// without adding another layer-backed custom control to deterministic previews.
+final class FooterActionButton: NSButton {
+    var onPress: (() -> Void)?
+
+    init(title: String, frame: NSRect) {
+        super.init(frame: frame)
+        self.title = title
+        bezelStyle = .rounded
+        controlSize = .regular
+        font = .systemFont(ofSize: 12, weight: .semibold)
+        contentTintColor = .controlAccentColor
+        target = self
+        action = #selector(pressed)
+        setAccessibilityLabel(title)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    @objc private func pressed() {
+        onPress?()
+    }
+}
+
+/// Primary footer button with a branded pointer-hover treatment. It remains a native
+/// NSButton for keyboard and VoiceOver activation: blue at rest, Klik PRO green with
+/// a black outline while hovered.
+final class PrimaryHoverButton: NSButton {
+    var onPress: (() -> Void)?
+    private var hoverTrackingArea: NSTrackingArea?
+    private var isHovered = false
+
+    init(title: String, frame: NSRect) {
+        super.init(frame: frame)
+        self.title = title
+        isBordered = false
+        font = .boldSystemFont(ofSize: 14)
+        target = self
+        action = #selector(pressed)
+        setAccessibilityLabel(title)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func resetCursorRects() {
+        if isEnabled {
+            addCursorRect(bounds, cursor: .pointingHand)
+        }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea = hoverTrackingArea {
+            removeTrackingArea(hoverTrackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        setHovered(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        setHovered(false)
+    }
+
+    private func setHovered(_ hovered: Bool) {
+        guard isHovered != hovered else { return }
+        isHovered = hovered
+        needsDisplay = true
+    }
+
+    func showHoverPreview() {
+        guard previewRenderingIsActive else { return }
+        setHovered(true)
+    }
+
+    @objc private func pressed() {
+        onPress?()
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let accent = NSColor.controlAccentColor
+        let fill = !isEnabled
+            ? accent.withAlphaComponent(0.42)
+            : (isHovered ? KlikProBrand.green : accent)
+        fill.setFill()
+        let pill = NSBezierPath(
+            roundedRect: bounds.insetBy(dx: 1, dy: 1),
+            xRadius: (bounds.height - 2) / 2,
+            yRadius: (bounds.height - 2) / 2
+        )
+        pill.fill()
+
+        if isHovered && isEnabled {
+            NSColor.black.setStroke()
+            pill.lineWidth = 1.5
+            pill.stroke()
+        }
+
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font ?? .boldSystemFont(ofSize: 14),
+            .foregroundColor: NSColor.white.withAlphaComponent(isEnabled ? 1 : 0.78),
+        ]
+        let text = title as NSString
+        let size = text.size(withAttributes: attributes)
+        text.draw(
+            at: NSPoint(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2),
+            withAttributes: attributes
+        )
+    }
+}
+
+private enum ShortcutRowLayout {
+    static let actionX: CGFloat = 158
+    static let actionWidth: CGFloat = 156
+    static let recorderX: CGFloat = 330
+    static let recorderWidth: CGFloat = 104
+    static let resetX: CGFloat = 438
+    static let resetWidth: CGFloat = 20
+    static let badgeX: CGFloat = 464
+    static let badgeWidth: CGFloat = 90
+    static let linkedFieldWidth: CGFloat = 360
+    static let linkedLockSize: CGFloat = 12
+    static let linkedLockGap: CGFloat = 6
+    static let dormantLinkIconSize: CGFloat = 10
+    static let dormantLinkGap: CGFloat = 6
+    static var dormantLinkX: CGFloat {
+        recorderX - dormantLinkGap - dormantLinkIconSize
+    }
+}
+
+final class RecordableShortcutRowView: NSView {
+    let titleLabel: String
+    let toggle: ToggleSwitchView
+    let recorder: ShortcutRecorderView
+    let resetButton: ShortcutResetButton
+    let badge: ConflictBadgeView
+    let actionPicker = NSPopUpButton(frame: .zero)
+    let appPicker = NSPopUpButton(frame: .zero)
+    var onToggleChange: ((Bool) -> Void)?
+    var onComboChange: ((KeyCombo) -> Void)?
+    var onOpenAppChange: ((UUID?) -> Void)?
+    private let defaultCombo: KeyCombo
+    private var linkedTarget: QuickLaunchTarget?
+    private var linkedCombo: KeyCombo?
+    private var linkedFeatureActive = false
+    private var linkedTargetReadiness: QuickLaunchTargetReadiness = .appNotInstalled
+    private var appTargets: [AppProfileInstance] = []
+    private var assignedAppID: UUID?
+    private var updatingActionControls = false
+    private var usesCompactTwoLineLayout = false
+
+    init(
+        title: String,
+        mapping: ShortcutMapping,
+        defaultCombo: KeyCombo,
+        status: ShortcutConflictStatus,
+        displayOverride: String? = nil,
+        displayOverrideResolver: ((KeyCombo) -> String?)? = nil,
+        frame: NSRect
+    ) {
+        self.titleLabel = title
+        self.defaultCombo = defaultCombo
+        // Compact layout so a full row (toggle + title + recorder + badge) fits in a
+        // half-width (~400pt) column.
+        self.toggle = ToggleSwitchView(isOn: mapping.enabled, frame: NSRect(x: 0, y: (frame.height - 22) / 2, width: 40, height: 22))
+        self.recorder = ShortcutRecorderView(
+            combo: mapping.combo,
+            displayOverride: displayOverride,
+            displayOverrideResolver: displayOverrideResolver,
+            frame: NSRect(
+                x: ShortcutRowLayout.recorderX,
+                y: (frame.height - 32) / 2,
+                width: ShortcutRowLayout.recorderWidth,
+                height: 32
+            )
+        )
+        self.resetButton = ShortcutResetButton(
+            title: title,
+            frame: NSRect(
+                x: ShortcutRowLayout.resetX,
+                y: (frame.height - 28) / 2,
+                width: ShortcutRowLayout.resetWidth,
+                height: 28
+            )
+        )
+        self.badge = ConflictBadgeView(
+            status: status,
+            frame: NSRect(
+                x: ShortcutRowLayout.badgeX,
+                y: (frame.height - 22) / 2,
+                width: ShortcutRowLayout.badgeWidth,
+                height: 22
+            )
+        )
+        super.init(frame: frame)
+        actionPicker.frame = NSRect(
+            x: ShortcutRowLayout.actionX, y: (frame.height - 30) / 2,
+            width: ShortcutRowLayout.actionWidth, height: 30
+        )
+        actionPicker.addItems(withTitles: ["Shortcut", "Open App"])
+        // A keyboard glyph stands in for "Keyboard" so the option reads "⌨ Shortcut"
+        // in full instead of truncating, letting the picker be narrower.
+        actionPicker.item(at: 0)?.image = NSImage(
+            systemSymbolName: "keyboard", accessibilityDescription: "Keyboard shortcut"
+        )
+        // Pair a "launch app" glyph with the keyboard glyph so both options read
+        // as icon + label rather than one icon and one bare word.
+        actionPicker.item(at: 1)?.image = NSImage(
+            systemSymbolName: "arrow.up.forward.app", accessibilityDescription: "Open app"
+        )
+        actionPicker.target = self
+        actionPicker.action = #selector(actionModeChanged)
+        appPicker.frame = NSRect(
+            x: ShortcutRowLayout.recorderX, y: (frame.height - 30) / 2,
+            width: 260, height: 30
+        )
+        appPicker.target = self
+        appPicker.action = #selector(appTargetChanged)
+        appPicker.isHidden = true
+        addSubview(toggle); addSubview(actionPicker); addSubview(recorder)
+        addSubview(resetButton); addSubview(badge); addSubview(appPicker)
+        toggle.setAccessibilityLabel("\(title) enabled")
+        recorder.setAccessibilityLabel("\(title) shortcut")
+        toggle.onChange = { [weak self] on in self?.onToggleChange?(on) }
+        recorder.onChange = { [weak self] combo in self?.onComboChange?(combo) }
+        resetButton.onPress = { [weak self] in
+            guard let self = self,
+                  self.recorder.combo.signature != self.defaultCombo.signature else { return }
+            self.recorder.setCombo(self.defaultCombo)
+            self.onComboChange?(self.defaultCombo)
+        }
+    }
+    required init?(coder: NSCoder) { nil }
+    override var isFlipped: Bool { true }
+
+    /// Fits the complete action picker, shortcut/app target, reset, and conflict state
+    /// inside the approved half-width Mappings column without removing behavior.
+    func applyCompactTwoLineLayout() {
+        usesCompactTwoLineLayout = true
+        toggle.frame = NSRect(x: 0, y: 6, width: 40, height: 22)
+        badge.frame = NSRect(x: 273, y: 6, width: 86, height: 22)
+        actionPicker.frame = NSRect(x: 48, y: 34, width: 120, height: 30)
+        recorder.frame = NSRect(x: 176, y: 33, width: 145, height: 32)
+        resetButton.frame = NSRect(x: 329, y: 34, width: 20, height: 28)
+        appPicker.frame = NSRect(x: 176, y: 34, width: 173, height: 30)
+        needsDisplay = true
+    }
+
+    func setOpenAppOptions(_ instances: [AppProfileInstance], assignedID: UUID?) {
+        updatingActionControls = true
+        appTargets = instances
+        assignedAppID = assignedID
+        appPicker.removeAllItems()
+        instances.forEach { appPicker.addItem(withTitle: $0.label) }
+        if let assignedID, let index = instances.firstIndex(where: { $0.id == assignedID }) {
+            actionPicker.selectItem(at: 1)
+            appPicker.selectItem(at: index)
+            recorder.isHidden = true
+            resetButton.isHidden = true
+            badge.isHidden = true
+            appPicker.isHidden = false
+        } else {
+            actionPicker.selectItem(at: 0)
+            recorder.isHidden = false
+            resetButton.isHidden = false
+            badge.isHidden = false
+            appPicker.isHidden = true
+        }
+        toggle.isHidden = false
+        updatingActionControls = false
+        needsDisplay = true
+    }
+
+    @objc private func actionModeChanged() {
+        guard !updatingActionControls else { return }
+        if actionPicker.indexOfSelectedItem == 0 {
+            onOpenAppChange?(nil)
+        } else if let first = appTargets.first {
+            appPicker.selectItem(at: 0)
+            onOpenAppChange?(first.id)
+        } else {
+            NSSound.beep()
+            actionPicker.selectItem(at: 0)
+        }
+    }
+
+    @objc private func appTargetChanged() {
+        guard !updatingActionControls,
+              appPicker.indexOfSelectedItem >= 0,
+              appPicker.indexOfSelectedItem < appTargets.count else { return }
+        onOpenAppChange?(appTargets[appPicker.indexOfSelectedItem].id)
+    }
+
+    func setLinked(
+        to target: QuickLaunchTarget?,
+        combo: KeyCombo? = nil,
+        specialFeatureActive: Bool = false,
+        targetReadiness: QuickLaunchTargetReadiness = .appNotInstalled
+    ) {
+        guard assignedAppID == nil else { return }
+        linkedTarget = target
+        linkedCombo = combo
+        linkedFeatureActive = specialFeatureActive
+        linkedTargetReadiness = targetReadiness
+        toggle.isHidden = false
+        recorder.isHidden = false
+        resetButton.isHidden = false
+        badge.isHidden = false
+        setAccessibilityElement(false)
+        if let target = target {
+            let state = targetReadiness == .ready
+                ? "Special Feature is off."
+                : targetReadiness.explanation
+            let help = "Normal action is active; assigned to \(target.title) when available and enabled. \(state)"
+            toolTip = "\(target.title) assignment dormant — \(state) Normal action is active."
+            toggle.setAccessibilityHelp(help)
+            recorder.setAccessibilityHelp(help)
+        } else {
+            toolTip = nil
+            toggle.setAccessibilityHelp("Enable or disable \(titleLabel).")
+            recorder.setAccessibilityHelp("Record the keyboard shortcut for \(titleLabel).")
+        }
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+            .foregroundColor: NSColor.appTextPrimary
+        ]
+        let titleY = usesCompactTwoLineLayout ? 9 : (bounds.height - 15) / 2
+        titleLabel.draw(at: NSPoint(x: 48, y: titleY), withAttributes: attrs)
+        guard linkedTarget != nil,
+              let link = NSImage(systemSymbolName: "link", accessibilityDescription: nil) else { return }
+        let iconSize = ShortcutRowLayout.dormantLinkIconSize
+        link.draw(
+            in: NSRect(
+                x: ShortcutRowLayout.dormantLinkX,
+                y: bounds.midY - iconSize / 2,
+                width: iconSize,
+                height: iconSize
+            ),
+            from: .zero,
+            operation: .sourceOver,
+            fraction: linkedFeatureActive && linkedTargetReadiness == .ready ? 0.72 : 0.42
+        )
+    }
+}
+
+// Like RecordableShortcutRowView but with no enable/disable toggle — the combo is
+// always active (its on/off is governed elsewhere, e.g. by the Special Feature master
+// toggle). Still editable via the recorder, and still shows a conflict badge.
+final class RecorderOnlyRowView: NSView {
+    let titleLabel: String
+    let recorder: ShortcutRecorderView
+    let resetButton: ShortcutResetButton
+    let badge: ConflictBadgeView
+    var onComboChange: ((KeyCombo) -> Void)?
+    private let defaultCombo: KeyCombo
+    private var readiness: QuickLaunchTargetReadiness = .ready
+    private var conflictStatus: ShortcutConflictStatus
+
+    init(
+        title: String,
+        mapping: ShortcutMapping,
+        defaultCombo: KeyCombo,
+        status: ShortcutConflictStatus,
+        frame: NSRect
+    ) {
+        self.titleLabel = title
+        self.defaultCombo = defaultCombo
+        self.conflictStatus = status
+        // Same recorder/badge x-positions as RecordableShortcutRowView so rows line up
+        // in the same column; the title just starts where the toggle would have been.
+        self.recorder = ShortcutRecorderView(
+            combo: mapping.combo,
+            frame: NSRect(
+                x: ShortcutRowLayout.recorderX,
+                y: (frame.height - 32) / 2,
+                width: ShortcutRowLayout.recorderWidth,
+                height: 32
+            )
+        )
+        self.resetButton = ShortcutResetButton(
+            title: title,
+            frame: NSRect(
+                x: ShortcutRowLayout.resetX,
+                y: (frame.height - 28) / 2,
+                width: ShortcutRowLayout.resetWidth,
+                height: 28
+            )
+        )
+        self.badge = ConflictBadgeView(
+            status: status,
+            frame: NSRect(
+                x: ShortcutRowLayout.badgeX,
+                y: (frame.height - 22) / 2,
+                width: ShortcutRowLayout.badgeWidth,
+                height: 22
+            )
+        )
+        super.init(frame: frame)
+        addSubview(recorder); addSubview(resetButton); addSubview(badge)
+        recorder.setAccessibilityLabel("\(title) shortcut")
+        recorder.onChange = { [weak self] combo in self?.onComboChange?(combo) }
+        resetButton.onPress = { [weak self] in
+            guard let self = self,
+                  self.recorder.combo.signature != self.defaultCombo.signature else { return }
+            self.recorder.setCombo(self.defaultCombo)
+            self.onComboChange?(self.defaultCombo)
+        }
+    }
+    required init?(coder: NSCoder) { nil }
+    override var isFlipped: Bool { true }
+
+    func setReadiness(_ readiness: QuickLaunchTargetReadiness) {
+        self.readiness = readiness
+        let ready = readiness == .ready
+        recorder.isEnabled = ready
+        resetButton.isEnabled = ready
+        window?.invalidateCursorRects(for: resetButton)
+        recorder.toolTip = readiness.explanation
+        recorder.setAccessibilityHelp(readiness.explanation)
+        badge.status = ready ? conflictStatus : .unavailable
+        needsDisplay = true
+    }
+
+    func setConflictStatus(_ status: ShortcutConflictStatus) {
+        conflictStatus = status
+        badge.status = readiness == .ready ? status : .unavailable
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let dim: CGFloat = readiness == .ready ? 1 : 0.45
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+            .foregroundColor: NSColor.appTextPrimary.withAlphaComponent(dim)
+        ]
+        titleLabel.draw(at: NSPoint(x: 0, y: (bounds.height - 15) / 2), withAttributes: attrs)
+    }
+}
+
+/// Native, keyboard-accessible selector for assigning one Special Feature launcher to
+/// a physical mouse button. A button already owned by the other launcher is disabled.
+final class QuickLaunchButtonPickerView: NSView {
+    private let titleLabel: String
+    private let target: QuickLaunchTarget
+    private var readiness: QuickLaunchTargetReadiness = .ready
+    private var conflictingButton: QuickLaunchMouseButton?
+    private var conflictingOwner: QuickLaunchTarget?
+    let popup: NSPopUpButton
+    var onSelectionChange: ((QuickLaunchMouseButton?) -> Void)?
+
+    init(
+        title: String,
+        target: QuickLaunchTarget,
+        selection: QuickLaunchMouseButton?,
+        frame: NSRect
+    ) {
+        titleLabel = title
+        self.target = target
+        // Leave a deliberate visual gap below the label. The previous 1pt gap made
+        // the title and native pop-up control read as though they were touching.
+        popup = NSPopUpButton(frame: NSRect(x: 0, y: 20, width: frame.width, height: 26), pullsDown: false)
+        super.init(frame: frame)
+        popup.controlSize = .small
+        popup.font = NSFont.systemFont(ofSize: 12)
+        popup.addItem(withTitle: "None")
+        popup.lastItem?.tag = 0
+        for (index, button) in QuickLaunchMouseButton.allCases.enumerated() {
+            popup.addItem(withTitle: button.title)
+            popup.lastItem?.tag = index + 1
+        }
+        popup.target = self
+        popup.action = #selector(selectionDidChange)
+        popup.setAccessibilityLabel("\(target.title) mouse button")
+        popup.setAccessibilityHelp("Choose which mouse button opens \(target.title).")
+        addSubview(popup)
+        setSelection(selection)
+    }
+
+    required init?(coder: NSCoder) { nil }
+    override var isFlipped: Bool { true }
+
+    var selection: QuickLaunchMouseButton? {
+        let tag = popup.selectedTag()
+        guard tag > 0 else { return nil }
+        return QuickLaunchMouseButton.allCases[tag - 1]
+    }
+
+    func setSelection(_ selection: QuickLaunchMouseButton?) {
+        let tag = selection.flatMap { QuickLaunchMouseButton.allCases.firstIndex(of: $0) }.map { $0 + 1 } ?? 0
+        popup.selectItem(withTag: tag)
+        refreshAvailability()
+    }
+
+    func setReadiness(_ readiness: QuickLaunchTargetReadiness) {
+        self.readiness = readiness
+        refreshAvailability()
+        needsDisplay = true
+    }
+
+    func setUnavailable(_ button: QuickLaunchMouseButton?, owner: QuickLaunchTarget) {
+        conflictingButton = button
+        conflictingOwner = owner
+        refreshAvailability()
+    }
+
+    private func refreshAvailability() {
+        let currentSelection = selection
+        let ready = readiness == .ready
+        let repairOnly = !ready && currentSelection != nil
+        let help: String
+        if repairOnly {
+            help = "\(readiness.explanation) Choose None to clear this assignment."
+        } else if ready {
+            help = "Choose which mouse button opens \(target.title)."
+        } else {
+            help = readiness.explanation
+        }
+
+        popup.isEnabled = quickLaunchMousePickerIsEnabled(
+            readiness: readiness,
+            selection: currentSelection
+        )
+        popup.toolTip = help
+        popup.setAccessibilityHelp(help)
+        popup.setAccessibilityLabel(
+            ready
+                ? "\(target.title) mouse button"
+                : "\(target.title) mouse button, \(readiness.shortLabel ?? "unavailable")"
+        )
+
+        let noneItem = popup.itemArray.first { $0.tag == 0 }
+        noneItem?.isEnabled = true
+        noneItem?.toolTip = repairOnly ? "Clear this assignment" : nil
+        for item in popup.itemArray where item.tag > 0 {
+            let value = QuickLaunchMouseButton.allCases[item.tag - 1]
+            if !ready {
+                item.isEnabled = value == currentSelection
+                item.toolTip = value == currentSelection
+                    ? "Current assignment; choose None to clear it"
+                    : readiness.explanation
+                continue
+            }
+            let conflicts = value == conflictingButton && value != currentSelection
+            item.isEnabled = !conflicts
+            item.toolTip = conflicts
+                ? "Already assigned to \(conflictingOwner?.title ?? "the other launcher")"
+                : nil
+        }
+    }
+
+    @objc private func selectionDidChange() {
+        onSelectionChange?(selection)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let status = readiness.shortLabel
+        let statusAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
+            .foregroundColor: NSColor.systemOrange
+        ]
+        let statusSize = status.map {
+            ($0 as NSString).size(withAttributes: statusAttrs)
+        } ?? .zero
+        let titleStyle = NSMutableParagraphStyle()
+        titleStyle.lineBreakMode = .byTruncatingTail
+        let titleAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: status == nil ? 11.5 : 9.5, weight: .semibold),
+            .foregroundColor: NSColor.appTextPrimary.withAlphaComponent(
+                readiness == .ready ? 1 : 0.58
+            ),
+            .paragraphStyle: titleStyle
+        ]
+        let reservedStatusWidth = status == nil ? 0 : statusSize.width + 7
+        (titleLabel as NSString).draw(
+            in: NSRect(x: 0, y: 0, width: bounds.width - reservedStatusWidth, height: 14),
+            withAttributes: titleAttrs
+        )
+        guard let status = status else { return }
+        (status as NSString).draw(
+            at: NSPoint(x: bounds.maxX - statusSize.width, y: 1),
+            withAttributes: statusAttrs
+        )
+    }
+}
+
+// MARK: - InfoLinkView + Special Feature details popup
+
+/// A small link-styled, clickable label. Clicking it opens a modal popup that
+/// explains the Special Feature in full (what it is, settings, restrictions, why it
+/// exists, and a use-case scenario).
+final class InfoLinkView: NSView {
+    private let text = "What is this? Requirements & use cases ›"
+
+    override var isFlipped: Bool { true }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        SpecialFeatureInfo.showPopup()
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+            .foregroundColor: NSColor.controlAccentColor,
+            .underlineStyle: NSUnderlineStyle.single.rawValue
+        ]
+        (text as NSString).draw(at: NSPoint(x: 0, y: (bounds.height - 14) / 2), withAttributes: attrs)
+    }
+}
+
+// Renders the GitHub "Invertocat" mark from its official path (nominative use — links to
+// the project's repo). Drawn at runtime, not bundled as an asset file. GitHub and Ko-fi
+// are trademarks of their respective owners — see NOTICE.md.
+enum BrandMarks {
+    private static let githubMarkD = "M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"
+
+    static func github(size: CGFloat, color: NSColor) -> NSImage {
+        let path = parseSVGPath(githubMarkD)
+        return NSImage(size: NSSize(width: size, height: size), flipped: false) { _ in
+            let t = NSAffineTransform()
+            t.translateX(by: 0, yBy: size)
+            t.scaleX(by: size / 24, yBy: -size / 24)   // 24×24 viewBox; flip y (SVG is y-down)
+            t.concat()
+            color.setFill()
+            path.fill()
+            return true
+        }
+    }
+}
+
+// Minimal SVG path parser — supports M/m L/l C/c Z/z, enough for the marks used here.
+private func parseSVGPath(_ d: String) -> NSBezierPath {
+    let path = NSBezierPath()
+    let chars = Array(d); var i = 0; var cur = NSPoint.zero; var cmd: Character = " "
+    func skipSep() { while i < chars.count, chars[i] == " " || chars[i] == "," { i += 1 } }
+    func num() -> CGFloat {
+        skipSep(); var s = ""
+        if i < chars.count, chars[i] == "-" || chars[i] == "+" { s.append(chars[i]); i += 1 }
+        var dot = false
+        while i < chars.count {
+            let c = chars[i]
+            if c.isNumber { s.append(c); i += 1 }
+            else if c == "." && !dot { dot = true; s.append(c); i += 1 }
+            else { break }
+        }
+        return CGFloat(Double(s) ?? 0)
+    }
+    while i < chars.count {
+        skipSep(); guard i < chars.count else { break }
+        if chars[i].isLetter { cmd = chars[i]; i += 1; skipSep() }
+        switch cmd {
+        case "M", "m":
+            let x = num(), y = num()
+            cur = cmd == "M" ? NSPoint(x: x, y: y) : NSPoint(x: cur.x + x, y: cur.y + y)
+            path.move(to: cur); cmd = cmd == "M" ? "L" : "l"
+        case "L", "l":
+            let x = num(), y = num()
+            cur = cmd == "L" ? NSPoint(x: x, y: y) : NSPoint(x: cur.x + x, y: cur.y + y)
+            path.line(to: cur)
+        case "C", "c":
+            let a = num(), b = num(), c = num(), dd = num(), e = num(), f = num()
+            let c1: NSPoint, c2: NSPoint, end: NSPoint
+            if cmd == "C" { c1 = NSPoint(x: a, y: b); c2 = NSPoint(x: c, y: dd); end = NSPoint(x: e, y: f) }
+            else { c1 = NSPoint(x: cur.x + a, y: cur.y + b); c2 = NSPoint(x: cur.x + c, y: cur.y + dd); end = NSPoint(x: cur.x + e, y: cur.y + f) }
+            path.curve(to: end, controlPoint1: c1, controlPoint2: c2); cur = end
+        case "Z", "z":
+            path.close()
+        default:
+            _ = num()   // unknown param — consume to avoid an infinite loop
+        }
+    }
+    return path
+}
+
+private extension NSImage {
+    func tinted(_ color: NSColor) -> NSImage {
+        guard let img = self.copy() as? NSImage else { return self }
+        img.lockFocus(); color.set()
+        NSRect(origin: .zero, size: img.size).fill(using: .sourceAtop)
+        img.unlockFocus(); img.isTemplate = false
+        return img
+    }
+}
+
+// A small clickable footer element (optionally with an icon) that opens a URL — used for
+// the GitHub repo link and the Ko-fi support button in the bottom-right of the window.
+final class URLLinkView: NSView {
+    enum Style { case link, pill, outline }
+    var title: String {
+        didSet {
+            setAccessibilityLabel(title)
+            needsDisplay = true
+        }
+    }
+    private let url: URL?
+    private let style: Style
+    private let fill: NSColor
+    private let icon: NSImage?
+    var onClick: (() -> Void)?
+    private var hoverTrackingArea: NSTrackingArea?
+    private var isHovered = false
+
+    private let alignRight: Bool
+
+    init(title: String, urlString: String, style: Style, fill: NSColor = .controlAccentColor,
+         icon: NSImage? = nil, alignRight: Bool = true, frame: NSRect) {
+        self.title = title; self.url = URL(string: urlString); self.style = style
+        self.fill = fill; self.icon = icon; self.alignRight = alignRight
+        super.init(frame: frame)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel(title)
+        if style == .outline {
+            wantsLayer = true
+            layer?.backgroundColor = NSColor.clear.cgColor
+            layer?.cornerCurve = .continuous
+        }
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override var isFlipped: Bool { true }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+
+    override func layout() {
+        super.layout()
+        if style == .outline {
+            layer?.cornerRadius = bounds.height / 2
+        }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea = hoverTrackingArea {
+            removeTrackingArea(hoverTrackingArea)
+        }
+        guard style == .outline else {
+            hoverTrackingArea = nil
+            return
+        }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        setHovered(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        setHovered(false)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        guard style == .outline else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer?.backgroundColor = hoverBackgroundColor
+        CATransaction.commit()
+    }
+
+    private var hoverBackgroundColor: CGColor {
+        (isHovered
+            ? NSColor.appTextPrimary.withAlphaComponent(0.085)
+            : NSColor.clear
+        ).cgColor
+    }
+
+    private func setHovered(_ hovered: Bool) {
+        guard style == .outline, isHovered != hovered else { return }
+        isHovered = hovered
+
+        let animation = CABasicAnimation(keyPath: "backgroundColor")
+        animation.fromValue = layer?.presentation()?.backgroundColor ?? layer?.backgroundColor
+        animation.toValue = hoverBackgroundColor
+        animation.duration = 0.14
+        animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        layer?.add(animation, forKey: "supportButtonHover")
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer?.backgroundColor = hoverBackgroundColor
+        CATransaction.commit()
+        needsDisplay = true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if let onClick = onClick {
+            onClick()
+        } else if let url = url {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let textColor: NSColor
+        switch style {
+        case .pill: textColor = .white
+        case .outline: textColor = .appTextPrimary
+        case .link: textColor = .appTextSecondary
+        }
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12, weight: .semibold), .foregroundColor: textColor
+        ]
+        let iconSize: CGFloat = 15, gap: CGFloat = 6
+        let textSize = (title as NSString).size(withAttributes: attrs)
+        let iconW: CGFloat = icon != nil ? iconSize + gap : 0
+        let groupW = iconW + textSize.width
+        switch style {
+        case .pill:
+            fill.setFill()
+            NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
+        case .outline:
+            (isHovered
+                ? NSColor.appTextPrimary.withAlphaComponent(0.22)
+                : NSColor.separatorColor
+            ).setStroke()
+            let p = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: bounds.height / 2, yRadius: bounds.height / 2)
+            p.lineWidth = 1; p.stroke()
+        case .link:
+            break
+        }
+        let centered = style == .pill || style == .outline
+        let startX = centered ? (bounds.width - groupW) / 2 : (alignRight ? (bounds.width - groupW) : 0)
+        let midY = bounds.height / 2
+        if let icon = icon {
+            icon.draw(in: NSRect(x: startX, y: midY - iconSize / 2, width: iconSize, height: iconSize),
+                      from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        }
+        (title as NSString).draw(at: NSPoint(x: startX + iconW, y: midY - textSize.height / 2), withAttributes: attrs)
+    }
+}
+
+// Small icon-only gear button in the footer (after the support links). Runs an action
+// closure rather than opening a URL — wired by ToggleView to open the Settings tab.
+final class IconActionButton: NSView {
+    private let icon: NSImage?
+    var onClick: (() -> Void)?
+
+    init(symbolName: String, accessibility: String, frame: NSRect) {
+        self.icon = NSImage(systemSymbolName: symbolName, accessibilityDescription: accessibility)?
+            .tinted(.appTextSecondary)
+        super.init(frame: frame)
+        setAccessibilityLabel(accessibility)
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override var isFlipped: Bool { true }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+    override func mouseDown(with event: NSEvent) { onClick?() }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let icon = icon else { return }
+        let s: CGFloat = 17
+        icon.draw(in: NSRect(x: bounds.midX - s / 2, y: bounds.height / 2 - s / 2, width: s, height: s),
+                  from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+    }
+}
+
+enum SpecialFeatureInfo {
+    static func showPopup() {
+        let alert = NSAlert()
+        alert.messageText = "Special Feature — ChatGPT / Codex & Claude Quick Launch"
+        alert.informativeText = "An optional, opt-in feature. Everything else in Klik PRO works without it."
+
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 480, height: 360))
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .lineBorder
+        scroll.drawsBackground = false
+        let textView = NSTextView(frame: scroll.bounds)
+        textView.autoresizingMask = [.width]
+        textView.isEditable = false
+        textView.drawsBackground = false
+        textView.textContainerInset = NSSize(width: 8, height: 8)
+        textView.textStorage?.setAttributedString(content())
+        scroll.documentView = textView
+
+        alert.accessoryView = scroll
+        alert.addButton(withTitle: "Close")
+        alert.runModal()
+    }
+
+    private static func content() -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        let headerAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.boldSystemFont(ofSize: 13),
+            .foregroundColor: NSColor.appTextPrimary
+        ]
+        let bodyAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12),
+            .foregroundColor: NSColor.appTextPrimary
+        ]
+        func section(_ header: String, _ body: String) {
+            result.append(NSAttributedString(string: header + "\n", attributes: headerAttrs))
+            result.append(NSAttributedString(string: body + "\n\n", attributes: bodyAttrs))
+        }
+
+        section("What it is",
+            "A one-toggle shortcut for opening a dedicated second instance of ChatGPT / Codex "
+            + "and/or Claude — from a keyboard hotkey, assigned mouse button, or menu-bar icon — without disturbing the "
+            + "window you already have open. It works with both apps or with just one: if only "
+            + "ChatGPT / Codex is set up you get its icon and hotkey alone, and the same for Claude.")
+
+        section("The settings",
+            "• Master toggle (ON/OFF): available only when the real ChatGPT / Codex or Claude "
+            + "desktop app is installed. With neither installed it stays OFF and disabled; a "
+            + "leftover launcher wrapper alone does not enable it. ON registers the launch "
+            + "hotkey(s) and assigned mouse buttons. Its launcher menu-bar icons can be shown or "
+            + "hidden separately in Settings without disabling those shortcuts. OFF releases the hotkeys "
+            + "system-wide. Klik PRO's own menu-bar icon is independent and has no hotkey; "
+            + "its two green dots report the main input helper's active state and do not follow this toggle.\n"
+            + "• ChatGPT / Codex Hotkey & Claude Hotkey: the global keyboard shortcuts "
+            + "(defaults ⌃⌥⌘G and ⌃⌥⌘C). They have no separate on/off switch — the master toggle "
+            + "governs them — and each stays editable whenever its app and launcher are ready.\n"
+            + "• ChatGPT / Codex button & Claude button: optionally link each launcher to Middle, "
+            + "Gesture, Forward, or Back. The linked row is enabled and mirrors its launch hotkey "
+            + "while ON. OFF, None, or a missing launcher restores the untouched normal button "
+            + "mapping. If a side becomes unavailable, its existing dropdown remains available "
+            + "only so None can clear the old assignment. One physical button cannot be assigned "
+            + "to both launchers.\n"
+            + "• The Settings tab can hide all ready launcher icons while keeping the Special "
+            + "Feature active. Unavailable sides stay hidden, and there is no per-icon option.")
+
+        section("Restrictions",
+            "This is the one part of Klik PRO that is not portable as-is. It requires:\n"
+            + "• The ChatGPT / Codex and/or Claude desktop app installed in /Applications.\n"
+            + "• Small wrapper \"launcher\" apps present on this machine that open each app under "
+            + "its own separate profile. A missing app or launcher disables that side's hotkey "
+            + "and new button choices with an exact status; a stale dropdown assignment can still "
+            + "be changed to None, and its mouse button keeps its normal action. The master toggle "
+            + "itself stays disabled until at least one real app is "
+            + "installed.\n"
+            + "The launch targets are hardcoded in the source and can be repointed to any app(s) "
+            + "you like. Every other Klik PRO control is independent of this launcher setup; "
+            + "actual button and wheel support still varies by mouse hardware.")
+
+        section("Why it exists",
+            "The user runs two independent profiles of an app side by side — for example a "
+            + "personal ChatGPT / Codex signed into one account and a separate work one, or a "
+            + "normal Claude and a project-scoped Claude — each using its own user-data directory "
+            + "(and a separate Codex home for ChatGPT / Codex). macOS won't open a second instance "
+            + "of an already-running app on its own, so a wrapper is needed to spawn or focus the "
+            + "second profile. This feature puts that one keystroke or click away.")
+
+        section("Use case",
+            "You're coding with your work ChatGPT / Codex instance open and want to ask your "
+            + "personal account something — without logging out or losing your work session. Press "
+            + "⌃⌥⌘G, click the ChatGPT / Codex menu-bar icon when shown, or press its assigned mouse button, "
+            + "and your second ChatGPT / Codex "
+            + "profile opens or comes to the front. ⌃⌥⌘C does the same for Claude. You don't need "
+            + "both apps — a single-app setup (two instances of just one of them) works too.")
+
+        return result
+    }
+}
+
+// MARK: - ToggleOnlyRowView (master on/off switch, e.g. the Special Feature toggle)
+
+final class ToggleOnlyRowView: NSView {
+    let titleLabel: String
+    let detailLabel: String
+    let disabledDetailLabel: String?
+    let toggle: ToggleSwitchView
+    var onToggleChange: ((Bool) -> Void)?
+    var isEnabled: Bool = true {
+        didSet {
+            toggle.isEnabled = isEnabled
+            let help = isEnabled
+                ? detailLabel
+                : (disabledDetailLabel ?? detailLabel)
+            toggle.toolTip = help
+            toggle.setAccessibilityHelp(help)
+            needsDisplay = true
+        }
+    }
+
+    init(
+        title: String,
+        detail: String,
+        disabledDetail: String? = nil,
+        isOn: Bool,
+        frame: NSRect
+    ) {
+        self.titleLabel = title
+        self.detailLabel = detail
+        self.disabledDetailLabel = disabledDetail
+        self.toggle = ToggleSwitchView(isOn: isOn, frame: NSRect(x: 0, y: (frame.height - 22) / 2, width: 44, height: 22))
+        super.init(frame: frame)
+        addSubview(toggle)
+        toggle.setAccessibilityLabel(title)
+        toggle.onChange = { [weak self] on in self?.onToggleChange?(on) }
+    }
+    required init?(coder: NSCoder) { nil }
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let titleDim: CGFloat = isEnabled ? 1 : 0.38
+        // The disabled detail is the action the user must take, so keep it readable
+        // even while the title and switch correctly look unavailable.
+        let detailDim: CGFloat = isEnabled ? 1 : 0.88
+        let titleAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 13, weight: .medium),
+            .foregroundColor: NSColor.appTextPrimary.withAlphaComponent(titleDim)
+        ]
+        let detailAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11),
+            .foregroundColor: NSColor.appTextSecondary.withAlphaComponent(detailDim)
+        ]
+        let effectiveDetail = isEnabled
+            ? detailLabel
+            : (disabledDetailLabel ?? detailLabel)
+        titleLabel.draw(at: NSPoint(x: 60, y: (bounds.height - 16) / 2 - 8), withAttributes: titleAttrs)
+        effectiveDetail.draw(at: NSPoint(x: 60, y: (bounds.height - 16) / 2 + 10), withAttributes: detailAttrs)
+    }
+}
+
+// MARK: - Scrollable settings content (device diagram + all mapping rows)
+
+final class SettingsContentView: NSView {
+    private let image: NSImage?
+
+    let middleButtonRow: RecordableShortcutRowView
+    let gestureButtonRow: RecordableShortcutRowView
+    let forwardRow: RecordableShortcutRowView
+    let backRow: RecordableShortcutRowView
+    // Thumb wheel is a single row of one master switch and four browser options.
+    let thumbWheelToggle: ToggleSwitchView
+    let chromeCheck: CheckboxView
+    let braveCheck: CheckboxView
+    let firefoxCheck: CheckboxView
+    let safariCheck: CheckboxView
+    // Special Feature card: master on/off toggle (applied by the combined helper) plus
+    // the two hotkeys it gates. The hotkey rows have no per-row toggle — the master
+    // toggle governs them — and each recorder is editable while its launch side is ready.
+    let specialFeatureToggleRow: ToggleOnlyRowView
+    let chatGPTButtonPicker: QuickLaunchButtonPickerView
+    let claudeButtonPicker: QuickLaunchButtonPickerView
+    let chatGPTHotkeyRow: RecorderOnlyRowView
+    let claudeHotkeyRow: RecorderOnlyRowView
+    let infoLink = InfoLinkView(frame: .zero)
+    // Bottom-right support row: GitHub plus the three support buttons.
+    let githubLink = URLLinkView(title: "GitHub",
+                                 urlString: "https://github.com/AminudinMurad/klik-pro",
+                                 style: .outline,
+                                 icon: BrandMarks.github(size: 15, color: .appTextSecondary),
+                                 alignRight: false, frame: .zero)
+    let sponsorsLink = URLLinkView(title: "GitHub Sponsors",
+                                 urlString: "https://github.com/sponsors/aminudinmurad",
+                                 style: .outline,
+                                 icon: NSImage(systemSymbolName: "heart.fill", accessibilityDescription: nil)?.tinted(.systemPink),
+                                 alignRight: false, frame: .zero)
+    let kofiButton = URLLinkView(title: "Ko-fi",
+                                 urlString: "https://ko-fi.com/aminudinmurad",
+                                 style: .outline,
+                                 icon: NSImage(systemSymbolName: "cup.and.saucer.fill", accessibilityDescription: nil)?
+                                     .tinted(NSColor(calibratedRed: 1.0, green: 0.37, blue: 0.36, alpha: 1)),
+                                 alignRight: false, frame: .zero)
+    let paypalLink = URLLinkView(title: "PayPal",
+                                 urlString: "https://www.paypal.com/paypalme/aminudinmurad",
+                                 style: .outline,
+                                 icon: NSImage(systemSymbolName: "dollarsign.circle.fill", accessibilityDescription: nil)?
+                                     .tinted(NSColor(calibratedRed: 0, green: 0.44, blue: 0.73, alpha: 1)),
+                                 alignRight: false, frame: .zero)
+    let settingsButton = IconActionButton(
+        symbolName: "gearshape.fill",
+        accessibility: "Open Settings",
+        frame: .zero
+    )
+    let mappingProfilesView: MappingAppProfilesView
+    // App icons shown in the Special Feature card, loaded at runtime from the user's
+    // installed apps (never bundled — avoids shipping third-party logos). The preview
+    // process uses generated letter tiles so fixtures do not depend on the host Mac.
+    private var chatGPTIcon: NSImage?
+    private var claudeIcon: NSImage?
+    var specialFeatureOn: Bool { didSet { needsDisplay = true } }
+
+    override var isFlipped: Bool { true }
+
+    // Two-column, single-page layout (no scrolling). Each of the 2 config groups sits in
+    // its own rounded card. Cards are 420pt wide with 18pt inner padding; rows are inset
+    // to the padded content box.
+    static let leftCardX: CGFloat = 0
+    // Asymmetric columns: the left mouse-shortcut card is trimmed to hug its
+    // content (the Safari thumb-wheel checkbox ends at x≈399) so the right
+    // app-list card can be wider and hold longer profile names. 16pt gap,
+    // total width stays 872 (0..420, gap, 436..872).
+    static let rightCardX: CGFloat = 436
+    static let cardW: CGFloat = 420            // left column width
+    static let rightCardW: CGFloat = 436       // right (app list) column width
+    static let pad: CGFloat = 18
+    static var innerLeftX: CGFloat { leftCardX + pad }      // 18
+    static var innerRightX: CGFloat { rightCardX + pad }    // 518
+    static var innerW: CGFloat { cardW - pad * 2 }          // 448
+
+    // Mappings starts with a full-width device guide, then switches to the
+    // two-column controls/profile layout underneath.
+    static let deviceCard         = NSRect(x: 0, y: 0, width: rightCardX + rightCardW, height: 214)
+    static let recordableCard     = NSRect(x: leftCardX, y: 232, width: cardW, height: 370)
+    static let thumbWheelCard     = NSRect(x: leftCardX, y: 618, width: cardW, height: 84)
+    static let specialFeatureCard = NSRect(x: rightCardX, y: 232, width: rightCardW, height: 470)
+
+    private static func previewAppIcon(for target: QuickLaunchTarget) -> NSImage {
+        let label = target == .chatGPT ? "G" : "C"
+        let background = target == .chatGPT
+            ? NSColor(calibratedRed: 0.12, green: 0.42, blue: 0.34, alpha: 1)
+            : NSColor(calibratedRed: 0.78, green: 0.37, blue: 0.20, alpha: 1)
+        return NSImage(size: NSSize(width: 64, height: 64), flipped: false) { rect in
+            background.setFill()
+            NSBezierPath(roundedRect: rect.insetBy(dx: 2, dy: 2), xRadius: 14, yRadius: 14).fill()
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 30, weight: .bold),
+                .foregroundColor: NSColor.white,
+            ]
+            let text = label as NSString
+            let size = text.size(withAttributes: attributes)
+            text.draw(
+                at: NSPoint(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2),
+                withAttributes: attributes
+            )
+            return true
+        }
+    }
+
+    private static func installedAppIcon(_ target: QuickLaunchTarget) -> NSImage? {
+        guard let applicationURL = quickLaunchTargetApplicationURL(target) else { return nil }
+        let useInstalledPreviewIcon = ProcessInfo.processInfo.environment[
+            "KLIK_PRO_PREVIEW_USE_INSTALLED_APP_ICONS"
+        ] == "1"
+        if previewRenderingIsActive && !useInstalledPreviewIcon {
+            return previewAppIcon(for: target)
+        }
+        return NSWorkspace.shared.icon(forFile: applicationURL.path)
+    }
+
+    init(
+        config: KlikProConfig,
+        statuses: [ShortcutSlot: ShortcutConflictStatus],
+        specialFeatureOn: Bool,
+        specialFeatureAvailable: Bool,
+        width: CGFloat
+    ) {
+        image = Bundle.main.url(forResource: "device-reference", withExtension: "png").flatMap { NSImage(contentsOf: $0) }
+        chatGPTIcon = Self.installedAppIcon(.chatGPT)
+        claudeIcon = Self.installedAppIcon(.claude)
+        self.specialFeatureOn = specialFeatureAvailable && specialFeatureOn
+
+        let ix = SettingsContentView.innerLeftX
+        let rxi = SettingsContentView.innerRightX
+        let iw = SettingsContentView.innerW
+        let mappingW = iw
+
+        // LEFT card — recordable mouse controls. Gesture is device-isolated through an
+        // MX Master 3-only F20 sentinel, so keyboard Command-Tab remains native for
+        // normal app switching. Four rows are spread evenly down the card.
+        middleButtonRow = RecordableShortcutRowView(
+            title: "Middle Button",
+            mapping: config.middleButton,
+            defaultCombo: KlikProConfig.default.middleButton.combo,
+            status: statuses[.middleButton] ?? .ok,
+            frame: NSRect(x: ix, y: 272, width: mappingW, height: 66)
+        )
+        gestureButtonRow = RecordableShortcutRowView(
+            title: "Gesture Button",
+            mapping: config.gestureButton,
+            defaultCombo: KlikProConfig.default.gestureButton.combo,
+            status: statuses[.gestureButton] ?? .ok,
+            frame: NSRect(x: ix, y: 356, width: mappingW, height: 66)
+        )
+        let forwardDisplay = browserHistoryDisplayOverride(
+            slot: .forwardButton,
+            combo: config.forwardButton.combo
+        )
+        let backDisplay = browserHistoryDisplayOverride(
+            slot: .backButton,
+            combo: config.backButton.combo
+        )
+        forwardRow = RecordableShortcutRowView(
+            title: "Forward Button", mapping: config.forwardButton,
+            defaultCombo: KlikProConfig.default.forwardButton.combo,
+            status: statuses[.forwardButton] ?? .ok, displayOverride: forwardDisplay,
+            displayOverrideResolver: { combo in
+                browserHistoryDisplayOverride(slot: .forwardButton, combo: combo)
+            },
+            frame: NSRect(x: ix, y: 440, width: mappingW, height: 66)
+        )
+        backRow = RecordableShortcutRowView(
+            title: "Back Button", mapping: config.backButton,
+            defaultCombo: KlikProConfig.default.backButton.combo,
+            status: statuses[.backButton] ?? .ok, displayOverride: backDisplay,
+            displayOverrideResolver: { combo in
+                browserHistoryDisplayOverride(slot: .backButton, combo: combo)
+            },
+            frame: NSRect(x: ix, y: 524, width: mappingW, height: 66)
+        )
+        [middleButtonRow, gestureButtonRow, forwardRow, backRow].forEach {
+            $0.applyCompactTwoLineLayout()
+        }
+
+        // LEFT card — thumb-wheel checkboxes, all in one row below mouse shortcuts.
+        thumbWheelToggle = ToggleSwitchView(isOn: config.thumbWheel.enabled, frame: NSRect(x: ix, y: 663, width: 44, height: 22))
+        thumbWheelToggle.setAccessibilityLabel("Tab Switching")
+        chromeCheck = CheckboxView(label: "Chrome", isOn: config.thumbWheel.chromeEnabled, frame: NSRect(x: ix + 102, y: 660, width: 65, height: 28))
+        braveCheck = CheckboxView(label: "Brave", isOn: config.thumbWheel.braveEnabled, frame: NSRect(x: ix + 179, y: 660, width: 57, height: 28))
+        firefoxCheck = CheckboxView(label: "Firefox", isOn: config.thumbWheel.firefoxEnabled, frame: NSRect(x: ix + 248, y: 660, width: 63, height: 28))
+        safariCheck = CheckboxView(label: "Safari", isOn: config.thumbWheel.safariEnabled, frame: NSRect(x: ix + 323, y: 660, width: 58, height: 28))
+        // Browser options are gated by the master "Tab Switching" toggle — greyed until it's on.
+        let tabSwitchingOn = config.thumbWheel.enabled
+        chromeCheck.isEnabled = tabSwitchingOn
+        braveCheck.isEnabled = tabSwitchingOn
+        firefoxCheck.isEnabled = tabSwitchingOn
+        safariCheck.isEnabled = tabSwitchingOn
+
+        // RIGHT card — each launcher owns one clear column for its mouse-button
+        // selector, followed by full-width hotkey rows below.
+        specialFeatureToggleRow = ToggleOnlyRowView(
+            title: "ChatGPT / Codex & Claude Quick Launch",
+            detail: "Enables menu icons, hotkeys, and assigned mouse buttons",
+            disabledDetail: "Install ChatGPT or Claude to enable",
+            isOn: specialFeatureAvailable && specialFeatureOn,
+            frame: NSRect(x: rxi, y: 278, width: iw, height: 44)
+        )
+        let pickerGap: CGFloat = 24
+        let pickerWidth = (iw - pickerGap) / 2
+        chatGPTButtonPicker = QuickLaunchButtonPickerView(
+            title: "ChatGPT / Codex button",
+            target: .chatGPT,
+            selection: config.chatGPTMouseButton,
+            frame: NSRect(x: rxi, y: 330, width: pickerWidth, height: 46)
+        )
+        claudeButtonPicker = QuickLaunchButtonPickerView(
+            title: "Claude button",
+            target: .claude,
+            selection: config.claudeMouseButton,
+            frame: NSRect(x: rxi + pickerWidth + pickerGap, y: 330, width: pickerWidth, height: 46)
+        )
+        chatGPTHotkeyRow = RecorderOnlyRowView(
+            title: "ChatGPT / Codex Hotkey",
+            mapping: config.chatGPTHotkey,
+            defaultCombo: KlikProConfig.default.chatGPTHotkey.combo,
+            status: statuses[.chatGPTHotkey] ?? .ok,
+            frame: NSRect(x: rxi, y: 385, width: iw, height: 36)
+        )
+        claudeHotkeyRow = RecorderOnlyRowView(
+            title: "Claude Hotkey",
+            mapping: config.claudeHotkey,
+            defaultCombo: KlikProConfig.default.claudeHotkey.combo,
+            status: statuses[.claudeHotkey] ?? .ok,
+            frame: NSRect(x: rxi, y: 429, width: iw, height: 36)
+        )
+        infoLink.frame = NSRect(x: rxi, y: 477, width: iw, height: 18)
+        // Four support links, justified across the right column's bottom area. Each
+        // badge is sized to its own content (icon + gap + label + padding) so the outline
+        // never crops the text, and the leftover space is shared as equal gaps — this
+        // avoids the old fixed-width cramping where long labels ("GitHub Sponsors")
+        // overflowed their pill. Measured at runtime so it stays correct if labels change.
+        let footerFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        let footerIconSpan: CGFloat = 15 + 6   // iconSize + gap, matches URLLinkView.draw
+        func footerContentW(_ title: String) -> CGFloat {
+            (title as NSString).size(withAttributes: [.font: footerFont]).width + footerIconSpan
+        }
+        let footerLinks = [githubLink, sponsorsLink, kofiButton, paypalLink]
+        let footerTitles = ["GitHub", "GitHub Sponsors", "Ko-fi", "PayPal"]
+        let footerContent = footerTitles.map(footerContentW)
+        let footerTrackX = SettingsContentView.rightCardX + 6
+        let settingsButtonW: CGFloat = 32
+        let settingsButtonGap: CGFloat = 8
+        let fullTrackW = SettingsContentView.cardW - 12 - settingsButtonW - settingsButtonGap
+        // Fit: badgeWidth = content + 2*innerPad; 4 badges + 3 gaps span the track.
+        // Prefer 10pt inner padding; if that overflows, shrink padding down to a floor.
+        var footerPad: CGFloat = 10
+        var footerGap = (fullTrackW - (footerContent.reduce(0, +) + footerPad * 2 * 4)) / 3
+        if footerGap < 7 {
+            footerGap = 7
+            footerPad = max(3, (fullTrackW - footerContent.reduce(0, +) - footerGap * 3) / 8)
+        }
+        var footerX = footerTrackX
+        for (i, link) in footerLinks.enumerated() {
+            let w = footerContent[i] + footerPad * 2
+            link.frame = NSRect(x: footerX, y: 528, width: w, height: 32)
+            footerX += w + footerGap
+        }
+        settingsButton.frame = NSRect(
+            x: footerTrackX + fullTrackW + settingsButtonGap,
+            y: 528,
+            width: settingsButtonW,
+            height: 32
+        )
+
+        mappingProfilesView = MappingAppProfilesView(
+            instances: config.instances,
+            frame: SettingsContentView.specialFeatureCard
+        )
+
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 702))
+
+        [middleButtonRow, gestureButtonRow, forwardRow, backRow,
+         thumbWheelToggle, chromeCheck, braveCheck, firefoxCheck, safariCheck,
+         mappingProfilesView].forEach { addSubview($0) }
+        setSpecialFeatureAvailability(specialFeatureAvailable, isOn: specialFeatureOn)
+        updateQuickLaunchAssignments(config: config, featureActive: self.specialFeatureOn)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    func setSpecialFeatureAvailability(_ available: Bool, isOn: Bool) {
+        chatGPTIcon = Self.installedAppIcon(.chatGPT)
+        claudeIcon = Self.installedAppIcon(.claude)
+        specialFeatureOn = available && isOn
+        specialFeatureToggleRow.toggle.isOn = specialFeatureOn
+        specialFeatureToggleRow.isEnabled = available
+        let chatGPTReadiness = quickLaunchTargetReadiness(.chatGPT)
+        let claudeReadiness = quickLaunchTargetReadiness(.claude)
+        chatGPTButtonPicker.setReadiness(chatGPTReadiness)
+        claudeButtonPicker.setReadiness(claudeReadiness)
+        chatGPTHotkeyRow.setReadiness(chatGPTReadiness)
+        claudeHotkeyRow.setReadiness(claudeReadiness)
+        needsDisplay = true
+    }
+
+    func updateQuickLaunchAssignments(config: KlikProConfig, featureActive: Bool) {
+        chatGPTButtonPicker.setSelection(config.chatGPTMouseButton)
+        claudeButtonPicker.setSelection(config.claudeMouseButton)
+        chatGPTButtonPicker.setUnavailable(config.claudeMouseButton, owner: .claude)
+        claudeButtonPicker.setUnavailable(config.chatGPTMouseButton, owner: .chatGPT)
+
+        let availableInstances = config.instances.filter {
+            // In preview rendering the seeded legacy instances have no on-disk
+            // launcher, so include them anyway to keep the rows consistent with
+            // the App Profiles chips in screenshots.
+            previewRenderingIsActive
+                || $0.launcherKind == .managed
+                || FileManager.default.fileExists(atPath: $0.launcherPath)
+        }.sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
+        let rows: [(QuickLaunchMouseButton, RecordableShortcutRowView)] = [
+            (.middle, middleButtonRow), (.gesture, gestureButtonRow),
+            (.forward, forwardRow), (.back, backRow),
+        ]
+        rows.forEach { button, row in
+            row.setLinked(to: nil)
+            let assigned = config.instances.first { $0.mouseButton == button }
+            row.setOpenAppOptions(availableInstances, assignedID: assigned?.id)
+        }
+        _ = featureActive
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        // Full-width mouse guide on top; controls and App Profiles list underneath.
+        drawDeviceCard(in: SettingsContentView.deviceCard)
+        drawCard(SettingsContentView.thumbWheelCard)
+        drawCard(SettingsContentView.recordableCard)
+
+        // Section labels, inset into each card (16pt below the card's top edge)
+        let ix = SettingsContentView.innerLeftX
+        drawSectionLabel("Mouse Button Shortcuts", x: ix, y: SettingsContentView.recordableCard.minY + 16)
+        drawSectionLabel("Thumb Wheel Tab Switching", x: ix, y: SettingsContentView.thumbWheelCard.minY + 16)
+        // The section title already names the feature; keep the master label compact
+        // enough to leave comfortable spacing for all four browser options.
+        ("Enabled" as NSString).draw(at: NSPoint(x: ix + 50, y: 666), withAttributes: [
+            .font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.appTextPrimary])
+    }
+
+    // The two quick-launch app icons, right-aligned in the Special Feature card header.
+    // Full-colour when the feature is ON, faded when OFF. Icons come from the user's own
+    // installed apps at runtime; a missing app shows a neutral placeholder.
+    private func drawSpecialFeatureIcons() {
+        let card = SettingsContentView.specialFeatureCard
+        let iconSize: CGFloat = 26
+        let gap: CGFloat = 10
+        let y = card.minY + 8
+        let rightX = card.maxX - SettingsContentView.pad
+        let icons = [chatGPTIcon, claudeIcon]
+        var x = rightX - CGFloat(icons.count) * iconSize - CGFloat(icons.count - 1) * gap
+        for icon in icons {
+            let rect = NSRect(x: x, y: y, width: iconSize, height: iconSize)
+            if let icon = icon {
+                icon.draw(in: rect, from: .zero, operation: .sourceOver,
+                          fraction: specialFeatureOn ? 1.0 : 0.28,
+                          respectFlipped: true, hints: nil)
+            } else {
+                NSColor.separatorColor.setFill()
+                NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
+            }
+            x += iconSize + gap
+        }
+    }
+
+    private func drawCard(_ rect: NSRect) {
+        NSColor.controlBackgroundColor.setFill()
+        NSBezierPath(roundedRect: rect, xRadius: 12, yRadius: 12).fill()
+        NSColor.separatorColor.setStroke()
+        let border = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 12, yRadius: 12)
+        border.lineWidth = 1
+        border.stroke()
+    }
+
+    private func drawSectionLabel(_ text: String, x: CGFloat, y: CGFloat) {
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.boldSystemFont(ofSize: 12),
+            .foregroundColor: NSColor.appTextSecondary
+        ]
+        text.uppercased().draw(at: NSPoint(x: x, y: y), withAttributes: attrs)
+    }
+
+    private func drawDeviceCard(in card: NSRect) {
+        NSColor.controlBackgroundColor.setFill()
+        NSBezierPath(rect: card).fill()
+
+        guard let image = image else { return }
+        let imageAspect = image.size.height > 0 ? image.size.width / image.size.height : 1
+        let available = card.insetBy(dx: 190, dy: 8)
+        let drawHeight = min(available.height, available.width / imageAspect)
+        let drawWidth = drawHeight * imageAspect
+        let rect = NSRect(
+            x: card.midX - drawWidth / 2,
+            y: card.midY - drawHeight / 2,
+            width: drawWidth,
+            height: drawHeight
+        )
+        // respectFlipped: true is required because this view is isFlipped — without it
+        // NSImage.draw renders upside-down in the flipped coordinate system.
+        image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1.0,
+                   respectFlipped: true, hints: nil)
+
+        drawDeviceCallouts(in: rect)
+    }
+
+    // Callouts mapped to the controls in assets/Klik PRO mouse.png. Target = fraction of
+    // the drawn mouse rect; labels sit in the wide card's left/right margins so they don't
+    // overlap the mouse or grow the card height (keeping the single-page layout).
+    private struct DeviceCallout {
+        let title: String
+        let fx: CGFloat   // target x as fraction of mouse rect
+        let fy: CGFloat   // target y as fraction of mouse rect
+        let onLeft: Bool  // label sits in the left margin (else right)
+        let labelY: CGFloat
+    }
+
+    // fx/fy are fractions of the drawn mouse rect (top-left origin). Re-tuned 2026-07-20
+    // for the reframed device artwork — the crop now centers the whole mouse in the
+    // 1000x742 canvas (assets/Klik PRO mouse.png via tools/crop-device.swift), so the
+    // targets are the dark control centroids measured in the regenerated reference.
+    private static let deviceCallouts: [DeviceCallout] = [
+        DeviceCallout(title: "Middle Button (Scroll Wheel)", fx: 0.245, fy: 0.413, onLeft: true, labelY: 100),
+        DeviceCallout(title: "Forward Button", fx: 0.584, fy: 0.546, onLeft: true, labelY: 172),
+        DeviceCallout(title: "Horizontal Thumb Wheel", fx: 0.594, fy: 0.422, onLeft: false, labelY: 40),
+        DeviceCallout(title: "Back Button", fx: 0.692, fy: 0.447, onLeft: false, labelY: 110),
+        DeviceCallout(title: "Gesture Button", fx: 0.755, fy: 0.745, onLeft: false, labelY: 180),
+    ]
+
+    private func drawDeviceCallouts(in mouseRect: NSRect) {
+        let teal = NSColor(calibratedRed: 0.04, green: 0.70, blue: 0.68, alpha: 1)
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.boldSystemFont(ofSize: 12),
+            .foregroundColor: NSColor.appTextPrimary
+        ]
+        let leftEdge = mouseRect.minX - 18
+        let rightEdge = mouseRect.maxX + 18
+
+        for c in SettingsContentView.deviceCallouts {
+            let target = NSPoint(x: mouseRect.minX + c.fx * mouseRect.width,
+                                 y: mouseRect.minY + c.fy * mouseRect.height)
+            let size = (c.title as NSString).size(withAttributes: attrs)
+            let labelPoint: NSPoint
+            let anchor: NSPoint
+            if c.onLeft {
+                labelPoint = NSPoint(x: leftEdge - size.width, y: c.labelY)
+                anchor = NSPoint(x: leftEdge, y: c.labelY + size.height / 2)
+            } else {
+                labelPoint = NSPoint(x: rightEdge, y: c.labelY)
+                anchor = NSPoint(x: rightEdge, y: c.labelY + size.height / 2)
+            }
+
+            let path = NSBezierPath()
+            path.move(to: anchor)
+            path.line(to: NSPoint(x: (anchor.x + target.x) / 2, y: anchor.y))
+            path.line(to: target)
+            teal.setStroke()
+            path.lineWidth = 1.5
+            path.stroke()
+
+            teal.setFill()
+            NSBezierPath(ovalIn: NSRect(x: target.x - 3.5, y: target.y - 3.5, width: 7, height: 7)).fill()
+            (c.title as NSString).draw(at: labelPoint, withAttributes: attrs)
+        }
+    }
+}
+
+// Reads the input helper's most recent Accessibility status from its event log — the
+// settings app can't query the helper's TCC grant directly, but the helper logs
+// an explicit recheck result (or the legacy mapping-ready/permission-required messages).
+func helperAccessibilityGranted() -> Bool {
+    if let previewValue = ProcessInfo.processInfo.environment[
+        "KLIK_PRO_PREVIEW_ACCESSIBILITY_GRANTED"
+    ] {
+        return previewValue == "1"
+    }
+    if previewRenderingIsActive { return true }
+    let path = NSString(string: "~/Library/Logs/klik-pro-events.log").expandingTildeInPath
+    guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return false }
+    for line in text.split(separator: "\n").reversed() {
+        if line.contains("Accessibility status recheck: granted") { return true }
+        if line.contains("Accessibility status recheck: required") { return false }
+        if line.contains("Button mappings ready") { return true }
+        if line.contains("Accessibility permission is required") { return false }
+    }
+    return false
+}
+
+// Compact, accessible status row for the one macOS permission Klik PRO requires.
+final class PermissionStatusRowView: NSView {
+    private let title: String
+    private var statusText: String
+    private var statusColor: NSColor
+
+    override var isFlipped: Bool { true }
+
+    init(title: String, statusText: String, statusColor: NSColor, frame: NSRect) {
+        self.title = title
+        self.statusText = statusText
+        self.statusColor = statusColor
+        super.init(frame: frame)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+        updateAccessibilityLabel()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    func setStatus(_ text: String, color: NSColor) {
+        guard statusText != text || statusColor != color else { return }
+        statusText = text
+        statusColor = color
+        updateAccessibilityLabel()
+        needsDisplay = true
+    }
+
+    private func updateAccessibilityLabel() {
+        setAccessibilityLabel("\(title): \(statusText)")
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let titleAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 13, weight: .medium),
+            .foregroundColor: NSColor.appTextPrimary,
+        ]
+        (title as NSString).draw(
+            at: NSPoint(x: 0, y: bounds.midY - 8),
+            withAttributes: titleAttributes
+        )
+
+        let statusAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.boldSystemFont(ofSize: 10.5),
+            .foregroundColor: statusColor,
+        ]
+        let statusSize = (statusText as NSString).size(withAttributes: statusAttributes)
+        let pill = NSRect(
+            x: bounds.maxX - statusSize.width - 18,
+            y: bounds.midY - 10,
+            width: statusSize.width + 18,
+            height: 20
+        )
+        let pillPath = NSBezierPath(
+            roundedRect: pill.insetBy(dx: 0.5, dy: 0.5),
+            xRadius: 9.5,
+            yRadius: 9.5
+        )
+        statusColor.withAlphaComponent(0.14).setFill()
+        pillPath.fill()
+        statusColor.withAlphaComponent(0.42).setStroke()
+        pillPath.lineWidth = 1
+        pillPath.stroke()
+        (statusText as NSString).draw(
+            at: NSPoint(x: pill.minX + 9, y: pill.midY - statusSize.height / 2),
+            withAttributes: statusAttributes
+        )
+    }
+}
+
+// MARK: - PreferencesContentView (the "Settings" tab)
+
+final class PreferencesContentView: NSView {
+    let launchAtLoginRow: ToggleOnlyRowView
+    let autoUpdateRow: ToggleOnlyRowView
+    let showMenuBarIconRow: ToggleOnlyRowView
+    let caffeinateRow: ToggleOnlyRowView
+    let openAccessibilityLink: URLLinkView
+    let recheckAccessibilityLink: URLLinkView
+    let resetAccessibilityLink: URLLinkView
+    let openSourceLink: URLLinkView
+    let openLogsLink: URLLinkView
+    let settingsGithubLink: URLLinkView
+    let settingsSponsorsLink: URLLinkView
+    let settingsKofiLink: URLLinkView
+    let settingsPayPalLink: URLLinkView
+    let accessibilityPermissionRow: PermissionStatusRowView
+    private var accessibilityGranted: Bool
+
+    override var isFlipped: Bool { true }
+
+    private static let leftX: CGFloat = 0
+    // Tighter 16pt inter-column gap (was 32); total width stays 872.
+    private static let rightX: CGFloat = 444
+    private static let cardW: CGFloat = 428
+    private static let pad: CGFloat = 18
+    private static let generalCard = NSRect(x: leftX, y: 20, width: cardW, height: 300)
+    private static let permCard    = NSRect(x: rightX, y: 20, width: cardW, height: 132)
+    private static let aboutCard   = NSRect(x: rightX, y: 168, width: cardW, height: 126)
+    private static let supportCard = NSRect(x: rightX, y: 310, width: cardW, height: 92)
+    private static let headingContentGap: CGFloat = 8
+    private static let permissionRecheckXOffset: CGFloat = 168
+
+    init(
+        accessibilityGranted: Bool,
+        launchAtLogin: Bool,
+        autoCheck: Bool,
+        showMenuBarIcon: Bool,
+        caffeinateMenu: Bool,
+        width: CGFloat
+    ) {
+        self.accessibilityGranted = accessibilityGranted
+        let ix = PreferencesContentView.leftX + PreferencesContentView.pad
+        let rxi = PreferencesContentView.rightX + PreferencesContentView.pad
+        let iw = PreferencesContentView.cardW - PreferencesContentView.pad * 2
+        launchAtLoginRow = ToggleOnlyRowView(title: "Launch at login",
+            detail: "Start Klik PRO automatically after you log in",
+            isOn: launchAtLogin, frame: NSRect(x: ix, y: 64, width: iw, height: 46))
+        autoUpdateRow = ToggleOnlyRowView(title: "Automatically check for updates",
+            detail: "Check GitHub for a newer version at launch",
+            isOn: autoCheck, frame: NSRect(x: ix, y: 124, width: iw, height: 46))
+        showMenuBarIconRow = ToggleOnlyRowView(title: "Show menu bar icon",
+            detail: "Show the main Klik PRO status icon",
+            isOn: showMenuBarIcon, frame: NSRect(x: ix, y: 184, width: iw, height: 46))
+        caffeinateRow = ToggleOnlyRowView(title: "Caffeinate",
+            detail: "Keep the Mac awake from the menu bar icon",
+            isOn: caffeinateMenu, frame: NSRect(x: ix, y: 244, width: iw, height: 46))
+        // The Caffeinate menu lives inside the main menu-bar icon's right-click menu, so
+        // it stays tappable but prompts to turn the icon on first when it is hidden.
+        accessibilityPermissionRow = PermissionStatusRowView(
+            title: "Accessibility",
+            statusText: accessibilityGranted ? "Granted" : "Needs permission",
+            statusColor: accessibilityGranted ? .systemGreen : .systemOrange,
+            frame: NSRect(
+                x: rxi,
+                y: 54 + PreferencesContentView.headingContentGap,
+                width: iw,
+                height: 28
+            )
+        )
+        openAccessibilityLink = URLLinkView(
+            title: accessibilityGranted ? "Open Accessibility…" : "Set Up Accessibility…",
+            urlString: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+            style: .outline,
+            alignRight: false,
+            frame: NSRect(
+                x: rxi,
+                y: 96 + PreferencesContentView.headingContentGap,
+                width: 164,
+                height: 28
+            )
+        )
+        recheckAccessibilityLink = URLLinkView(
+            title: "Recheck",
+            urlString: "",
+            style: .outline,
+            alignRight: false,
+            frame: NSRect(
+                x: rxi + PreferencesContentView.permissionRecheckXOffset,
+                y: 56 + PreferencesContentView.headingContentGap,
+                width: 80,
+                height: 24
+            )
+        )
+        resetAccessibilityLink = URLLinkView(
+            title: "Reset Access…",
+            urlString: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+            style: .outline,
+            alignRight: false,
+            frame: NSRect(
+                x: rxi + 172,
+                y: 96 + PreferencesContentView.headingContentGap,
+                width: 116,
+                height: 28
+            )
+        )
+        openSourceLink = URLLinkView(
+            title: "Open source · GPL-3.0 License",
+            urlString: "https://github.com/AminudinMurad/klik-pro/blob/main/LICENSE",
+            style: .link,
+            alignRight: false,
+            frame: NSRect(
+                x: rxi,
+                y: 248 + PreferencesContentView.headingContentGap,
+                width: 200,
+                height: 24
+            )
+        )
+        openLogsLink = URLLinkView(title: "Open Logs",
+            urlString: "file://" + NSString(string: "~/Library/Logs").expandingTildeInPath,
+            style: .outline,
+            alignRight: false,
+            frame: NSRect(
+                x: rxi + 296,
+                y: 96 + PreferencesContentView.headingContentGap,
+                width: 88,
+                height: 28
+            ))
+        settingsGithubLink = URLLinkView(
+            title: "GitHub",
+            urlString: "https://github.com/AminudinMurad/klik-pro",
+            style: .outline,
+            icon: BrandMarks.github(size: 15, color: .appTextSecondary),
+            alignRight: false,
+            frame: .zero
+        )
+        settingsSponsorsLink = URLLinkView(
+            title: "GitHub Sponsors",
+            urlString: "https://github.com/sponsors/aminudinmurad",
+            style: .outline,
+            icon: NSImage(systemSymbolName: "heart.fill", accessibilityDescription: nil)?
+                .tinted(.systemPink),
+            alignRight: false,
+            frame: .zero
+        )
+        settingsKofiLink = URLLinkView(
+            title: "Ko-fi",
+            urlString: "https://ko-fi.com/aminudinmurad",
+            style: .outline,
+            icon: NSImage(systemSymbolName: "cup.and.saucer.fill", accessibilityDescription: nil)?
+                .tinted(NSColor(calibratedRed: 1.0, green: 0.37, blue: 0.36, alpha: 1)),
+            alignRight: false,
+            frame: .zero
+        )
+        settingsPayPalLink = URLLinkView(
+            title: "PayPal",
+            urlString: "https://www.paypal.com/paypalme/aminudinmurad",
+            style: .outline,
+            icon: NSImage(systemSymbolName: "dollarsign.circle.fill", accessibilityDescription: nil)?
+                .tinted(NSColor(calibratedRed: 0, green: 0.44, blue: 0.73, alpha: 1)),
+            alignRight: false,
+            frame: .zero
+        )
+
+        let supportFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        let supportIconSpan: CGFloat = 15 + 6
+        func supportContentWidth(_ title: String) -> CGFloat {
+            (title as NSString).size(withAttributes: [.font: supportFont]).width
+                + supportIconSpan
+        }
+        let supportLinks = [
+            settingsGithubLink,
+            settingsSponsorsLink,
+            settingsKofiLink,
+            settingsPayPalLink,
+        ]
+        let supportTitles = ["GitHub", "GitHub Sponsors", "Ko-fi", "PayPal"]
+        let supportContentWidths = supportTitles.map(supportContentWidth)
+        let supportTrackX = PreferencesContentView.supportCard.minX + 6
+        let supportTrackWidth = PreferencesContentView.cardW - 12
+        var supportPadding: CGFloat = 10
+        var supportGap = (
+            supportTrackWidth
+                - (supportContentWidths.reduce(0, +) + supportPadding * 2 * 4)
+        ) / 3
+        if supportGap < 7 {
+            supportGap = 7
+            supportPadding = max(
+                3,
+                (supportTrackWidth - supportContentWidths.reduce(0, +) - supportGap * 3) / 8
+            )
+        }
+        var supportX = supportTrackX
+        for (index, link) in supportLinks.enumerated() {
+            let buttonWidth = supportContentWidths[index] + supportPadding * 2
+            link.frame = NSRect(
+                x: supportX,
+                y: 351 + PreferencesContentView.headingContentGap,
+                width: buttonWidth,
+                height: 32
+            )
+            supportX += buttonWidth + supportGap
+        }
+
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 432))
+        [
+            launchAtLoginRow,
+            autoUpdateRow,
+            showMenuBarIconRow,
+            caffeinateRow,
+            accessibilityPermissionRow,
+            openAccessibilityLink,
+            recheckAccessibilityLink,
+            resetAccessibilityLink,
+            openSourceLink,
+            openLogsLink,
+            settingsGithubLink,
+            settingsSponsorsLink,
+            settingsKofiLink,
+            settingsPayPalLink,
+        ].forEach { addSubview($0) }
+    }
+    required init?(coder: NSCoder) { nil }
+
+    func setAccessibilityGranted(_ granted: Bool) {
+        guard accessibilityGranted != granted else { return }
+        accessibilityGranted = granted
+        accessibilityPermissionRow.setStatus(
+            granted ? "Granted" : "Needs permission",
+            color: granted ? .systemGreen : .systemOrange
+        )
+        openAccessibilityLink.title = granted ? "Open Accessibility…" : "Set Up Accessibility…"
+        needsDisplay = true
+    }
+
+    private func drawCard(_ rect: NSRect) {
+        NSColor.controlBackgroundColor.setFill()
+        NSBezierPath(roundedRect: rect, xRadius: 12, yRadius: 12).fill()
+        NSColor.separatorColor.setStroke()
+        let b = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 12, yRadius: 12)
+        b.lineWidth = 1; b.stroke()
+    }
+    private func drawSectionLabel(_ text: String, x: CGFloat, y: CGFloat) {
+        text.uppercased().draw(at: NSPoint(x: x, y: y), withAttributes: [
+            .font: NSFont.boldSystemFont(ofSize: 12), .foregroundColor: NSColor.appTextSecondary])
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        drawCard(PreferencesContentView.generalCard)
+        drawCard(PreferencesContentView.permCard)
+        drawCard(PreferencesContentView.aboutCard)
+        drawCard(PreferencesContentView.supportCard)
+        let ix = PreferencesContentView.leftX + PreferencesContentView.pad
+        let rxi = PreferencesContentView.rightX + PreferencesContentView.pad
+        drawSectionLabel("General", x: ix, y: PreferencesContentView.generalCard.minY + 16)
+        drawSectionLabel("Permissions", x: rxi, y: PreferencesContentView.permCard.minY + 16)
+        drawSectionLabel("About", x: rxi, y: PreferencesContentView.aboutCard.minY + 16)
+        drawSectionLabel(
+            "Support open-source development",
+            x: rxi,
+            y: PreferencesContentView.supportCard.minY + 12
+        )
+
+        ("Open-source mouse shortcuts for macOS." as NSString).draw(
+            at: NSPoint(
+                x: rxi,
+                y: PreferencesContentView.aboutCard.minY
+                    + 40
+                    + PreferencesContentView.headingContentGap
+            ),
+            withAttributes: [
+                .font: NSFont.systemFont(ofSize: 11),
+                .foregroundColor: NSColor.appTextSecondary,
+            ]
+        )
+
+        // About: one clear description, version detail, and the open-source action.
+        let ver = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String).map { "Version \($0)" } ?? "Version unavailable"
+        (ver as NSString).draw(at: NSPoint(
+            x: rxi,
+            y: PreferencesContentView.aboutCard.minY
+                + 62
+                + PreferencesContentView.headingContentGap
+        ), withAttributes: [
+            .font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.tertiaryLabelColor])
+    }
+}
+
+// MARK: - First-launch onboarding
+
+/// Draws a lightweight accent outline over a native alert button while the pointer
+/// is inside it. Hit testing remains with the original NSButton, preserving its
+/// standard click, keyboard, and accessibility behavior.
+final class ButtonHoverOutlineView: NSView {
+    private var hoverTrackingArea: NSTrackingArea?
+    private var isHovered = false
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea = hoverTrackingArea {
+            removeTrackingArea(hoverTrackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        setHovered(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        setHovered(false)
+    }
+
+    func showHoverPreview() {
+        guard previewRenderingIsActive else { return }
+        setHovered(true)
+    }
+
+    private func setHovered(_ hovered: Bool) {
+        guard isHovered != hovered else { return }
+        isHovered = hovered
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard isHovered else { return }
+        let outlineBounds = bounds.insetBy(dx: 1.25, dy: 1.25)
+        let outline = NSBezierPath(
+            roundedRect: outlineBounds,
+            xRadius: outlineBounds.height / 2,
+            yRadius: outlineBounds.height / 2
+        )
+        NSColor.controlAccentColor.withAlphaComponent(0.82).setStroke()
+        outline.lineWidth = 1.5
+        outline.stroke()
+    }
+}
+
+/// The native first-launch sheet. Every Settings toggle starts OFF; the user turns on
+/// what they want (or skips) and `ToggleView` applies and persists those choices when
+/// the sheet is confirmed. Kept to one screen at a fixed 430×252 size so the rendered
+/// onboarding fixtures stay dimensionally stable across releases.
+final class OnboardingChecklistView: NSView {
+    override var isFlipped: Bool { true }
+
+    let launchAtLoginRow: ToggleOnlyRowView
+    let autoUpdateRow: ToggleOnlyRowView
+    let showMenuBarIconRow: ToggleOnlyRowView
+    let caffeinateRow: ToggleOnlyRowView
+
+    // Caffeinate reads as OFF whenever the menu-bar icon is off, since it only lives in
+    // that icon's menu — matching the Settings dependency.
+    var launchAtLoginOn: Bool { launchAtLoginRow.toggle.isOn }
+    var autoUpdateOn: Bool { autoUpdateRow.toggle.isOn }
+    var showMenuBarIconOn: Bool { showMenuBarIconRow.toggle.isOn }
+    var caffeinateOn: Bool { showMenuBarIconRow.toggle.isOn && caffeinateRow.toggle.isOn }
+
+    init(accessibilityGranted: Bool) {
+        let contentWidth: CGFloat = 430
+        let rowX: CGFloat = 20
+        let rowWidth = contentWidth - rowX * 2
+        let firstRowY: CGFloat = 68
+        let rowHeight: CGFloat = 46
+
+        launchAtLoginRow = ToggleOnlyRowView(
+            title: "Launch at login",
+            detail: "Start Klik PRO automatically after you log in",
+            isOn: false,
+            frame: NSRect(x: rowX, y: firstRowY, width: rowWidth, height: rowHeight)
+        )
+        autoUpdateRow = ToggleOnlyRowView(
+            title: "Automatically check for updates",
+            detail: "Check GitHub for a newer version at launch",
+            isOn: false,
+            frame: NSRect(x: rowX, y: firstRowY + rowHeight, width: rowWidth, height: rowHeight)
+        )
+        showMenuBarIconRow = ToggleOnlyRowView(
+            title: "Show menu bar icon",
+            detail: "Show the main Klik PRO status icon",
+            isOn: false,
+            frame: NSRect(x: rowX, y: firstRowY + rowHeight * 2, width: rowWidth, height: rowHeight)
+        )
+        caffeinateRow = ToggleOnlyRowView(
+            title: "Caffeinate",
+            detail: "Keep the Mac awake from the menu bar icon",
+            disabledDetail: "Turn on Show menu bar icon to use Caffeinate",
+            isOn: false,
+            frame: NSRect(x: rowX, y: firstRowY + rowHeight * 3, width: rowWidth, height: rowHeight)
+        )
+
+        super.init(frame: NSRect(x: 0, y: 0, width: contentWidth, height: 252))
+
+        let welcome = KlikProWordmarkView(
+            prefix: "Welcome to ",
+            centered: true,
+            frame: NSRect(x: 0, y: 0, width: contentWidth, height: 30)
+        )
+        let introduction = NSTextField(
+            wrappingLabelWithString: "Turn on what you'd like now — you can change any of these later in Settings."
+        )
+        introduction.frame = NSRect(x: 28, y: 32, width: contentWidth - 56, height: 34)
+        introduction.font = .systemFont(ofSize: 13)
+        introduction.alignment = .center
+        introduction.textColor = .appTextSecondary
+        introduction.maximumNumberOfLines = 2
+
+        addSubview(welcome)
+        addSubview(introduction)
+
+        // Caffeinate is only reachable through the menu-bar icon's menu. It stays
+        // tappable, but turning it on while the icon is off asks the user to enable the
+        // icon first; turning the icon back off clears Caffeinate with it.
+        showMenuBarIconRow.onToggleChange = { [weak self] on in
+            guard let self = self, !on else { return }
+            self.caffeinateRow.toggle.isOn = false
+        }
+        caffeinateRow.onToggleChange = { [weak self] on in
+            guard let self = self, on, !self.showMenuBarIconRow.toggle.isOn else { return }
+            if confirmEnableMenuBarIconForCaffeinate() {
+                self.showMenuBarIconRow.toggle.isOn = true
+            } else {
+                self.caffeinateRow.toggle.isOn = false
+            }
+        }
+
+        addSubview(launchAtLoginRow)
+        addSubview(autoUpdateRow)
+        addSubview(showMenuBarIconRow)
+        addSubview(caffeinateRow)
+    }
+
+    required init?(coder: NSCoder) { nil }
+}
+
+/// Prompt shown when Caffeinate is switched on while "Show menu bar icon" is off.
+/// Caffeinate lives in that icon's menu, so the icon must be visible to use it. Returns
+/// true if the user chose to turn the menu-bar icon on (so both can be enabled together).
+func confirmEnableMenuBarIconForCaffeinate() -> Bool {
+    guard !previewRenderingIsActive else { return false }
+    let alert = NSAlert()
+    alert.alertStyle = .informational
+    alert.messageText = "Turn on the menu bar icon?"
+    alert.informativeText = "Caffeinate lives in the Klik PRO menu bar icon's menu, so the icon has to be shown to use it. Turn on Show menu bar icon too?"
+    alert.addButton(withTitle: "Turn On Menu Bar Icon")
+    alert.addButton(withTitle: "Cancel")
+    return alert.runModal() == .alertFirstButtonReturn
+}
+
+func makeOnboardingAlert(accessibilityGranted: Bool) -> NSAlert {
+    let alert = NSAlert()
+    alert.alertStyle = .informational
+    // With no native message fields, NSAlert centers its app icon above the custom
+    // welcome header instead of reserving the usual left-hand icon column.
+    if previewRenderingIsActive,
+       let previewIconURL = Bundle.main.url(
+           forResource: "OnboardingPreviewIcon",
+           withExtension: "png"
+       ),
+       let previewIcon = NSImage(contentsOf: previewIconURL) {
+        // The fixed PNG avoids nondeterministic ICNS representation selection in
+        // repeated visual-regression renders. The shipped app still uses its icon.
+        previewIcon.size = NSSize(width: 64, height: 64)
+        alert.icon = previewIcon
+    } else {
+        alert.icon = NSApp.applicationIconImage
+    }
+    alert.messageText = ""
+    alert.informativeText = ""
+    alert.accessoryView = OnboardingChecklistView(accessibilityGranted: accessibilityGranted)
+    alert.addButton(
+        withTitle: accessibilityGranted ? "Start Using Klik PRO" : "Set Up Accessibility…"
+    )
+    alert.addButton(withTitle: "View Mappings")
+    let closeButton = alert.addButton(withTitle: accessibilityGranted ? "Close" : "Not Now")
+    let closeHoverOutline = ButtonHoverOutlineView(frame: closeButton.bounds)
+    closeHoverOutline.autoresizingMask = [.width, .height]
+    closeButton.addSubview(closeHoverOutline)
+    if ProcessInfo.processInfo.environment["KLIK_PRO_PREVIEW_ONBOARDING_CLOSE_HOVER"] == "1" {
+        closeHoverOutline.showHoverPreview()
+    }
+    return alert
+}
+
+// MARK: - Top-level window chrome (fixed header + scroll view + fixed footer)
+
+final class ToggleWindowController: NSWindowController {
+    private let content = ToggleView()
+
+    init() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 940, height: 934),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Klik PRO"
+        window.center()
+        window.contentView = content
+        super.init(window: window)
+        content.onClose = { [weak self] in
+            self?.close()
+            NSApp.terminate(nil)
+        }
+    }
+
+    func showFirstLaunchOnboardingIfNeeded() {
+        content.showFirstLaunchOnboardingIfNeeded()
+    }
+
+    func checkForUpdatesFromMenuBar() {
+        showWindow(nil)
+        window?.makeKeyAndOrderFront(nil)
+        content.checkForUpdatesFromMenuBar()
+    }
+
+    func ensureBackgroundHelperRunningAtLaunch() {
+        content.ensureBackgroundHelperRunningAtLaunch()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+}
+
+final class ToggleView: NSView {
+    private struct AppControlState: Equatable {
+        var launchAtLogin: Bool
+        var automaticUpdateChecks: Bool
+        var specialFeatureEnabled: Bool
+    }
+
+    var onClose: (() -> Void)?
+
+    private var menuRunning: Bool
+    private var config: KlikProConfig
+    private var persistedConfig: KlikProConfig   // snapshot as-loaded, for conflict-engine's false-positive check
+    private var controlState: AppControlState
+    private var persistedControlState: AppControlState
+    private let browserExtensionShortcuts: Set<KeyCombo.Signature>
+    private var saveStatusMessage: String?
+    private let saveApplyQueue = DispatchQueue(
+        label: "local.klik-pro.settings.save-apply",
+        qos: .userInitiated
+    )
+    private var saveInProgress = false
+    private var appProfileLifecycleInProgress = false
+    private var appProfileInteractionShield: NSView?
+    private var unsavedChangesPreviewOverride = false
+    private var onboardingReviewInProgress = false {
+        didSet {
+            onboardingReturnButton.isHidden = !onboardingReviewInProgress
+            needsDisplay = true
+        }
+    }
+    private let headerWordmark: KlikProWordmarkView = {
+        let scale: CGFloat = 2
+        let size = KlikProBrand.wordmarkSize(prefix: "", scale: scale)
+        return KlikProWordmarkView(
+            centered: false,
+            scale: scale,
+            frame: NSRect(x: 38, y: 14, width: size.width, height: 60)
+        )
+    }()
+    private let scrollView = NSScrollView()
+    private let contentView: SettingsContentView
+    private let preferencesView: PreferencesContentView
+    private let appProfilesView: AppProfilesContentView
+    private let appProfileManager = AppProfileManager()
+    private let appProfileRuntime = AppProfileRuntime()
+    private let appProfileQueue = DispatchQueue(
+        label: "local.klik-pro.settings.app-profiles",
+        qos: .userInitiated
+    )
+    private var supportedAppCandidateCache: [AppProfileCandidate]?
+    private var supportedAppDiscoveryInProgress = false
+    private let saveButton = PrimaryHoverButton(
+        title: "Save",
+        frame: NSRect(x: 48, y: 854, width: 120, height: 42)
+    )
+    private lazy var onboardingReturnButton: FooterActionButton = {
+        let button = FooterActionButton(
+            title: "Back to Welcome",
+            frame: NSRect(x: 624, y: 858, width: 164, height: 34)
+        )
+        button.isHidden = true
+        return button
+    }()
+    // Check-for-updates button, top-right of the header (where the status pill used to be).
+    private let updateButtonRect = NSRect(x: 714, y: 30, width: 174, height: 30)
+    private var updateButtonTrackingArea: NSTrackingArea?
+    private var updateButtonHovered = false
+    private let closeButtonRect = NSRect(x: 808, y: 854, width: 90, height: 42)
+    private var closeButtonTrackingArea: NSTrackingArea?
+    private var closeButtonHovered = false
+    // Set by a successful check when a newer release exists; lights up the header button.
+    private var updateAvailableURL: URL?
+    static let autoCheckKey = "klikpro.autoCheckUpdates"
+    // Mappings | Settings | App Profiles tabs (below the title).
+    private var activeTab = 0
+    private let mappingsTabRect = NSRect(x: 38, y: 84, width: 86, height: 26)
+    private let settingsTabRect = NSRect(x: 138, y: 84, width: 78, height: 26)
+    private let appProfilesTabRect = NSRect(x: 230, y: 84, width: 76, height: 26)
+    private var appActivationObserver: NSObjectProtocol?
+
+    override var isFlipped: Bool { true }
+
+    override init(frame frameRect: NSRect) {
+        let loadedConfig = KlikProConfigStore.load()
+        if !previewRenderingIsActive {
+            _ = installLaunchAgentPlist(appBundleURL: Bundle.main.bundleURL)
+        }
+        let specialFeatureAvailable = hasInstalledQuickLaunchTarget()
+        let detectedBrowserExtensionShortcuts = installedChromeExtensionShortcutSignatures()
+        // A fresh install has onboarding pending: every Settings toggle defaults OFF until
+        // the user chooses in the first-run sheet. Existing users (onboarding already
+        // completed, or migrated) keep their prior implicit defaults, so nothing an
+        // updater relied on silently flips off.
+        let onboardingPending = !previewRenderingIsActive && !loadedConfig.onboardingCompleted
+        let autoCheckEnabled = previewRenderingIsActive
+            ? true
+            : (UserDefaults.standard.object(forKey: ToggleView.autoCheckKey) as? Bool
+                ?? !onboardingPending)
+        let helperRunning = previewRenderingIsActive
+            ? true
+            : run(["print", inputTarget]) == 0
+        let launchAtLoginEnabled = previewRenderingIsActive
+            ? true
+            : launchAtLoginPreference(defaultValue: onboardingPending ? false : helperRunning)
+        menuRunning = loadedConfig.specialFeatureEnabled
+            && specialFeatureAvailable
+            && helperRunning
+        config = loadedConfig
+        persistedConfig = loadedConfig
+        controlState = AppControlState(
+            launchAtLogin: launchAtLoginEnabled,
+            automaticUpdateChecks: autoCheckEnabled,
+            specialFeatureEnabled: menuRunning
+        )
+        persistedControlState = controlState
+        browserExtensionShortcuts = detectedBrowserExtensionShortcuts
+        let statuses = evaluateShortcutConflicts(
+            candidate: loadedConfig,
+            persisted: loadedConfig,
+            browserExtensionShortcuts: detectedBrowserExtensionShortcuts,
+            specialFeatureActive: menuRunning,
+            chatGPTAvailable: quickLaunchTargetIsAvailable(.chatGPT),
+            claudeAvailable: quickLaunchTargetIsAvailable(.claude)
+        )
+        contentView = SettingsContentView(
+            config: loadedConfig,
+            statuses: statuses,
+            specialFeatureOn: menuRunning,
+            specialFeatureAvailable: specialFeatureAvailable,
+            width: 872
+        )
+        preferencesView = PreferencesContentView(
+            accessibilityGranted: helperAccessibilityGranted(),
+            launchAtLogin: launchAtLoginEnabled,
+            autoCheck: autoCheckEnabled,
+            showMenuBarIcon: loadedConfig.showMenuBarIcon,
+            caffeinateMenu: loadedConfig.caffeinateMenuEnabled,
+            width: 872)
+        appProfilesView = AppProfilesContentView(instances: loadedConfig.instances, width: 872)
+
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+
+        addSubview(headerWordmark)
+        scrollView.frame = NSRect(x: 34, y: 122, width: 872, height: 702)
+        scrollView.hasVerticalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.drawsBackground = false
+        scrollView.documentView = contentView
+        addSubview(scrollView)
+        saveButton.onPress = { [weak self] in
+            self?.saveConfiguration()
+        }
+        addSubview(saveButton)
+        if !previewRenderingIsActive {
+            onboardingReturnButton.onPress = { [weak self] in
+                guard let self = self else { return }
+                self.onboardingReviewInProgress = false
+                self.presentOnboarding(force: true)
+            }
+            addSubview(onboardingReturnButton)
+        }
+
+        wireRowCallbacks()
+        recomputeConflictBadges()   // badges correct on first paint
+        appActivationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshSpecialFeatureAvailability()
+            self?.refreshAccessibilityStatus()
+            self?.refreshAppProfileHealth()
+        }
+        refreshAppProfileHealth()
+        refreshSupportedAppCandidates()
+        healManagedAppProfilesIfNeeded()
+
+        // Launch at login controls only the next login. The helper may still be
+        // running now to provide mouse shortcuts and menu-bar icons.
+        preferencesView.launchAtLoginRow.onToggleChange = { on in
+            if on {
+                UserDefaults.standard.set(true, forKey: launchAtLoginPreferenceKey)
+                guard self.ensureLaunchAgentSetup() else {
+                    UserDefaults.standard.set(false, forKey: launchAtLoginPreferenceKey)
+                    self.preferencesView.launchAtLoginRow.toggle.isOn = false
+                    self.configurationDidChange()
+                    return
+                }
+                _ = run(["enable", inputTarget])
+                _ = ensureInputHelperRunning(launchAtLoginEnabled: true)
+            } else {
+                UserDefaults.standard.set(false, forKey: launchAtLoginPreferenceKey)
+                guard self.ensureLaunchAgentSetup() else {
+                    UserDefaults.standard.set(true, forKey: launchAtLoginPreferenceKey)
+                    self.preferencesView.launchAtLoginRow.toggle.isOn = true
+                    NSSound.beep()
+                    self.configurationDidChange()
+                    return
+                }
+                _ = ensureInputHelperRunning(launchAtLoginEnabled: false)
+                _ = run(["disable", inputTarget])
+            }
+            self.configurationDidChange()
+        }
+        preferencesView.autoUpdateRow.onToggleChange = { [weak self] on in
+            UserDefaults.standard.set(on, forKey: ToggleView.autoCheckKey)
+            self?.configurationDidChange()
+        }
+        preferencesView.openAccessibilityLink.onClick = { [weak self] in
+            self?.beginAccessibilitySetup()
+        }
+        preferencesView.recheckAccessibilityLink.onClick = { [weak self] in
+            self?.recheckAccessibilityStatus()
+        }
+        preferencesView.resetAccessibilityLink.onClick = { [weak self] in
+            self?.confirmAccessibilityReset()
+        }
+        // Auto-check for updates on launch (app-only; lights up the header button if newer).
+        if !previewRenderingIsActive && autoCheckEnabled {
+            checkForUpdates(silent: true)
+        }
+    }
+
+    deinit {
+        if let appActivationObserver = appActivationObserver {
+            NotificationCenter.default.removeObserver(appActivationObserver)
+        }
+    }
+
+    /// Switch between Mappings (0), Settings (1), and App Profiles (2).
+    func selectTab(_ index: Int) {
+        let previousTab = activeTab
+        activeTab = index
+        // Crossfade the swapped content only; the window and scroll frame never resize.
+        // Previews must stay deterministic, so fixture rendering swaps instantly.
+        if !previewRenderingIsActive && index != previousTab && scrollView.documentView != nil {
+            scrollView.contentView.wantsLayer = true
+            let fade = CATransition()
+            fade.type = .fade
+            fade.duration = 0.18
+            fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            scrollView.contentView.layer?.add(fade, forKey: "tabContentFade")
+        }
+        switch index {
+        case 1: scrollView.documentView = preferencesView
+        case 2:
+            scrollView.documentView = appProfilesView
+            refreshSupportedAppCandidates(showLoading: supportedAppCandidateCache == nil)
+        default: scrollView.documentView = contentView
+        }
+        needsDisplay = true
+    }
+
+    /// Deterministic preview-only state used to verify the pending-save affordance.
+    func showUnsavedChangesPreview() {
+        guard previewRenderingIsActive else { return }
+        unsavedChangesPreviewOverride = true
+        saveStatusMessage = nil
+        needsDisplay = true
+    }
+
+    func showSaveButtonHoverPreview() {
+        guard previewRenderingIsActive else { return }
+        saveButton.showHoverPreview()
+    }
+
+    func showUpdateButtonHoverPreview() {
+        guard previewRenderingIsActive else { return }
+        setUpdateButtonHovered(true)
+    }
+
+    func showCloseButtonHoverPreview() {
+        guard previewRenderingIsActive else { return }
+        setCloseButtonHovered(true)
+    }
+
+    func showSupportedAppProfilesPreview() {
+        guard previewRenderingIsActive else { return }
+        let legacyInstances = persistedConfig.instances.filter {
+            $0.launcherKind == .legacyExternal
+        }
+        let candidates = legacyInstances.compactMap { instance -> AppProfileCandidate? in
+            guard instance.launcherKind == .legacyExternal else { return nil }
+            let displayName = instance.source.bundleIdentifier == "com.openai.codex"
+                ? "ChatGPT" : "Claude"
+            let app = InstalledApp(
+                bundleIdentifier: instance.source.bundleIdentifier,
+                bundleURL: URL(fileURLWithPath: instance.source.bundleURL, isDirectory: true),
+                displayName: displayName,
+                version: "preview"
+            )
+            return AppProfileCandidate(
+                app: app,
+                engine: .electron,
+                eligibility: .verified(ruleID: "preview-approved")
+            )
+        }
+        let chatGPT = legacyInstances.first {
+            $0.source.bundleIdentifier == "com.openai.codex"
+        }
+        let claude = legacyInstances.first {
+            $0.source.bundleIdentifier == "com.anthropic.claudefordesktop"
+        }
+        let previewSeeds: [(String, AppProfileInstance?, AppProfileLauncherKind, QuickLaunchMouseButton?)] = [
+            ("ChatGPT P", chatGPT, .legacyExternal, .forward),
+            ("ChatGPT G", chatGPT, .legacyExternal, nil),
+            ("ChatGPT A", chatGPT, .legacyExternal, nil),
+            ("Claude P", claude, .legacyExternal, .back),
+            ("Claude G", claude, .legacyExternal, nil),
+            ("Claude 3", claude, .managed, nil),
+        ]
+        let expandedInstances = previewSeeds.enumerated().compactMap { index, seed -> AppProfileInstance? in
+            let (label, base, kind, button) = seed
+            guard var instance = base else { return nil }
+            instance.id = UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", index + 1))!
+            instance.label = label
+            instance.launcherKind = kind
+            instance.profileOwnership = kind == .managed ? .managed : .external
+            instance.mouseButton = button
+            return instance
+        }
+        appProfilesView.setInstances(expandedInstances)
+        appProfilesView.setSupportedCandidates(candidates)
+        // Preview only: mirror the seeded assignments into `config` so the Mouse
+        // Button Shortcuts rows agree with the App Profiles chips in the rendered
+        // screenshots (the running app already shares one config between them).
+        // Sync persistedConfig too so this doesn't read as an unsaved change.
+        config.instances = expandedInstances
+        config.chatGPTMouseButton = nil
+        config.claudeMouseButton = nil
+        persistedConfig = config
+        refreshQuickLaunchAssignments()
+    }
+
+    func showEmptyAppProfilesPreview() {
+        guard previewRenderingIsActive else { return }
+        appProfilesView.setInstances([])
+        appProfilesView.setSupportedCandidates([])
+        appProfilesView.setStatus("")
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    private func wireRowCallbacks() {
+        // Footer gear → open the Settings tab.
+        contentView.settingsButton.onClick = { [weak self] in
+            self?.selectTab(1)
+        }
+        preferencesView.showMenuBarIconRow.onToggleChange = { [weak self] on in
+            guard let self = self else { return }
+            self.config.showMenuBarIcon = on
+            // Caffeinate cannot exist without the icon, so hiding the icon clears it.
+            if !on && self.preferencesView.caffeinateRow.toggle.isOn {
+                self.preferencesView.caffeinateRow.toggle.isOn = false
+                self.config.caffeinateMenuEnabled = false
+            }
+            self.configurationDidChange()
+        }
+        preferencesView.caffeinateRow.onToggleChange = { [weak self] on in
+            guard let self = self else { return }
+            if on && !self.preferencesView.showMenuBarIconRow.toggle.isOn {
+                // Ask to turn the menu-bar icon on first; enable both or revert.
+                if confirmEnableMenuBarIconForCaffeinate() {
+                    self.preferencesView.showMenuBarIconRow.toggle.isOn = true
+                    self.config.showMenuBarIcon = true
+                    self.config.caffeinateMenuEnabled = true
+                } else {
+                    self.preferencesView.caffeinateRow.toggle.isOn = false
+                    self.config.caffeinateMenuEnabled = false
+                }
+            } else {
+                self.config.caffeinateMenuEnabled = on
+            }
+            self.configurationDidChange()
+        }
+        appProfilesView.onGenerate = { [weak self] candidate in
+            self?.createManagedAppProfile(from: candidate)
+        }
+        appProfilesView.onOpen = { [weak self] instance in
+            self?.launchAppProfile(instance)
+        }
+        appProfilesView.onAssign = { [weak self] instance in
+            self?.assignMouseButton(to: instance)
+        }
+        appProfilesView.onToggleMenuBar = { [weak self] instance in
+            self?.toggleMenuBarPin(for: instance)
+        }
+        appProfilesView.onRename = { [weak self] instance in
+            self?.renameAppProfile(instance)
+        }
+        appProfilesView.onRemove = { [weak self] instance in
+            self?.confirmRemoveAppProfile(instance)
+        }
+        appProfilesView.onChangeApp = { [weak self] _ in
+            self?.showAppProfileAlert(
+                title: "No other supported app installed",
+                message: "Klik PRO currently supports ChatGPT and Claude for App Profile generation."
+            )
+        }
+        appProfilesView.onRefreshApps = { [weak self] in
+            guard let self else { return }
+            // Refresh both sides: re-scan installed apps for the generator, and reload the
+            // profiles list (picking up wrappers created/removed on disk) with their health.
+            self.refreshSupportedAppCandidates(showLoading: true, force: true)
+            self.appProfilesView.setInstances(self.persistedConfig.instances)
+            self.refreshAppProfileHealth()
+        }
+        contentView.mappingProfilesView.onOpen = { [weak self] instance in
+            self?.launchAppProfile(instance)
+        }
+        contentView.mappingProfilesView.onAssign = { [weak self] instance in
+            self?.assignMouseButton(to: instance)
+        }
+        appProfilesView.onInstancesChange = { [weak self] instances in
+            self?.contentView.mappingProfilesView.setInstances(instances)
+        }
+        appProfilesView.onRuntimeHealthChange = { [weak self] health in
+            self?.contentView.mappingProfilesView.setRuntimeHealth(health)
+        }
+        appProfilesView.onStatusChange = { [weak self] message, color in
+            self?.contentView.mappingProfilesView.setStatus(message, color: color)
+        }
+
+        contentView.middleButtonRow.onToggleChange = { [weak self] on in
+            self?.config.middleButton.enabled = on
+            self?.configurationDidChange()
+            self?.recomputeConflictBadges()
+        }
+        contentView.middleButtonRow.onComboChange = { [weak self] combo in
+            self?.config.middleButton.combo = combo
+            self?.configurationDidChange()
+            self?.recomputeConflictBadges()
+        }
+
+        contentView.gestureButtonRow.onToggleChange = { [weak self] on in
+            self?.config.gestureButton.enabled = on
+            self?.configurationDidChange()
+            self?.recomputeConflictBadges()
+        }
+        contentView.gestureButtonRow.onComboChange = { [weak self] combo in
+            self?.config.gestureButton.combo = combo
+            self?.configurationDidChange()
+            self?.recomputeConflictBadges()
+        }
+
+        contentView.forwardRow.onToggleChange = { [weak self] on in
+            self?.config.forwardButton.enabled = on
+            self?.configurationDidChange()
+            self?.recomputeConflictBadges()
+        }
+        contentView.forwardRow.onComboChange = { [weak self] combo in
+            self?.config.forwardButton.combo = combo
+            self?.configurationDidChange()
+            self?.recomputeConflictBadges()
+        }
+
+        contentView.backRow.onToggleChange = { [weak self] on in
+            self?.config.backButton.enabled = on
+            self?.configurationDidChange()
+            self?.recomputeConflictBadges()
+        }
+        contentView.backRow.onComboChange = { [weak self] combo in
+            self?.config.backButton.combo = combo
+            self?.configurationDidChange()
+            self?.recomputeConflictBadges()
+        }
+
+        contentView.middleButtonRow.onOpenAppChange = { [weak self] id in
+            self?.setDualAppMapping(instanceID: id, button: .middle)
+        }
+        contentView.gestureButtonRow.onOpenAppChange = { [weak self] id in
+            self?.setDualAppMapping(instanceID: id, button: .gesture)
+        }
+        contentView.forwardRow.onOpenAppChange = { [weak self] id in
+            self?.setDualAppMapping(instanceID: id, button: .forward)
+        }
+        contentView.backRow.onOpenAppChange = { [weak self] id in
+            self?.setDualAppMapping(instanceID: id, button: .back)
+        }
+
+        contentView.chatGPTHotkeyRow.onComboChange = { [weak self] combo in
+            self?.config.chatGPTHotkey.combo = combo
+            self?.configurationDidChange()
+            self?.refreshQuickLaunchAssignments()
+            self?.recomputeConflictBadges()
+        }
+        contentView.claudeHotkeyRow.onComboChange = { [weak self] combo in
+            self?.config.claudeHotkey.combo = combo
+            self?.configurationDidChange()
+            self?.refreshQuickLaunchAssignments()
+            self?.recomputeConflictBadges()
+        }
+
+        contentView.chatGPTButtonPicker.onSelectionChange = { [weak self] button in
+            self?.setQuickLaunchMouseButton(button, for: .chatGPT)
+        }
+        contentView.claudeButtonPicker.onSelectionChange = { [weak self] button in
+            self?.setQuickLaunchMouseButton(button, for: .claude)
+        }
+
+        contentView.specialFeatureToggleRow.onToggleChange = { [weak self] on in
+            guard let self = self else { return }
+            guard hasInstalledQuickLaunchTarget() else {
+                NSSound.beep()
+                self.refreshSpecialFeatureAvailability()
+                return
+            }
+            if on && !self.ensureLaunchAgentSetup() {
+                self.refreshSpecialFeatureAvailability()
+                return
+            }
+            if on && !previewRenderingIsActive && run(["print", inputTarget]) != 0 {
+                _ = ensureInputHelperRunning(
+                    launchAtLoginEnabled: self.preferencesView.launchAtLoginRow.toggle.isOn
+                )
+            }
+            self.config.specialFeatureEnabled = on
+            self.menuRunning = on
+            self.refreshSpecialFeatureAvailability()
+            self.configurationDidChange()
+        }
+
+        contentView.thumbWheelToggle.onChange = { [weak self] on in
+            guard let self = self else { return }
+            self.config.thumbWheel.enabled = on
+            // Grey out / re-enable the per-browser options with the master toggle.
+            self.contentView.chromeCheck.isEnabled = on
+            self.contentView.braveCheck.isEnabled = on
+            self.contentView.firefoxCheck.isEnabled = on
+            self.contentView.safariCheck.isEnabled = on
+            self.window?.invalidateCursorRects(for: self.contentView.chromeCheck)
+            self.window?.invalidateCursorRects(for: self.contentView.braveCheck)
+            self.window?.invalidateCursorRects(for: self.contentView.firefoxCheck)
+            self.window?.invalidateCursorRects(for: self.contentView.safariCheck)
+            self.configurationDidChange()
+        }
+        contentView.chromeCheck.onChange = { [weak self] on in
+            self?.config.thumbWheel.chromeEnabled = on
+            self?.configurationDidChange()
+        }
+        contentView.braveCheck.onChange = { [weak self] on in
+            self?.config.thumbWheel.braveEnabled = on
+            self?.configurationDidChange()
+        }
+        contentView.firefoxCheck.onChange = { [weak self] on in
+            self?.config.thumbWheel.firefoxEnabled = on
+            self?.configurationDidChange()
+        }
+        contentView.safariCheck.onChange = { [weak self] on in
+            self?.config.thumbWheel.safariEnabled = on
+            self?.configurationDidChange()
+        }
+    }
+
+    private var hasUnsavedConfigurationChanges: Bool {
+        unsavedChangesPreviewOverride
+            || config != persistedConfig
+            || controlState != persistedControlState
+    }
+
+    private func setDualAppMapping(instanceID: UUID?, button: QuickLaunchMouseButton) {
+        let currentOwner = config.instances.first { $0.mouseButton == button }
+        let selected = instanceID.flatMap { id in config.instances.first { $0.id == id } }
+        let previousButton = selected?.mouseButton
+        let releasesDifferentOwner = currentOwner?.id != nil && currentOwner?.id != instanceID
+        let movesSelectedApp = previousButton != nil && previousButton != button
+        if releasesDifferentOwner || movesSelectedApp {
+            let releasedNames = [currentOwner?.label, movesSelectedApp ? selected?.label : nil]
+                .compactMap { $0 }
+                .reduce(into: [String]()) { names, name in
+                    if !names.contains(name) { names.append(name) }
+                }
+                .joined(separator: " and ")
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Force Release the current assignment?"
+            alert.informativeText = "\(releasedNames) will lose only its mouse-button assignment. Its app, profile data, and saved keyboard shortcut remain intact."
+            alert.addButton(withTitle: "Force Release & Assign")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else {
+                refreshQuickLaunchAssignments()
+                return
+            }
+        }
+
+        config.instances.indices.forEach { index in
+            if config.instances[index].mouseButton == button
+                || (instanceID != nil && config.instances[index].id == instanceID) {
+                config.instances[index].mouseButton = nil
+            }
+        }
+        if config.chatGPTMouseButton == button { config.chatGPTMouseButton = nil }
+        if config.claudeMouseButton == button { config.claudeMouseButton = nil }
+        if let previousButton, selected?.legacyQuickLaunchTarget == .chatGPT {
+            if config.chatGPTMouseButton == previousButton { config.chatGPTMouseButton = nil }
+        }
+        if let previousButton, selected?.legacyQuickLaunchTarget == .claude {
+            if config.claudeMouseButton == previousButton { config.claudeMouseButton = nil }
+        }
+        if let selected {
+            if let target = selected.legacyQuickLaunchTarget {
+                switch target {
+                case .chatGPT: config.chatGPTMouseButton = button
+                case .claude: config.claudeMouseButton = button
+                }
+            } else if let index = config.instances.firstIndex(where: { $0.id == selected.id }) {
+                config.instances[index].mouseButton = button
+            }
+        }
+        config = normalizedQuickLaunchConfig(config)
+        configurationDidChange()
+        refreshButtonAssignmentViews()
+    }
+
+    private func beginAppProfileLifecycle() -> Bool {
+        guard !saveInProgress,
+              !appProfileLifecycleInProgress,
+              !hasUnsavedConfigurationChanges else {
+            return false
+        }
+        appProfileLifecycleInProgress = true
+        window?.makeFirstResponder(nil)
+        let shield = NSView(frame: bounds)
+        shield.autoresizingMask = [.width, .height]
+        shield.setAccessibilityLabel("App Profile change in progress")
+        addSubview(shield, positioned: .above, relativeTo: nil)
+        appProfileInteractionShield = shield
+        saveButton.isEnabled = false
+        return true
+    }
+
+    private func finishAppProfileLifecycle() {
+        appProfileInteractionShield?.removeFromSuperview()
+        appProfileInteractionShield = nil
+        appProfileLifecycleInProgress = false
+        saveButton.isEnabled = !saveInProgress
+    }
+
+    private func refreshSupportedAppCandidates(showLoading: Bool = false, force: Bool = false) {
+        guard !previewRenderingIsActive else {
+            appProfilesView.setSupportedCandidates([])
+            return
+        }
+        if let cached = supportedAppCandidateCache, !force {
+            appProfilesView.setSupportedCandidates(cached)
+            return
+        }
+        guard !supportedAppDiscoveryInProgress else { return }
+        supportedAppDiscoveryInProgress = true
+        if showLoading || supportedAppCandidateCache == nil {
+            appProfilesView.setAppDiscoveryLoading()
+        }
+        appProfileQueue.async { [weak self] in
+            guard let self else { return }
+            let supported = self.appProfileManager.supportedCandidates()
+            DispatchQueue.main.async {
+                self.supportedAppDiscoveryInProgress = false
+                self.supportedAppCandidateCache = supported
+                self.appProfilesView.setSupportedCandidates(supported)
+            }
+        }
+    }
+
+    /// Launch-time heal for already-generated profiles: existing instances
+    /// gain any environment their compiled-in rule now requires (e.g.
+    /// CLAUDE_CONFIG_DIR) plus their visible home symlink, in place, without
+    /// touching profile data — so users never have to remove and regenerate a
+    /// profile they are actively using. Idempotent and non-fatal; skipped
+    /// entirely while rendering deterministic previews.
+    private func healManagedAppProfilesIfNeeded() {
+        guard !previewRenderingIsActive, !persistedConfig.instances.isEmpty else { return }
+        let healed = appProfileManager.healManagedInstances(config: persistedConfig)
+        guard healed != persistedConfig else { return }
+        persistedConfig = healed
+        config.instances = healed.instances
+    }
+
+    private func createManagedAppProfile(from candidate: AppProfileCandidate) {
+        guard !saveInProgress, !appProfileLifecycleInProgress else {
+            showAppProfileAlert(
+                title: "Please wait",
+                message: "Finish the current Save or App Profile change before starting another one."
+            )
+            return
+        }
+        guard !hasUnsavedConfigurationChanges else {
+            showAppProfileAlert(
+                title: "Save current changes first",
+                message: "Save or restore the current mapping changes before adding an App Profile."
+            )
+            return
+        }
+        let proposedName = nextDualAppName(for: candidate)
+        guard let request = requestDualAppNameOptions(
+            title: "Name your App Profile",
+            informativeText: "This name appears under the generated icon. You can rename it later.",
+            initialValue: proposedName,
+            actionTitle: "Generate",
+            allowDockOption: true
+        ) else { return }
+        let requestedName = request.name
+        guard beginAppProfileLifecycle() else {
+            showAppProfileAlert(
+                title: "Save current changes first",
+                message: "The App Profile was not created. Finish any current Save, then save or restore your edits first."
+            )
+            return
+        }
+        appProfilesView.setStatus("Creating \(candidate.app.displayName)…")
+        let currentConfig = persistedConfig
+        appProfileQueue.async { [weak self] in
+            guard let self else { return }
+            do {
+                let result = try self.appProfileManager.create(
+                    from: candidate,
+                    label: requestedName,
+                    config: currentConfig
+                )
+                let dockResult = request.addLauncherToDock
+                    ? Self.addLauncherToDock(URL(fileURLWithPath: result.instance.launcherPath, isDirectory: true))
+                    : DockPinResult.notRequested
+                let applied = applySavedConfig()
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.config = result.config
+                    self.persistedConfig = result.config
+                    self.appProfilesView.setInstances(result.config.instances)
+                    let dockSuffix: String
+                    switch dockResult {
+                    case .notRequested:
+                        dockSuffix = ""
+                    case .added:
+                        dockSuffix = " Added to Dock."
+                    case .alreadyPresent:
+                        dockSuffix = " Already in Dock."
+                    case .failed:
+                        dockSuffix = " Dock icon was not added."
+                    }
+                    self.appProfilesView.setStatus(
+                        applied
+                            ? "\(result.instance.label) was generated and opened.\(dockSuffix)"
+                            : "\(result.instance.label) was generated; helper apply is pending.\(dockSuffix)",
+                        color: applied && dockResult != .failed ? .systemGreen : .systemOrange
+                    )
+                    self.refreshAppProfileHealth()
+                    self.launchAppProfile(result.instance)
+                    self.needsDisplay = true
+                }
+            } catch let error as AppProfileManagerError {
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.appProfilesView.setStatus("App Profile was not created.", color: .systemRed)
+                    self.showAppProfileAlert(
+                        title: "App Profile was not created",
+                        message: self.appProfileErrorMessage(error)
+                    )
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.appProfilesView.setStatus("App Profile was not created.", color: .systemRed)
+                }
+            }
+        }
+    }
+
+    private func nextDualAppName(for candidate: AppProfileCandidate) -> String {
+        let base = candidate.app.bundleIdentifier == "com.openai.codex"
+            ? "ChatGPT"
+            : candidate.app.displayName
+        let hasNamedChatGPTProfiles = persistedConfig.instances.contains {
+            $0.source.bundleIdentifier.hasPrefix("local.chatgpt.")
+        }
+        let matchingCount = persistedConfig.instances.filter { instance in
+            if base == "ChatGPT",
+               hasNamedChatGPTProfiles,
+               instance.legacyQuickLaunchTarget == .chatGPT {
+                return false
+            }
+            return instance.label.localizedCaseInsensitiveContains(base)
+                || instance.source.bundleURL == candidate.app.bundleURL.path
+                || (base == "ChatGPT" && instance.source.bundleIdentifier.hasPrefix("local.chatgpt."))
+                || (base == "Claude" && instance.source.bundleIdentifier.hasPrefix("local.claude."))
+        }.count
+        return "\(base) \(matchingCount + 1)"
+    }
+
+    private struct DualAppNameRequest {
+        let name: String
+        let addLauncherToDock: Bool
+    }
+
+    private enum DockPinResult: Equatable {
+        case notRequested
+        case added
+        case alreadyPresent
+        case failed
+    }
+
+    private enum DockRenameResult: Equatable {
+        case notPresent
+        case updated
+        case failed
+    }
+
+    private func requestDualAppName(
+        title: String,
+        informativeText: String,
+        initialValue: String,
+        actionTitle: String,
+        excludingInstanceID: UUID? = nil
+    ) -> String? {
+        requestDualAppNameOptions(
+            title: title,
+            informativeText: informativeText,
+            initialValue: initialValue,
+            actionTitle: actionTitle,
+            excludingInstanceID: excludingInstanceID,
+            allowDockOption: false
+        )?.name
+    }
+
+    private func requestDualAppNameOptions(
+        title: String,
+        informativeText: String,
+        initialValue: String,
+        actionTitle: String,
+        excludingInstanceID: UUID? = nil,
+        allowDockOption: Bool
+    ) -> DualAppNameRequest? {
+        let field = NSTextField(string: initialValue)
+        field.frame = NSRect(x: 0, y: allowDockOption ? 30 : 0, width: 320, height: 26)
+        field.selectText(nil)
+        let addToDockCheckbox = NSButton(checkboxWithTitle: "Add launcher icon to Dock", target: nil, action: nil)
+        addToDockCheckbox.frame = NSRect(x: 0, y: 0, width: 320, height: 22)
+        addToDockCheckbox.state = .off
+        let accessory: NSView
+        if allowDockOption {
+            field.frame.origin.y = 30
+            let view = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 58))
+            view.addSubview(field)
+            view.addSubview(addToDockCheckbox)
+            accessory = view
+        } else {
+            accessory = field
+        }
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = informativeText
+        alert.accessoryView = accessory
+        alert.addButton(withTitle: actionTitle)
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            showAppProfileAlert(title: "Enter a name", message: "The App Profile name cannot be empty.")
+            return nil
+        }
+        guard !persistedConfig.instances.contains(where: {
+            $0.id != excludingInstanceID && $0.label.caseInsensitiveCompare(name) == .orderedSame
+        }) else {
+            showAppProfileAlert(
+                title: "That name is already used",
+                message: "Choose a unique name so icons and button assignments stay clear."
+            )
+            return nil
+        }
+        return DualAppNameRequest(
+            name: name,
+            addLauncherToDock: allowDockOption && addToDockCheckbox.state == .on
+        )
+    }
+
+    private static func addLauncherToDock(_ launcherURL: URL) -> DockPinResult {
+        let launcherPath = launcherURL.standardizedFileURL.path
+        guard FileManager.default.fileExists(atPath: launcherPath) else { return .failed }
+        if dockPersistentAppsContain(path: launcherPath) { return .alreadyPresent }
+
+        let dockEntry = """
+        <dict>
+          <key>tile-data</key>
+          <dict>
+            <key>file-data</key>
+            <dict>
+              <key>_CFURLString</key>
+              <string>\(xmlEscaped(launcherPath))</string>
+              <key>_CFURLStringType</key>
+              <integer>0</integer>
+            </dict>
+            <key>file-label</key>
+            <string>\(xmlEscaped(launcherURL.deletingPathExtension().lastPathComponent))</string>
+          </dict>
+          <key>tile-type</key>
+          <string>file-tile</string>
+        </dict>
+        """
+
+        guard runProcess("/usr/bin/defaults", [
+            "write", "com.apple.dock", "persistent-apps", "-array-add", dockEntry
+        ]) == 0 else {
+            return .failed
+        }
+        _ = runProcess("/usr/bin/killall", ["Dock"])
+        return dockPersistentAppsContain(path: launcherPath) ? .added : .failed
+    }
+
+    private static func xmlEscaped(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&apos;")
+    }
+
+    private static func dockPersistentAppsContain(path launcherPath: String) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+        process.arguments = ["read", "com.apple.dock", "persistent-apps"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return false
+        }
+        guard process.terminationStatus == 0 else { return false }
+        let output = pipe.fileHandleForReading.readDataToEndOfFile()
+        return String(data: output, encoding: .utf8)?.contains(launcherPath) == true
+    }
+
+    private static func renameDockLauncherIfPresent(
+        from previousURL: URL,
+        to updatedURL: URL
+    ) -> DockRenameResult {
+        let previousPath = previousURL.standardizedFileURL.path
+        let updatedPath = updatedURL.standardizedFileURL.path
+        guard previousPath != updatedPath else { return .notPresent }
+
+        let appID = "com.apple.dock" as CFString
+        guard let rawEntries = CFPreferencesCopyAppValue(
+            "persistent-apps" as CFString,
+            appID
+        ) as? [[String: Any]] else {
+            return .notPresent
+        }
+        var entries = rawEntries
+        var found = false
+        for index in entries.indices {
+            guard var tileData = entries[index]["tile-data"] as? [String: Any],
+                  var fileData = tileData["file-data"] as? [String: Any],
+                  let storedPath = fileData["_CFURLString"] as? String,
+                  URL(fileURLWithPath: storedPath).standardizedFileURL.path == previousPath else {
+                continue
+            }
+            fileData["_CFURLString"] = updatedPath
+            fileData["_CFURLStringType"] = 0
+            tileData["file-data"] = fileData
+            tileData["file-label"] = updatedURL.deletingPathExtension().lastPathComponent
+            entries[index]["tile-data"] = tileData
+            found = true
+        }
+        guard found else { return .notPresent }
+
+        CFPreferencesSetAppValue(
+            "persistent-apps" as CFString,
+            entries as CFArray,
+            appID
+        )
+        guard CFPreferencesAppSynchronize(appID) else { return .failed }
+        _ = runProcess("/usr/bin/killall", ["Dock"])
+        return dockPersistentAppsContain(path: updatedPath) ? .updated : .failed
+    }
+
+    private static func runProcess(_ executable: String, _ arguments: [String]) -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus
+        } catch {
+            return -1
+        }
+    }
+
+    private func toggleMenuBarPin(for instance: AppProfileInstance) {
+        guard !saveInProgress, !appProfileLifecycleInProgress else {
+            showAppProfileAlert(
+                title: "Please wait",
+                message: "Finish the current Save or App Profile change before changing menu-bar visibility."
+            )
+            return
+        }
+        guard !hasUnsavedConfigurationChanges else {
+            showAppProfileAlert(
+                title: "Save current changes first",
+                message: "Save or restore the current mapping changes before changing menu-bar visibility."
+            )
+            return
+        }
+
+        var updated = persistedConfig
+        guard let index = updated.instances.firstIndex(where: { $0.id == instance.id }) else { return }
+        let newValue = !updated.instances[index].pinToMenuBar
+        updated.instances[index].pinToMenuBar = newValue
+        let previous = persistedConfig
+        appProfileLifecycleInProgress = true
+        saveButton.isEnabled = false
+        appProfilesView.setInstances(updated.instances)
+        appProfilesView.setStatus(
+            newValue
+                ? "Showing \(instance.label) in the menu bar…"
+                : "Hiding \(instance.label) from the menu bar…",
+            color: .appTextSecondary
+        )
+        needsDisplay = true
+
+        appProfileQueue.async { [weak self] in
+            guard let self else { return }
+            let saved = KlikProConfigStore.save(updated)
+            let applied = saved && applySavedConfig()
+            DispatchQueue.main.async {
+                self.appProfileLifecycleInProgress = false
+                self.saveButton.isEnabled = !self.saveInProgress
+                if saved {
+                    self.config = updated
+                    self.persistedConfig = updated
+                    self.appProfilesView.setInstances(updated.instances)
+                    self.appProfilesView.setStatus(
+                        newValue
+                            ? "\(instance.label) will show in the menu bar."
+                            : "\(instance.label) will not show in the menu bar.",
+                        color: applied ? .systemGreen : .systemOrange
+                    )
+                    self.refreshAppProfileHealth()
+                } else {
+                    self.config = previous
+                    self.persistedConfig = previous
+                    self.appProfilesView.setInstances(previous.instances)
+                    self.appProfilesView.setStatus(
+                        "Menu bar setting was not changed.",
+                        color: .systemRed
+                    )
+                    self.showAppProfileAlert(
+                        title: "Menu bar setting was not changed",
+                        message: "Klik PRO could not save the menu-bar setting for \(instance.label)."
+                    )
+                }
+                self.needsDisplay = true
+            }
+        }
+    }
+
+    private func renameAppProfile(_ instance: AppProfileInstance) {
+        guard instance.launcherKind == .managed,
+              let name = requestDualAppName(
+                title: "Rename \(instance.label)",
+                informativeText: "Only the displayed name and generated icon change. Login and profile data stay in place.",
+                initialValue: instance.label,
+                actionTitle: "Rename",
+                excludingInstanceID: instance.id
+              ) else { return }
+        guard beginAppProfileLifecycle() else { return }
+        let currentConfig = persistedConfig
+        let previousLauncherURL = URL(
+            fileURLWithPath: instance.launcherPath,
+            isDirectory: true
+        )
+        appProfileQueue.async { [weak self] in
+            guard let self else { return }
+            do {
+                let updated = try self.appProfileManager.updateManagedInstance(
+                    instanceID: instance.id,
+                    label: name,
+                    menuColor: instance.menuColor,
+                    pinToMenuBar: instance.pinToMenuBar,
+                    hotkey: instance.hotkey,
+                    mouseButton: instance.mouseButton,
+                    config: currentConfig
+                )
+                let updatedInstance = updated.instances.first { $0.id == instance.id }
+                let dockRenameResult = updatedInstance.map {
+                    Self.renameDockLauncherIfPresent(
+                        from: previousLauncherURL,
+                        to: URL(fileURLWithPath: $0.launcherPath, isDirectory: true)
+                    )
+                } ?? .notPresent
+                let applied = applySavedConfig()
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.config = updated
+                    self.persistedConfig = updated
+                    self.appProfilesView.setInstances(updated.instances)
+                    let dockSuffix = dockRenameResult == .failed
+                        ? " The Dock icon could not be refreshed; remove the old tile and add the renamed launcher again."
+                        : ""
+                    self.appProfilesView.setStatus(
+                        applied
+                            ? "Renamed to \(name).\(dockSuffix)"
+                            : "Renamed; helper apply is pending.\(dockSuffix)",
+                        color: applied && dockRenameResult != .failed ? .systemGreen : .systemOrange
+                    )
+                    self.refreshAppProfileHealth()
+                }
+            } catch let error as AppProfileManagerError {
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.showAppProfileAlert(
+                        title: "App Profile was not renamed",
+                        message: self.appProfileErrorMessage(error)
+                    )
+                }
+            } catch {
+                DispatchQueue.main.async { self.finishAppProfileLifecycle() }
+            }
+        }
+    }
+
+    private func assignMouseButton(to instance: AppProfileInstance) {
+        // Gate on a settled configuration, exactly like the other App Profile
+        // lifecycle actions. This is what keeps the two sections consistent: the
+        // assign flow saves immediately from persistedConfig, so it must not run
+        // while the working `config` holds unsaved Mouse Button Shortcuts edits
+        // (which it would otherwise silently discard).
+        guard !saveInProgress, !appProfileLifecycleInProgress else {
+            showAppProfileAlert(
+                title: "Please wait",
+                message: "Finish the current Save or App Profile change before assigning a mouse button."
+            )
+            return
+        }
+        guard !hasUnsavedConfigurationChanges else {
+            showAppProfileAlert(
+                title: "Save current changes first",
+                message: "Save or restore the current mapping changes before assigning a mouse button."
+            )
+            return
+        }
+        let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 390, height: 42))
+        let picker = NSPopUpButton(frame: NSRect(x: 0, y: 6, width: 390, height: 30))
+        for button in QuickLaunchMouseButton.allCases {
+            let owner = persistedConfig.instances.first { $0.mouseButton == button }
+            let state = owner.map { "Used: \($0.label)" } ?? "Available"
+            picker.addItem(withTitle: "\(button.title) Button — \(state)")
+        }
+        accessory.addSubview(picker)
+        let alert = NSAlert()
+        alert.messageText = "Assign a mouse button to \(instance.label)"
+        alert.informativeText = "The selected button will open this app, or bring its existing window forward."
+        alert.accessoryView = accessory
+        alert.addButton(withTitle: "Assign")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let button = QuickLaunchMouseButton.allCases[picker.indexOfSelectedItem]
+        let currentOwner = persistedConfig.instances.first { $0.mouseButton == button && $0.id != instance.id }
+        if let currentOwner {
+            let confirmation = NSAlert()
+            confirmation.alertStyle = .warning
+            confirmation.messageText = "Force Release \(button.title) Button?"
+            confirmation.informativeText = "It is currently assigned to \(currentOwner.label). Only that button assignment will be released; the app and its saved shortcut remain intact."
+            confirmation.addButton(withTitle: "Force Release & Assign")
+            confirmation.addButton(withTitle: "Cancel")
+            guard confirmation.runModal() == .alertFirstButtonReturn else { return }
+        }
+
+        var updated = persistedConfig
+        updated.instances.indices.forEach { index in
+            if updated.instances[index].mouseButton == button {
+                updated.instances[index].mouseButton = nil
+            }
+        }
+        if updated.chatGPTMouseButton == button { updated.chatGPTMouseButton = nil }
+        if updated.claudeMouseButton == button { updated.claudeMouseButton = nil }
+        if let target = instance.legacyQuickLaunchTarget {
+            switch target {
+            case .chatGPT: updated.chatGPTMouseButton = button
+            case .claude: updated.claudeMouseButton = button
+            }
+        } else if let index = updated.instances.firstIndex(where: { $0.id == instance.id }) {
+            updated.instances[index].mouseButton = button
+        }
+        guard KlikProConfigStore.save(updated) else {
+            showAppProfileAlert(title: "Button was not assigned", message: "Klik PRO could not save a valid assignment.")
+            return
+        }
+        updated = normalizedQuickLaunchConfig(updated)
+        let applied = applySavedConfig()
+        config = updated
+        persistedConfig = updated
+        refreshButtonAssignmentViews()
+        appProfilesView.setStatus(
+            applied ? "\(button.title) Button opens \(instance.label)." : "Assigned; helper apply is pending.",
+            color: applied ? .systemGreen : .systemOrange
+        )
+        refreshAppProfileHealth()
+    }
+
+    private func configureAppProfile(_ instance: AppProfileInstance) {
+        guard instance.launcherKind == .managed else { return }
+        guard !saveInProgress, !appProfileLifecycleInProgress else {
+            showAppProfileAlert(
+                title: "Please wait",
+                message: "Finish the current Save or App Profile change before configuring this instance."
+            )
+            return
+        }
+        guard !hasUnsavedConfigurationChanges else {
+            showAppProfileAlert(
+                title: "Save current changes first",
+                message: "Save or restore the current mapping changes before configuring an App Profile."
+            )
+            return
+        }
+
+        let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 390, height: 202))
+        let labelTitle = NSTextField(labelWithString: "Label")
+        labelTitle.frame = NSRect(x: 0, y: 176, width: 80, height: 20)
+        let labelField = NSTextField(string: instance.label)
+        labelField.frame = NSRect(x: 88, y: 172, width: 296, height: 26)
+        let colorTitle = NSTextField(labelWithString: "Marker")
+        colorTitle.frame = NSRect(x: 0, y: 142, width: 80, height: 20)
+        let colorPicker = NSPopUpButton(frame: NSRect(x: 88, y: 136, width: 180, height: 30))
+        colorPicker.addItem(withTitle: "None")
+        AppProfileMenuColor.allCases.forEach { colorPicker.addItem(withTitle: $0.title) }
+        if let color = instance.menuColor,
+           let index = AppProfileMenuColor.allCases.firstIndex(of: color) {
+            colorPicker.selectItem(at: index + 1)
+        }
+        let pinCheck = NSButton(
+            checkboxWithTitle: "Pin this instance to the menu bar",
+            target: nil,
+            action: nil
+        )
+        pinCheck.frame = NSRect(x: 88, y: 104, width: 296, height: 24)
+        pinCheck.state = instance.pinToMenuBar ? .on : .off
+        let hotkeyCheck = NSButton(
+            checkboxWithTitle: "Enable global hotkey",
+            target: nil,
+            action: nil
+        )
+        hotkeyCheck.frame = NSRect(x: 88, y: 70, width: 164, height: 24)
+        hotkeyCheck.state = instance.hotkey.enabled ? .on : .off
+        let recorder = ShortcutRecorderView(
+            combo: instance.hotkey.combo,
+            frame: NSRect(x: 258, y: 66, width: 126, height: 30)
+        )
+        let mouseTitle = NSTextField(labelWithString: "Mouse button")
+        mouseTitle.frame = NSRect(x: 0, y: 28, width: 80, height: 20)
+        let mousePicker = NSPopUpButton(frame: NSRect(x: 88, y: 22, width: 180, height: 30))
+        mousePicker.addItem(withTitle: "None")
+        QuickLaunchMouseButton.allCases.forEach { mousePicker.addItem(withTitle: $0.title) }
+        if let button = instance.mouseButton,
+           let index = QuickLaunchMouseButton.allCases.firstIndex(of: button) {
+            mousePicker.selectItem(at: index + 1)
+        }
+        [
+            labelTitle, labelField, colorTitle, colorPicker, pinCheck, hotkeyCheck, recorder,
+            mouseTitle, mousePicker,
+        ].forEach(accessory.addSubview)
+
+        let alert = NSAlert()
+        alert.messageText = "Configure \(instance.label)"
+        alert.informativeText = "Assignments are UUID-keyed. Duplicate mouse buttons, duplicate enabled hotkeys, and Command-Tab are rejected."
+        alert.accessoryView = accessory
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard beginAppProfileLifecycle() else {
+            showAppProfileAlert(
+                title: "Please wait",
+                message: "The App Profile configuration was not changed."
+            )
+            return
+        }
+
+        let selectedMouse: QuickLaunchMouseButton? = mousePicker.indexOfSelectedItem == 0
+            ? nil
+            : QuickLaunchMouseButton.allCases[mousePicker.indexOfSelectedItem - 1]
+        let mapping = ShortcutMapping(
+            enabled: hotkeyCheck.state == .on,
+            combo: recorder.combo
+        )
+        let updatedLabel = labelField.stringValue
+        let updatedMenuColor: AppProfileMenuColor? = colorPicker.indexOfSelectedItem == 0
+            ? nil
+            : AppProfileMenuColor.allCases[colorPicker.indexOfSelectedItem - 1]
+        let updatedPin = pinCheck.state == .on
+        let currentConfig = persistedConfig
+        appProfilesView.setStatus("Saving \(instance.label)…")
+        appProfileQueue.async { [weak self] in
+            guard let self else { return }
+            do {
+                let updated = try self.appProfileManager.updateManagedInstance(
+                    instanceID: instance.id,
+                    label: updatedLabel,
+                    menuColor: updatedMenuColor,
+                    pinToMenuBar: updatedPin,
+                    hotkey: mapping,
+                    mouseButton: selectedMouse,
+                    config: currentConfig
+                )
+                let applied = applySavedConfig()
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.config = updated
+                    self.persistedConfig = updated
+                    self.appProfilesView.setInstances(updated.instances)
+                    self.appProfilesView.setStatus(
+                        applied ? "App Profile configuration saved." : "Saved; helper apply is pending.",
+                        color: applied ? .systemGreen : .systemOrange
+                    )
+                    self.refreshAppProfileHealth()
+                    self.needsDisplay = true
+                }
+            } catch let error as AppProfileManagerError {
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.appProfilesView.setStatus("App Profile was not changed.", color: .systemRed)
+                    self.showAppProfileAlert(
+                        title: "App Profile was not changed",
+                        message: self.appProfileErrorMessage(error)
+                    )
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.appProfilesView.setStatus("App Profile was not changed.", color: .systemRed)
+                }
+            }
+        }
+    }
+
+    private func confirmConvertAppProfile(_ instance: AppProfileInstance) {
+        guard instance.launcherKind == .legacyExternal else { return }
+        guard !saveInProgress, !appProfileLifecycleInProgress,
+              !hasUnsavedConfigurationChanges else {
+            showAppProfileAlert(
+                title: "Save current changes first",
+                message: "Finish any current Save, then save or restore edits before converting."
+            )
+            return
+        }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Convert \(instance.label) to a managed App Profile?"
+        alert.informativeText = "Klik PRO will create a new UUID-keyed launcher and profile, then transfer this row's assignments. The existing external launcher and all of its data remain untouched."
+        alert.addButton(withTitle: "Convert")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard beginAppProfileLifecycle() else { return }
+
+        let currentConfig = persistedConfig
+        appProfilesView.setStatus("Converting \(instance.label)…")
+        appProfileQueue.async { [weak self] in
+            guard let self else { return }
+            do {
+                let result = try self.appProfileManager.convertLegacy(
+                    instanceID: instance.id,
+                    config: currentConfig
+                )
+                let applied = applySavedConfig()
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.config = result.config
+                    self.persistedConfig = result.config
+                    self.appProfilesView.setInstances(result.config.instances)
+                    self.appProfilesView.setStatus(
+                        applied
+                            ? "\(result.instance.label) is now managed; the external launcher was untouched."
+                            : "Converted; helper apply is pending. The external launcher was untouched.",
+                        color: applied ? .systemGreen : .systemOrange
+                    )
+                    self.refreshAppProfileHealth()
+                    self.needsDisplay = true
+                }
+            } catch let error as AppProfileManagerError {
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.appProfilesView.setStatus("Legacy conversion was not performed.", color: .systemRed)
+                    self.showAppProfileAlert(
+                        title: "Legacy conversion is unavailable",
+                        message: self.appProfileErrorMessage(error)
+                    )
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.appProfilesView.setStatus("Legacy conversion was not performed.", color: .systemRed)
+                }
+            }
+        }
+    }
+
+    private func confirmRemoveAppProfile(_ instance: AppProfileInstance) {
+        guard !saveInProgress, !appProfileLifecycleInProgress else {
+            showAppProfileAlert(
+                title: "Please wait",
+                message: "Finish the current Save or App Profile change before removing this profile."
+            )
+            return
+        }
+        guard !hasUnsavedConfigurationChanges else {
+            showAppProfileAlert(
+                title: "Save current changes first",
+                message: "Save or restore the current mapping changes before removing an App Profile."
+            )
+            return
+        }
+        guard instance.launcherKind == .managed else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Remove \(instance.label)?"
+        alert.informativeText = "The generated icon will be removed. Its login and profile data will be kept for recovery."
+        alert.addButton(withTitle: "Remove Icon")
+        alert.addButton(withTitle: "Cancel")
+        let response = alert.runModal()
+        guard response == .alertFirstButtonReturn else { return }
+        guard beginAppProfileLifecycle() else {
+            showAppProfileAlert(
+                title: "Please wait",
+                message: "Finish the current Save or App Profile change before removing this profile."
+            )
+            return
+        }
+
+        let currentConfig = persistedConfig
+        appProfilesView.setStatus("Removing \(instance.label)…")
+        appProfileQueue.async { [weak self] in
+            guard let self else { return }
+            do {
+                let result = try self.appProfileManager.remove(
+                    instanceID: instance.id,
+                    config: currentConfig,
+                    deleteProfileData: false
+                )
+                _ = applySavedConfig()
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.config = result.config
+                    self.persistedConfig = result.config
+                    self.appProfilesView.setInstances(result.config.instances)
+                    self.appProfilesView.setStatus(
+                        "\(instance.label) has been removed from Klik PRO.",
+                        color: .systemGreen
+                    )
+                    self.refreshAppProfileHealth()
+                    self.needsDisplay = true
+                }
+            } catch let error as AppProfileManagerError {
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.appProfilesView.setStatus("App Profile was not removed.", color: .systemRed)
+                    self.showAppProfileAlert(
+                        title: "App Profile was not removed",
+                        message: self.appProfileErrorMessage(error)
+                    )
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.appProfilesView.setStatus("App Profile was not removed.", color: .systemRed)
+                }
+            }
+        }
+    }
+
+    private func launchAppProfile(_ instance: AppProfileInstance) {
+        if instance.launcherKind == .managed {
+            do {
+                let launcherURL = try appProfileManager.generatedLauncherURL(for: instance)
+                let configuration = NSWorkspace.OpenConfiguration()
+                configuration.activates = true
+                NSWorkspace.shared.openApplication(
+                    at: launcherURL,
+                    configuration: configuration
+                ) { [weak self] _, error in
+                    guard error != nil else { return }
+                    DispatchQueue.main.async {
+                        self?.showAppProfileAlert(
+                            title: "App Profile could not be opened",
+                            message: "macOS could not open the validated launcher for \(instance.label)."
+                        )
+                    }
+                }
+            } catch {
+                showAppProfileAlert(
+                    title: "App Profile could not be opened",
+                    message: "The generated launcher for \(instance.label) is missing or no longer passes validation."
+                )
+            }
+            return
+        }
+        appProfileRuntime.launchOrFocus(instance) { [weak self] result in
+            guard case .failure(let error) = result else { return }
+            DispatchQueue.main.async {
+                self?.showAppProfileAlert(
+                    title: "App Profile action was blocked",
+                    message: self?.appProfileRuntimeErrorMessage(error)
+                        ?? "Klik PRO could not safely launch or focus this instance."
+                )
+            }
+        }
+    }
+
+    private func refreshAppProfileHealth() {
+        let instances = persistedConfig.instances
+        if previewRenderingIsActive {
+            appProfilesView.setRuntimeHealth(
+                Dictionary(uniqueKeysWithValues: instances.map { ($0.id, .ready) })
+            )
+            return
+        }
+        appProfileQueue.async { [weak self] in
+            guard let self else { return }
+            let health = Dictionary(uniqueKeysWithValues: instances.map {
+                ($0.id, self.appProfileRuntime.health(for: $0))
+            })
+            DispatchQueue.main.async {
+                self.appProfilesView.setRuntimeHealth(health)
+            }
+        }
+    }
+
+    private func appProfileRuntimeErrorMessage(_ error: AppProfileRuntimeError) -> String {
+        switch error {
+        case .unavailable(let health):
+            switch health {
+            case .ready:
+                return "The instance changed while it was being opened."
+            case .sourceUnavailable:
+                return "The exact source application is missing or changed."
+            case .verificationRequired(let reason):
+                return reason
+            case .launcherUnavailable:
+                return "The UUID-keyed launcher or profile path no longer passes validation."
+            case .externalUnavailable:
+                return "The external legacy launcher is missing."
+            }
+        case .processScanIncomplete:
+            return "Process identity could not be inspected completely, so Klik PRO failed closed."
+        case .ambiguousProcesses:
+            return "More than one verified root process references this profile. Klik PRO did not guess."
+        case .launchFailed:
+            return "macOS did not return a launched application for this instance."
+        case .processVerificationFailed:
+            return "The returned process did not match the exact executable and profile argument."
+        case .activationFailed:
+            return "The verified process did not become the frontmost application."
+        }
+    }
+
+    private func appProfileErrorMessage(_ error: AppProfileManagerError) -> String {
+        switch error {
+        case .sourceChanged:
+            return "The selected app changed after it was scanned. Scan it again before creating a profile."
+        case .creationDisabled(let reason):
+            return reason
+        case .duplicateInstanceID:
+            return "The generated instance UUID already exists. Nothing was created."
+        case .duplicateLabel:
+            return "That App Profile name is already used. Choose a unique name."
+        case .materializationFailed:
+            return "Klik PRO could not create and sign its managed launcher."
+        case .persistenceFailed:
+            return "Klik PRO could not save the updated configuration."
+        case .externalInstance:
+            return "Legacy external wrappers cannot be removed or claimed by Klik PRO."
+        case .launcherUnavailable:
+            return "The launcher is missing or no longer passes managed-path validation."
+        case .launcherCleanupFailed:
+            return "Klik PRO could not safely stage its managed launcher for removal. Nothing was removed."
+        case .invalidAssignments:
+            return "Assignments must use a unique mouse button and unique enabled hotkey. Command-Tab is never allowed."
+        case .processScanIncomplete:
+            return "Process inspection was incomplete, so profile deletion was blocked."
+        case .profileInUse:
+            return "A verified process still references this profile. Quit that instance before deleting its data."
+        case .profileCleanupFailed:
+            return "The profile path, UUID ownership marker, or removal staging check failed. Data was not deleted."
+        case .conversionUnavailable:
+            return "Only one of the two known legacy external rows can be explicitly converted."
+        case .vaultUnavailable:
+            return "No data folder is configured or mounted, so nothing could be scanned."
+        case .vaultManifestInvalid:
+            return "That folder is not a Klik PRO data folder (no valid vault.json), so it was not adopted."
+        }
+    }
+
+    private func showAppProfileAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
+    private func recheckControlState() {
+        controlState = AppControlState(
+            launchAtLogin: preferencesView.launchAtLoginRow.toggle.isOn,
+            automaticUpdateChecks: preferencesView.autoUpdateRow.toggle.isOn,
+            specialFeatureEnabled: contentView.specialFeatureToggleRow.toggle.isOn
+        )
+    }
+
+    private func configurationDidChange() {
+        recheckControlState()
+        // A new edit supersedes any stale Saved/check-for-updates footer message.
+        if !saveInProgress {
+            saveStatusMessage = nil
+        }
+        needsDisplay = true
+    }
+
+    private func refreshSpecialFeatureAvailability() {
+        let available = hasInstalledQuickLaunchTarget()
+        menuRunning = config.specialFeatureEnabled && available
+        contentView.setSpecialFeatureAvailability(available, isOn: menuRunning)
+        refreshQuickLaunchAssignments()
+        recomputeConflictBadges()
+        needsDisplay = true
+    }
+
+    private func refreshAccessibilityStatus() {
+        preferencesView.setAccessibilityGranted(helperAccessibilityGranted())
+    }
+
+    /// Requests a fresh, no-prompt TCC check from the helper and reloads the status
+    /// pill after the helper has had a moment to append its response to the event log.
+    private func recheckAccessibilityStatus() {
+        guard !previewRenderingIsActive else {
+            refreshAccessibilityStatus()
+            return
+        }
+        preferencesView.recheckAccessibilityLink.title = "Checking…"
+        DistributedNotificationCenter.default().post(
+            name: accessibilityStatusCheckRequestedNotification,
+            object: nil
+        )
+        refreshAccessibilityStatus()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            self?.refreshAccessibilityStatus()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
+            self?.refreshAccessibilityStatus()
+            self?.preferencesView.recheckAccessibilityLink.title = "Recheck"
+        }
+    }
+
+    func showFirstLaunchOnboardingIfNeeded() {
+        presentOnboarding(force: false)
+    }
+
+    /// Reopening Klik PRO after a menu-bar "Quit" left the background helper
+    /// stopped (Quit disables + boots it out), so the menu-bar icon and mouse
+    /// shortcuts stayed gone until the user toggled Launch at login. Bringing
+    /// the app to the foreground is a clear intent to use it, so restart the
+    /// helper for this session — honoring the resolved Launch-at-login value so
+    /// a prior "off" choice still means no auto-start at the next login.
+    /// `ensureInputHelperRunning` no-ops when the helper is already running, so
+    /// a normal launch never restarts or churns it. Onboarding starts the
+    /// helper through its own accessibility flow, so skip while it is pending.
+    func ensureBackgroundHelperRunningAtLaunch() {
+        guard !previewRenderingIsActive, config.onboardingCompleted else { return }
+        let launchAtLoginEnabled = controlState.launchAtLogin
+        saveApplyQueue.async {
+            _ = ensureInputHelperRunning(launchAtLoginEnabled: launchAtLoginEnabled)
+        }
+    }
+
+    private func presentOnboarding(force: Bool) {
+        guard !previewRenderingIsActive,
+              force || !config.onboardingCompleted,
+              let window = window,
+              window.attachedSheet == nil else { return }
+
+        let granted = helperAccessibilityGranted()
+        let alert = makeOnboardingAlert(accessibilityGranted: granted)
+        let selections = alert.accessoryView as? OnboardingChecklistView
+
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self = self else { return }
+            switch response {
+            case .alertFirstButtonReturn:
+                // The user confirmed their choices. Apply and persist the four toggles.
+                // When Accessibility still needs granting the helper is started by the
+                // accessibility setup below, so this call skips its own helper pass.
+                self.onboardingReviewInProgress = false
+                self.applyOnboardingSelections(
+                    launchAtLogin: selections?.launchAtLoginOn ?? false,
+                    autoUpdate: selections?.autoUpdateOn ?? false,
+                    showMenuBarIcon: selections?.showMenuBarIconOn ?? false,
+                    caffeinate: selections?.caffeinateOn ?? false,
+                    startHelper: granted
+                )
+                if granted {
+                    self.selectTab(0)
+                } else {
+                    self.selectTab(1)
+                    self.beginAccessibilitySetup()
+                }
+            case .alertSecondButtonReturn:
+                // Reviewing is not completion. Keep a clear route back in the footer,
+                // and leave a fresh installation pending if the app closes here.
+                self.onboardingReviewInProgress = true
+                self.selectTab(0)
+            default:
+                // Skip / Close: leave every toggle OFF, but still record the concrete
+                // choice so a later launch never falls back to the pre-onboarding
+                // defaults.
+                self.onboardingReviewInProgress = false
+                self.applyOnboardingSelections(
+                    launchAtLogin: false,
+                    autoUpdate: false,
+                    showMenuBarIcon: false,
+                    caffeinate: false,
+                    startHelper: false
+                )
+            }
+        }
+    }
+
+    /// Persist and apply the first-run toggle choices. UserDefaults-backed switches
+    /// (launch at login, auto-update) are written with concrete values so a later launch
+    /// never re-resolves them from the pre-onboarding defaults; config-backed switches
+    /// (menu-bar icon, Caffeinate) are saved to config.json. `startHelper` runs a single
+    /// launchd apply pass so the menu-bar icon appears/disappears immediately; callers
+    /// that will start the helper themselves (Accessibility setup) pass false to avoid a
+    /// second, churning pass.
+    private func applyOnboardingSelections(
+        launchAtLogin: Bool,
+        autoUpdate: Bool,
+        showMenuBarIcon: Bool,
+        caffeinate: Bool,
+        startHelper: Bool
+    ) {
+        let effectiveCaffeinate = showMenuBarIcon && caffeinate
+
+        UserDefaults.standard.set(autoUpdate, forKey: ToggleView.autoCheckKey)
+        UserDefaults.standard.set(launchAtLogin, forKey: launchAtLoginPreferenceKey)
+
+        preferencesView.launchAtLoginRow.toggle.isOn = launchAtLogin
+        preferencesView.autoUpdateRow.toggle.isOn = autoUpdate
+        preferencesView.showMenuBarIconRow.toggle.isOn = showMenuBarIcon
+        preferencesView.caffeinateRow.toggle.isOn = effectiveCaffeinate
+
+        config.showMenuBarIcon = showMenuBarIcon
+        config.caffeinateMenuEnabled = effectiveCaffeinate
+        config.onboardingCompleted = true
+        recheckControlState()
+
+        if KlikProConfigStore.save(config) {
+            persistedConfig = config
+            persistedControlState = controlState
+        }
+
+        guard startHelper, !previewRenderingIsActive else { return }
+        saveApplyQueue.async {
+            _ = installLaunchAgentPlist(appBundleURL: Bundle.main.bundleURL)
+            _ = applySavedConfig(launchAtLoginEnabled: launchAtLogin)
+        }
+    }
+
+    private func resetAccessibilityApproval(bundleIdentifier: String) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        process.arguments = ["reset", "Accessibility", bundleIdentifier]
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            return false
+        }
+    }
+
+    private func ensureLaunchAgentSetup() -> Bool {
+        guard installLaunchAgentPlist(appBundleURL: Bundle.main.bundleURL) else {
+            let alert = NSAlert()
+            alert.alertStyle = .critical
+            alert.messageText = "Background services could not be installed"
+            alert.informativeText = "Klik PRO could not create its per-user LaunchAgent files. Make sure the app is in Applications, then reopen it and try again."
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return false
+        }
+        return true
+    }
+
+    private func confirmAccessibilityReset() {
+        guard !previewRenderingIsActive else { return }
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Reset Accessibility?"
+        alert.informativeText = "Mouse mappings will pause until Accessibility is granted to Klik PRO Helper again. Klik PRO will restart the guided setup immediately."
+        alert.addButton(withTitle: "Reset and Set Up Again")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        guard resetAccessibilityApproval(bundleIdentifier: "local.klik-pro.helper") else {
+            let errorAlert = NSAlert()
+            errorAlert.alertStyle = .critical
+            errorAlert.messageText = "Accessibility could not be reset"
+            errorAlert.informativeText = "Klik PRO could not clear the helper's macOS permission. Remove Klik PRO Helper from Accessibility in System Settings, then try again."
+            errorAlert.addButton(withTitle: "OK")
+            errorAlert.runModal()
+            return
+        }
+
+        // Remove any stale entry for the settings app as well. The nested helper is
+        // the process that actually requires Accessibility, so this is best-effort.
+        _ = resetAccessibilityApproval(bundleIdentifier: "local.klik-pro")
+        preferencesView.setAccessibilityGranted(false)
+        _ = run(["kickstart", "-k", inputTarget])
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.presentOnboarding(force: true)
+        }
+    }
+
+    /// Accessibility remains a user-controlled macOS permission. This guided action
+    /// starts the real nested helper when necessary, asks that helper to register its
+    /// own trust request, then opens the exact pane containing the generated entry.
+    private func beginAccessibilitySetup() {
+        guard !previewRenderingIsActive else { return }
+        guard ensureLaunchAgentSetup() else { return }
+
+        if run(["print", inputTarget]) != 0 {
+            _ = ensureInputHelperRunning(
+                launchAtLoginEnabled: preferencesView.launchAtLoginRow.toggle.isOn
+            )
+        }
+
+        func notifyHelper() {
+            DistributedNotificationCenter.default().post(
+                name: accessibilitySetupRequestedNotification,
+                object: nil
+            )
+        }
+        notifyHelper()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            notifyHelper()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            guard let url = URL(
+                string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+            ) else { return }
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    private func setQuickLaunchMouseButton(
+        _ button: QuickLaunchMouseButton?,
+        for target: QuickLaunchTarget
+    ) {
+        if !quickLaunchMouseSelectionIsAllowed(
+            button,
+            readiness: quickLaunchTargetReadiness(target)
+        ) {
+            NSSound.beep()
+            refreshQuickLaunchAssignments()
+            return
+        }
+        let other = target == .chatGPT ? config.claudeMouseButton : config.chatGPTMouseButton
+        guard button == nil || button != other else {
+            NSSound.beep()
+            refreshQuickLaunchAssignments()
+            return
+        }
+        let current = target == .chatGPT ? config.chatGPTMouseButton : config.claudeMouseButton
+        guard button != current else {
+            refreshQuickLaunchAssignments()
+            return
+        }
+        switch target {
+        case .chatGPT: config.chatGPTMouseButton = button
+        case .claude: config.claudeMouseButton = button
+        }
+        configurationDidChange()
+        refreshButtonAssignmentViews()
+    }
+
+    private func refreshQuickLaunchAssignments() {
+        contentView.updateQuickLaunchAssignments(
+            config: config,
+            featureActive: menuRunning
+        )
+    }
+
+    /// Single refresh for every button-assignment mutation. Rebuilds the App
+    /// Profiles list (which fans out to the compact Mappings list via
+    /// onInstancesChange), the Mouse Button Shortcuts rows, and the conflict
+    /// badges from the same `config.instances[].mouseButton` state, so the two
+    /// sections can never drift out of sync. Callers must set `config` first.
+    private func refreshButtonAssignmentViews() {
+        appProfilesView.setInstances(config.instances)
+        refreshQuickLaunchAssignments()
+        recomputeConflictBadges()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let updateButtonTrackingArea = updateButtonTrackingArea {
+            removeTrackingArea(updateButtonTrackingArea)
+        }
+        if let closeButtonTrackingArea = closeButtonTrackingArea {
+            removeTrackingArea(closeButtonTrackingArea)
+        }
+        let updateArea = NSTrackingArea(
+            rect: updateButtonRect,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow],
+            owner: self,
+            userInfo: nil
+        )
+        let closeArea = NSTrackingArea(
+            rect: closeButtonRect,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(updateArea)
+        addTrackingArea(closeArea)
+        updateButtonTrackingArea = updateArea
+        closeButtonTrackingArea = closeArea
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(updateButtonRect, cursor: .pointingHand)
+        addCursorRect(closeButtonRect, cursor: .pointingHand)
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        if event.trackingArea === updateButtonTrackingArea {
+            setUpdateButtonHovered(true)
+        } else if event.trackingArea === closeButtonTrackingArea {
+            setCloseButtonHovered(true)
+        } else {
+            super.mouseEntered(with: event)
+        }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        if event.trackingArea === updateButtonTrackingArea {
+            setUpdateButtonHovered(false)
+        } else if event.trackingArea === closeButtonTrackingArea {
+            setCloseButtonHovered(false)
+        } else {
+            super.mouseExited(with: event)
+        }
+    }
+
+    private func setUpdateButtonHovered(_ hovered: Bool) {
+        guard updateButtonHovered != hovered else { return }
+        updateButtonHovered = hovered
+        needsDisplay = true
+    }
+
+    private func setCloseButtonHovered(_ hovered: Bool) {
+        guard closeButtonHovered != hovered else { return }
+        closeButtonHovered = hovered
+        needsDisplay = true
+    }
+
+    private func recomputeConflictBadges() {
+        let statuses = evaluateShortcutConflicts(
+            candidate: config,
+            persisted: persistedConfig,
+            browserExtensionShortcuts: browserExtensionShortcuts,
+            specialFeatureActive: menuRunning,
+            chatGPTAvailable: quickLaunchTargetIsAvailable(.chatGPT),
+            claudeAvailable: quickLaunchTargetIsAvailable(.claude)
+        )
+        contentView.middleButtonRow.badge.status = statuses[.middleButton] ?? .ok
+        contentView.gestureButtonRow.badge.status = statuses[.gestureButton] ?? .ok
+        contentView.forwardRow.badge.status = statuses[.forwardButton] ?? .ok
+        contentView.backRow.badge.status = statuses[.backButton] ?? .ok
+        contentView.chatGPTHotkeyRow.setConflictStatus(statuses[.chatGPTHotkey] ?? .ok)
+        contentView.claudeHotkeyRow.setConflictStatus(statuses[.claudeHotkey] ?? .ok)
+    }
+
+    private func saveConfiguration() {
+        guard !appProfileLifecycleInProgress else {
+            saveStatusMessage = "Wait for the App Profile change to finish."
+            needsDisplay = true
+            return
+        }
+        guard !saveInProgress else { return }
+        if !quickLaunchMouseAssignmentsAreValid(config),
+           let button = config.chatGPTMouseButton {
+            saveStatusMessage = "\(button.title) is already assigned to both launchers."
+            needsDisplay = true
+            return
+        }
+        if configuredSlotUsingGestureSentinel(in: config) != nil {
+            saveStatusMessage = "⌘F20 is reserved for the Gesture Button."
+            needsDisplay = true
+            return
+        }
+        if configuredGlobalHotKeyUsingReservedCommandTab(in: config) != nil {
+            saveStatusMessage = "⌘Tab is reserved for keyboard app switching and cannot be a global hotkey."
+            needsDisplay = true
+            return
+        }
+        let previousConfig = persistedConfig
+        let chatGPTAvailable = quickLaunchTargetIsAvailable(.chatGPT)
+        let claudeAvailable = quickLaunchTargetIsAvailable(.claude)
+        let previousFeatureActive = previousConfig.specialFeatureEnabled
+            && (chatGPTAvailable || claudeAvailable)
+        let currentFeatureActive = config.specialFeatureEnabled
+            && (chatGPTAvailable || claudeAvailable)
+        let configToSave = config
+        let controlStateToSave = controlState
+        let disablingGesture = mapping(
+            for: .gestureButton,
+            in: previousConfig,
+            specialFeatureActive: previousFeatureActive,
+            chatGPTAvailable: chatGPTAvailable,
+            claudeAvailable: claudeAvailable
+        ).enabled && !mapping(
+            for: .gestureButton,
+            in: config,
+            specialFeatureActive: currentFeatureActive,
+            chatGPTAvailable: chatGPTAvailable,
+            claudeAvailable: claudeAvailable
+        ).enabled
+        // Save writes config.json, then auto-applies by restarting the running
+        // helper(s) so the new mappings take effect immediately — no manual step
+        // and no launchctl jargon shown to the user. The restart re-reads config
+        // but keeps the same binary, so the Accessibility grant is preserved.
+        setSaveInProgress(true)
+        saveApplyQueue.async { [weak self] in
+            let saved = KlikProConfigStore.save(configToSave)
+            let gestureCleanupOK = saved
+                && (!disablingGesture || clearGestureSentinelMappingIfOwned())
+            let applied = saved && applySavedConfig()
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                if saved {
+                    self.persistedConfig = configToSave
+                    self.persistedControlState = controlStateToSave
+                    self.recomputeConflictBadges()
+                    let newerEditsRemain = self.config != configToSave
+                        || self.controlState != controlStateToSave
+                    if !gestureCleanupOK {
+                        self.saveStatusMessage = applied
+                            ? "Saved — Gesture cleanup will retry."
+                            : "Saved — Gesture cleanup is pending."
+                    } else if newerEditsRemain {
+                        self.saveStatusMessage = applied
+                            ? "Saved — newer edits remain unsaved."
+                            : "Saved — newer edits remain unsaved; apply is pending."
+                    } else {
+                        self.saveStatusMessage = applied
+                            ? "Saved — changes applied."
+                            : "Saved — helper apply timed out."
+                    }
+                } else {
+                    self.saveStatusMessage = "Save failed — check permissions."
+                }
+                self.setSaveInProgress(false)
+                self.needsDisplay = true
+            }
+        }
+    }
+
+    private func setSaveInProgress(_ inProgress: Bool) {
+        saveInProgress = inProgress
+        saveButton.isEnabled = !inProgress
+        saveButton.title = inProgress ? "Applying…" : "Save"
+        saveButton.setAccessibilityLabel(
+            inProgress ? "Applying saved settings" : "Save settings"
+        )
+        saveButton.needsDisplay = true
+        window?.invalidateCursorRects(for: saveButton)
+        if inProgress {
+            saveStatusMessage = "Applying changes…"
+        }
+        needsDisplay = true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+
+        if updateButtonRect.contains(point) {
+            if let url = updateAvailableURL { NSWorkspace.shared.open(url) } else { checkForUpdates() }
+            return
+        }
+        if mappingsTabRect.contains(point) { selectTab(0); return }
+        if settingsTabRect.contains(point) { selectTab(1); return }
+        if appProfilesTabRect.contains(point) { selectTab(2); return }
+
+        if closeButtonRect.contains(point) {
+            if saveInProgress {
+                NSSound.beep()
+                saveStatusMessage = "Please wait while settings are applied…"
+                needsDisplay = true
+                return
+            }
+            onClose?()
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        drawHeader()
+        drawFooter()
+    }
+
+    private var versionString: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "0.0"
+        // Marketing version only — the build number ("(2)") is internal and reads as
+        // a confusing pseudo-patch to users, so it's not shown in the header.
+        return "v\(short)"
+    }
+
+    private func drawHeader() {
+        let bodyAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 13),
+            .foregroundColor: NSColor.appTextSecondary
+        ]
+        // Mappings and Settings share the same centralized Klik PRO wordmark view.
+        versionString.draw(
+            at: NSPoint(x: headerWordmark.frame.maxX + 12, y: 43),
+            withAttributes: bodyAttributes
+        )
+
+        // Check-for-updates button — lights up green when an update is available.
+        let hasUpdate = updateAvailableURL != nil
+        let updateFill: NSColor
+        if hasUpdate {
+            updateFill = updateButtonHovered
+                ? (NSColor.systemGreen.blended(withFraction: 0.12, of: .white) ?? .systemGreen)
+                : .systemGreen
+        } else {
+            updateFill = NSColor.controlAccentColor.withAlphaComponent(
+                updateButtonHovered ? 0.20 : 0.12
+            )
+        }
+        let updateButtonPath = NSBezierPath(
+            roundedRect: updateButtonRect,
+            xRadius: updateButtonRect.height / 2,
+            yRadius: updateButtonRect.height / 2
+        )
+        updateFill.setFill()
+        updateButtonPath.fill()
+        if updateButtonHovered {
+            (hasUpdate
+                ? NSColor.white.withAlphaComponent(0.55)
+                : NSColor.controlAccentColor.withAlphaComponent(0.68)
+            ).setStroke()
+            updateButtonPath.lineWidth = 1.5
+            updateButtonPath.stroke()
+        }
+        let cfuAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+            .foregroundColor: hasUpdate ? NSColor.white : NSColor.controlAccentColor
+        ]
+        let cfu = (hasUpdate ? "Update available" : "Check for Updates") as NSString
+        let cfuSize = cfu.size(withAttributes: cfuAttrs)
+        cfu.draw(at: NSPoint(x: updateButtonRect.midX - cfuSize.width / 2, y: updateButtonRect.midY - cfuSize.height / 2), withAttributes: cfuAttrs)
+
+        // Tabs: Mappings | Settings | App Profiles
+        for (label, rect, idx) in [
+            ("Mappings", mappingsTabRect, 0),
+            ("Settings", settingsTabRect, 1),
+            ("App Profiles", appProfilesTabRect, 2),
+        ] {
+            let active = activeTab == idx
+            let tAttrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
+                .foregroundColor: active ? NSColor.controlAccentColor : NSColor.appTextSecondary
+            ]
+            (label as NSString).draw(at: NSPoint(x: rect.minX, y: rect.minY + 4), withAttributes: tAttrs)
+            if active {
+                let w = (label as NSString).size(withAttributes: tAttrs).width
+                NSColor.controlAccentColor.setFill()
+                NSBezierPath(rect: NSRect(x: rect.minX, y: rect.minY + 24, width: w, height: 2)).fill()
+            }
+        }
+    }
+
+    // silent = auto-check on launch: never shows the "up to date"/"couldn't check" alerts,
+    // only lights up the header button if a newer release exists.
+    private func checkForUpdates(silent: Bool = false) {
+        if !silent { saveStatusMessage = "Checking for updates…"; needsDisplay = true }
+        let current = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+        var req = URLRequest(url: URL(string: "https://api.github.com/repos/AminudinMurad/klik-pro/releases/latest")!)
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        req.setValue("Klik-PRO", forHTTPHeaderField: "User-Agent")
+        req.timeoutInterval = 15
+        URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if !silent { self.saveStatusMessage = nil; self.needsDisplay = true }
+                guard error == nil, let data = data,
+                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let tag = obj["tag_name"] as? String else {
+                    if !silent {
+                        self.showUpdateAlert("Couldn't check for updates",
+                                             "Please check your connection and try again, or visit the Releases page.",
+                                             URL(string: "https://github.com/AminudinMurad/klik-pro/releases"))
+                    }
+                    return
+                }
+                let latest = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
+                let releaseURL = (obj["html_url"] as? String).flatMap { URL(string: $0) }
+                if self.isNewer(latest, than: current) {
+                    self.updateAvailableURL = releaseURL
+                    self.needsDisplay = true
+                    if !silent {
+                        self.showUpdateAlert("Update available — \(tag)",
+                                             "You have v\(current). Open the release page to download the latest version.",
+                                             releaseURL)
+                    }
+                } else if !silent {
+                    self.showUpdateAlert("You're up to date", "Klik PRO v\(current) is the latest version.", nil)
+                }
+            }
+        }.resume()
+    }
+
+    func checkForUpdatesFromMenuBar() {
+        NSApp.activate(ignoringOtherApps: true)
+        checkForUpdates()
+    }
+
+    private func isNewer(_ a: String, than b: String) -> Bool {
+        let pa = a.split(separator: ".").map { Int($0) ?? 0 }
+        let pb = b.split(separator: ".").map { Int($0) ?? 0 }
+        for i in 0..<max(pa.count, pb.count) {
+            let x = i < pa.count ? pa[i] : 0, y = i < pb.count ? pb[i] : 0
+            if x != y { return x > y }
+        }
+        return false
+    }
+
+    private func showUpdateAlert(_ title: String, _ info: String, _ releaseURL: URL?) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = info
+        if let url = releaseURL {
+            alert.addButton(withTitle: "Open Release Page")
+            alert.addButton(withTitle: "Later")
+            if alert.runModal() == .alertFirstButtonReturn { NSWorkspace.shared.open(url) }
+        } else {
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
+    }
+
+    private func drawFooter() {
+        NSColor.controlColor.setFill()
+        let closeButtonPath = NSBezierPath(
+            roundedRect: closeButtonRect,
+            xRadius: closeButtonRect.height / 2,
+            yRadius: closeButtonRect.height / 2
+        )
+        closeButtonPath.fill()
+        if closeButtonHovered {
+            NSColor.controlAccentColor.withAlphaComponent(0.68).setStroke()
+            closeButtonPath.lineWidth = 1.5
+            closeButtonPath.stroke()
+        }
+
+        drawCentered("Close", in: closeButtonRect, font: .systemFont(ofSize: 14), color: .appTextPrimary)
+
+        if hasUnsavedConfigurationChanges {
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+                .foregroundColor: NSColor.systemRed
+            ]
+            "Unsaved changes".draw(at: NSPoint(x: 184, y: 866), withAttributes: attrs)
+        }
+
+        if let message = saveStatusMessage {
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 12),
+                .foregroundColor: NSColor.appTextSecondary
+            ]
+            message.draw(at: NSPoint(x: 356, y: 866), withAttributes: attrs)
+        }
+    }
+
+    private func drawCentered(_ text: String, in rect: NSRect, font: NSFont, color: NSColor) {
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: color
+        ]
+        let nsText = text as NSString
+        let size = nsText.size(withAttributes: attrs)
+        nsText.draw(at: NSPoint(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2), withAttributes: attrs)
+    }
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var controller: ToggleWindowController?
+    private var updateCheckObserver: NSObjectProtocol?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.disableRelaunchOnLogin()
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        controller = ToggleWindowController()
+        controller?.showWindow(nil)
+        // A menu-bar Quit stops the background helper; reopening the app should
+        // bring the mouse icon and shortcuts back rather than requiring a
+        // Launch-at-login toggle. No-ops when the helper is already running.
+        controller?.ensureBackgroundHelperRunningAtLaunch()
+        updateCheckObserver = DistributedNotificationCenter.default().addObserver(
+            forName: updateCheckRequestedNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.controller?.checkForUpdatesFromMenuBar()
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.controller?.showFirstLaunchOnboardingIfNeeded()
+        }
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
+    }
+
+    deinit {
+        if let updateCheckObserver = updateCheckObserver {
+            DistributedNotificationCenter.default().removeObserver(updateCheckObserver)
+        }
+    }
+}
+
+// NOTE: With KlikProConfig.swift compiled alongside this file, Swift no
+// longer treats this file as an implicit script entry point (that special case only
+// applies when a single file is passed to swiftc), so app startup is wrapped in an
+// `@main` type rather than living as bare top-level statements.
+@main
+private struct KlikProAppMain {
+    static func main() {
+        let app = NSApplication.shared
+        let delegate = AppDelegate()
+        app.delegate = delegate
+        app.run()
+    }
+}

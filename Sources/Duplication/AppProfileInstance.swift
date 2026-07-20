@@ -1,0 +1,167 @@
+import Foundation
+
+enum AppProfileLauncherKind: String, Codable, Equatable {
+    case managed
+    case legacyExternal
+}
+
+enum AppProfileOwnership: String, Codable, Equatable {
+    case managed
+    case adopted
+    case external
+}
+
+enum AppProfileMenuColor: String, Codable, CaseIterable, Equatable {
+    case blue
+    case green
+    case orange
+    case purple
+    case pink
+    case gray
+
+    var title: String {
+        switch self {
+        case .blue: return "Blue"
+        case .green: return "Green"
+        case .orange: return "Orange"
+        case .purple: return "Purple"
+        case .pink: return "Pink"
+        case .gray: return "Gray"
+        }
+    }
+}
+
+struct AppProfileSource: Codable, Equatable {
+    var bundleIdentifier: String
+    var bundleURL: String
+
+    private enum CodingKeys: String, CodingKey {
+        case bundleIdentifier = "bundleId"
+        case bundleURL
+    }
+}
+
+/// Persisted schema-10/11 instance model. Detection and eligibility fields are
+/// hints; callers must re-inspect the source app before any managed lifecycle
+/// action.
+struct AppProfileInstance: Identifiable, Codable, Equatable {
+    var id: UUID
+    var label: String
+    var launcherKind: AppProfileLauncherKind
+    var launcherPath: String
+    var profileDirectory: String?
+    var profileOwnership: AppProfileOwnership
+    var source: AppProfileSource
+    /// Schema 11: marks where this instance's data lives so healing and path
+    /// derivation pick the right root. `profileDirectory` and
+    /// `environmentOverrides` remain the stored absolute truth; derivation must
+    /// reproduce them, and a mismatch means the vault moved and needs healing.
+    var storage: AppProfileStorage
+    var environmentOverrides: [String: String]
+    var iconPath: String?
+    var menuColor: AppProfileMenuColor?
+    var pinToMenuBar: Bool
+    var hotkey: ShortcutMapping
+    var mouseButton: QuickLaunchMouseButton?
+    var lastDetectedEngine: AppProfileEngine?
+    var lastVerifiedAppVersion: String?
+    var lastVerifiedTeamIdentifier: String?
+    var compatibilityRuleID: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, label, launcherKind, launcherPath, profileOwnership, source
+        case profileDirectory = "profileDir"
+        case storage
+        case environmentOverrides = "envOverrides"
+        case iconPath, menuColor, pinToMenuBar, hotkey, mouseButton
+        case lastDetectedEngine, lastVerifiedAppVersion
+        case lastVerifiedTeamIdentifier, compatibilityRuleID
+    }
+
+    /// `storage` was added in schema 11. Every earlier row decodes as
+    /// `.applicationSupport`, so the schema 10 → 11 migration is purely
+    /// additive and never re-keys an existing instance.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        label = try container.decode(String.self, forKey: .label)
+        launcherKind = try container.decode(AppProfileLauncherKind.self, forKey: .launcherKind)
+        launcherPath = try container.decode(String.self, forKey: .launcherPath)
+        profileDirectory = try container.decodeIfPresent(String.self, forKey: .profileDirectory)
+        profileOwnership = try container.decode(
+            AppProfileOwnership.self,
+            forKey: .profileOwnership
+        )
+        source = try container.decode(AppProfileSource.self, forKey: .source)
+        storage = try container.decodeIfPresent(AppProfileStorage.self, forKey: .storage)
+            ?? .applicationSupport
+        environmentOverrides = try container.decode(
+            [String: String].self,
+            forKey: .environmentOverrides
+        )
+        iconPath = try container.decodeIfPresent(String.self, forKey: .iconPath)
+        menuColor = try container.decodeIfPresent(AppProfileMenuColor.self, forKey: .menuColor)
+        pinToMenuBar = try container.decode(Bool.self, forKey: .pinToMenuBar)
+        hotkey = try container.decode(ShortcutMapping.self, forKey: .hotkey)
+        mouseButton = try container.decodeIfPresent(
+            QuickLaunchMouseButton.self,
+            forKey: .mouseButton
+        )
+        lastDetectedEngine = try container.decodeIfPresent(
+            AppProfileEngine.self,
+            forKey: .lastDetectedEngine
+        )
+        lastVerifiedAppVersion = try container.decodeIfPresent(
+            String.self,
+            forKey: .lastVerifiedAppVersion
+        )
+        lastVerifiedTeamIdentifier = try container.decodeIfPresent(
+            String.self,
+            forKey: .lastVerifiedTeamIdentifier
+        )
+        compatibilityRuleID = try container.decodeIfPresent(
+            String.self,
+            forKey: .compatibilityRuleID
+        )
+    }
+
+    init(
+        id: UUID,
+        label: String,
+        launcherKind: AppProfileLauncherKind,
+        launcherPath: String,
+        profileDirectory: String?,
+        profileOwnership: AppProfileOwnership,
+        source: AppProfileSource,
+        storage: AppProfileStorage = .applicationSupport,
+        environmentOverrides: [String: String] = [:],
+        iconPath: String? = nil,
+        menuColor: AppProfileMenuColor? = nil,
+        pinToMenuBar: Bool,
+        hotkey: ShortcutMapping,
+        mouseButton: QuickLaunchMouseButton?,
+        lastDetectedEngine: AppProfileEngine? = nil,
+        lastVerifiedAppVersion: String? = nil,
+        lastVerifiedTeamIdentifier: String? = nil,
+        compatibilityRuleID: String? = nil
+    ) {
+        self.id = id
+        self.label = label
+        self.launcherKind = launcherKind
+        self.launcherPath = launcherPath
+        self.profileDirectory = profileDirectory
+        self.profileOwnership = profileOwnership
+        self.source = source
+        self.storage = storage
+        self.environmentOverrides = environmentOverrides
+        self.iconPath = iconPath
+        self.menuColor = menuColor
+        self.pinToMenuBar = pinToMenuBar
+        self.hotkey = hotkey
+        self.mouseButton = mouseButton
+        self.lastDetectedEngine = lastDetectedEngine
+        self.lastVerifiedAppVersion = lastVerifiedAppVersion
+        self.lastVerifiedTeamIdentifier = lastVerifiedTeamIdentifier
+        self.compatibilityRuleID = compatibilityRuleID
+    }
+}
