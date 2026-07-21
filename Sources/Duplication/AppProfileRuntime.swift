@@ -7,6 +7,40 @@ enum ManagedProcessScan: Equatable {
     case incomplete
 }
 
+/// A momentary process race — a second instance still spawning, or an old one
+/// mid-exit — briefly makes a profile's scan report more than one root, or fail
+/// to complete. Re-scan a bounded number of times, settling between attempts, so
+/// launch/focus no longer hard-fails with `ambiguousProcesses` on a transient
+/// double-process; only a result that persists across the whole budget is
+/// returned. Mirrors the removal path's re-scan. `settle` runs between attempts,
+/// never after the final one.
+func settledManagedProcessScan(
+    attempts: Int,
+    scan: () -> ManagedProcessScan,
+    settle: () -> Void
+) -> ManagedProcessScan {
+    var result = scan()
+    var attemptsLeft = Swift.max(1, attempts) - 1
+    while attemptsLeft > 0, managedProcessScanIsTransient(result) {
+        settle()
+        result = scan()
+        attemptsLeft -= 1
+    }
+    return result
+}
+
+/// Transient = not yet a stable launch/focus decision: an incomplete scan, or
+/// more than one root process for the profile. Exactly one root (focus) and zero
+/// roots (launch fresh) are both stable and end the re-scan immediately.
+func managedProcessScanIsTransient(_ scan: ManagedProcessScan) -> Bool {
+    switch scan {
+    case .incomplete:
+        return true
+    case .complete(let pids):
+        return pids.count > 1
+    }
+}
+
 /// Reads process identity without invoking `ps`, `pgrep`, a shell, or an external
 /// focus utility. KERN_PROCARGS2 parsing stops after the declared argc so environment
 /// variables are never inspected or exposed.
@@ -312,10 +346,25 @@ struct AppProfileRuntime {
             return
         }
 
-        switch processInspector.verifiedRoots(
-            executableURL: context.executableURL,
-            profileURL: context.profileURL
-        ) {
+        // A menu-bar click can land during a launch/exit race where the profile
+        // momentarily shows two roots (or an unreadable arg vector). A single scan
+        // then hard-fails with ambiguousProcesses even though it settles a moment
+        // later — the reported regression. Re-scan with a short settle so a
+        // transient race resolves to focus/launch; genuine, persistent ambiguity
+        // still fails closed. Bounded and only on a transient, so the common
+        // (clean first scan) path adds no delay. This helper runs on the main
+        // thread (menu-bar/hotkey), so the settle is deliberately short.
+        let processScan = settledManagedProcessScan(
+            attempts: 3,
+            scan: {
+                self.processInspector.verifiedRoots(
+                    executableURL: context.executableURL,
+                    profileURL: context.profileURL
+                )
+            },
+            settle: { Thread.sleep(forTimeInterval: 0.1) }
+        )
+        switch processScan {
         case .incomplete:
             withExtendedLifetime(operationLock) {
                 completion(.failure(.processScanIncomplete))

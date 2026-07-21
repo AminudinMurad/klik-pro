@@ -164,6 +164,7 @@ private struct AppProfilesFoundationTests {
         testVaultAdoptionRegeneratesFromManifest()
         testVaultInstanceRemovalAndManifestWriteFailSafe()
         testDataRootWiringFactorySelectsGenerator()
+        testSettledProcessScanResolvesTransientAmbiguity()
         print("App Profiles foundation tests passed")
     }
 
@@ -1937,6 +1938,50 @@ private struct AppProfilesFoundationTests {
             expect(error == .iconImageInvalid, "invalid image must map to .iconImageInvalid")
         } catch {
             expect(false, "unexpected error for invalid image: \(error)")
+        }
+    }
+
+    /// The menu-bar launch regression: a transient double-process (or a
+    /// momentarily incomplete scan) must be re-scanned and settled rather than
+    /// hard-failing with ambiguousProcesses, while genuine persistent ambiguity
+    /// still fails closed.
+    private static func testSettledProcessScanResolvesTransientAmbiguity() {
+        // A transient race that clears within the budget settles to the single
+        // root (focus), consuming exactly the attempts and settling between each.
+        var clearing: [ManagedProcessScan] = [.complete([11, 22]), .incomplete, .complete([11])]
+        var settleCount = 0
+        let resolved = settledManagedProcessScan(
+            attempts: 3,
+            scan: { clearing.removeFirst() },
+            settle: { settleCount += 1 }
+        )
+        expect(resolved == .complete([11]), "a clearing transient must settle to the single focus root")
+        expect(settleCount == 2, "must settle between re-scans, never after the final attempt")
+        expect(clearing.isEmpty, "a transient that persists until the last attempt consumes the budget")
+
+        // Persistent ambiguity is a real duplicate — after the budget it must
+        // remain ambiguous so launchOrFocus still fails closed.
+        var persistentScans = 0
+        let persistent = settledManagedProcessScan(
+            attempts: 3,
+            scan: { persistentScans += 1; return .complete([11, 22]) },
+            settle: {}
+        )
+        expect(persistent == .complete([11, 22]),
+               "persistent ambiguity must remain ambiguous (still fails closed)")
+        expect(persistentScans == 3, "persistent ambiguity must exhaust exactly the attempt budget")
+
+        // Stable results resolve on the first attempt with no settle: one root
+        // (focus) and zero roots (launch fresh).
+        for stable in [ManagedProcessScan.complete([11]), .complete([])] {
+            var scans = 0
+            let result = settledManagedProcessScan(
+                attempts: 3,
+                scan: { scans += 1; return stable },
+                settle: { expect(false, "a stable first scan must never settle") }
+            )
+            expect(result == stable && scans == 1,
+                   "a stable scan resolves immediately without re-scanning")
         }
     }
 

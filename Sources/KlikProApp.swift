@@ -3887,6 +3887,17 @@ final class ToggleView: NSView {
             .replacingOccurrences(of: "'", with: "&apos;")
     }
 
+    /// After an icon change, a pinned launcher's Dock tile keeps the Dock's own
+    /// cached image until the Dock reloads — `stampIcon`'s touch + lsregister
+    /// refresh Finder/LaunchPad but not the Dock. If (and only if) the launcher is
+    /// a Dock persistent-app, reload the Dock so the new icon shows immediately,
+    /// mirroring how pinning already refreshes it. Unpinned launchers are left
+    /// untouched so no Dock flash happens for users who never pinned.
+    private static func refreshDockIconIfPinned(launcherPath: String) {
+        guard dockPersistentAppsContain(path: launcherPath) else { return }
+        _ = runProcess("/usr/bin/killall", ["Dock"])
+    }
+
     private static func dockPersistentAppsContain(path launcherPath: String) -> Bool {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
@@ -4149,6 +4160,13 @@ final class ToggleView: NSView {
                     config: currentConfig
                 )
                 let applied = applySavedConfig()
+                // stampIcon already refreshed Finder/LaunchPad (touch +
+                // lsregister); the Dock caches a pinned launcher's tile image and
+                // won't re-read it, so reload the Dock — but only when this
+                // launcher is actually pinned, so unpinned users get no flash. Runs
+                // on this background queue (defaults read + killall) to keep the
+                // main thread responsive.
+                Self.refreshDockIconIfPinned(launcherPath: instance.launcherPath)
                 DispatchQueue.main.async {
                     self.finishAppProfileLifecycle()
                     self.config = updated
