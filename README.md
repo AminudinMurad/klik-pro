@@ -43,39 +43,39 @@ assigned buttons remain active. Actual button and wheel support varies by hardwa
 an opt-in Accessibility step), with Back navigation and no dead-ends:
 
 <p align="center">
-  <img src="assets/onboarding-flow.gif?v=1.2.0-b4" width="462" alt="Klik PRO first-launch onboarding animation cycling through its three steps: Welcome, Preferences, and an opt-in Accessibility step">
+  <img src="assets/onboarding-flow.gif?v=1.2.1-b5" width="462" alt="Klik PRO first-launch onboarding animation cycling through its three steps: Welcome, Preferences, and an opt-in Accessibility step">
 </p>
 
 **Supported controls** — configure compatible mouse controls and see live conflict
 checks:
 
-<img src="assets/screenshot-mappings.png?v=1.2.0-b4" width="940" alt="Klik PRO Mappings tab with supported mouse controls, shortcut settings, and App Profiles using their individual icons">
+<img src="assets/screenshot-mappings.png?v=1.2.1-b5" width="940" alt="Klik PRO Mappings tab with supported mouse controls, shortcut settings, and App Profiles using their individual icons">
 
 **App Profiles** — generate isolated extra instances of ChatGPT or Claude, each with
 its own login; open or assign each profile, and give it a custom PNG/ICO, colour tint,
 or initial badge so every account is recognisable at a glance:
 
-<img src="assets/screenshot-app-profiles.png?v=1.2.0-b4" width="940" alt="Klik PRO App Profiles tab showing individually styled profile icons, Open and Assign Button controls, per-profile menu-bar toggles, and a gear menu for profile management">
+<img src="assets/screenshot-app-profiles.png?v=1.2.1-b5" width="940" alt="Klik PRO App Profiles tab showing individually styled profile icons, Open and Assign Button controls, per-profile menu-bar toggles, and a gear menu for profile management">
 
 **Icon customisation** — distinguish profiles with colour tints or initial badges,
 manage them from the per-profile gear menu, and see the same identity immediately in
 Mappings:
 
 <p align="center">
-  <img src="assets/app-profiles-icon-showcase.gif?v=1.2.0-b4" width="600" alt="Klik PRO animation showing tinted and initial-badged App Profile icons, profile management controls, and matching icons in the Mappings tab">
+  <img src="assets/app-profiles-icon-showcase.gif?v=1.2.1-b5" width="600" alt="Klik PRO animation showing tinted and initial-badged App Profile icons, profile management controls, and matching icons in the Mappings tab">
 </p>
 
 **Settings** — launch-at-login, menu-icon visibility, update-check, and guided Accessibility setup/reset controls:
 
-<img src="assets/screenshot-settings.png?v=1.2.0-b4" width="940" alt="Klik PRO Settings tab with separated Recheck control and outlined Granted permission status">
+<img src="assets/screenshot-settings.png?v=1.2.1-b5" width="940" alt="Klik PRO Settings tab with separated Recheck control and outlined Granted permission status">
 
 **Advanced — durable data folder (lock-gated).** The Advanced tab is locked by default. Its options change where App Profile data is stored on disk, so clicking the padlock shows a risk confirmation before anything unlocks:
 
-<img src="assets/screenshot-advanced-locked.png?v=1.2.0-b4" width="940" alt="Klik PRO Advanced tab locked: a padlock, a warning that these options change where App Profile data is stored on disk and can leave profiles unfindable, and a Click the lock to unlock hint">
+<img src="assets/screenshot-advanced-locked.png?v=1.2.1-b5" width="940" alt="Klik PRO Advanced tab locked: a padlock, a warning that these options change where App Profile data is stored on disk and can leave profiles unfindable, and a Click the lock to unlock hint">
 
-Once unlocked, point new App Profiles at a durable data folder so their logins survive uninstalling Klik PRO, or scan an existing folder to recover profiles after a reinstall — existing profiles are never moved:
+Once unlocked, point new App Profiles at a durable data folder so their logins survive uninstalling Klik PRO, scan an existing folder to recover profiles after a reinstall, and review profile health. Missing launchers can be repaired; active profiles can be archived without deleting their login data or custom icon, then restored later with the same identity:
 
-<img src="assets/screenshot-advanced.png?v=1.2.0-b4" width="940" alt="Klik PRO Advanced tab unlocked, showing a durable data folder picker for new App Profiles and a Scan and Adopt control to recover profiles from an existing Klik PRO data folder">
+<img src="assets/screenshot-advanced.png?v=1.2.1-b5" width="940" alt="Klik PRO Advanced tab unlocked, showing durable data-folder controls and App Profile Maintenance rows for healthy, repairable, and archived profiles">
 
 ## Features
 
@@ -114,6 +114,10 @@ Once unlocked, point new App Profiles at a durable data folder so their logins s
   tints, or an initial badge; pinned to the Dock or menu bar; assigned to a mouse
   button; or removed at any time. Its identity stays consistent across App Profiles,
   Mappings, the menu bar, Launchpad, and Finder. See [App Profiles](#app-profiles).
+- **Non-destructive profile maintenance** — Advanced reports whether each managed
+  profile is healthy, missing its launcher, missing its data, or archived. Repair
+  safely rebuilds a missing launcher; Archive removes runtime access while preserving
+  login data, assignments, identity, and custom artwork; Restore brings it back.
 - **Caffeinate** — an optional keep-awake menu on the Klik PRO menu-bar icon
   (30 minutes, 1 hour, 2 hours, or until turned off), powered by macOS's own
   `caffeinate`, with a coffee-cup status icon while active.
@@ -121,10 +125,10 @@ Once unlocked, point new App Profiles at a durable data folder so their logins s
 
 ## Install (pre-built release)
 
-The current release is **Klik PRO v1.2.0 (build 4)**, provided as one universal
+The current release is **Klik PRO v1.2.1 (build 5)**, provided as one universal
 macOS app for Apple Silicon and Intel Macs. The DMG is the recommended download;
 the ZIP contains the same app as an alternative.
-**[Download Klik PRO v1.2.0](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.2.0).**
+**[Download Klik PRO v1.2.1](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.2.1).**
 
 Klik PRO is **not notarized or signed with an Apple Developer ID** — it's an
 ad-hoc-signed, self-built utility — so a downloaded copy is quarantined and
@@ -346,6 +350,25 @@ Shortcut** or **Open App**, while thumb-wheel browser switching is unchanged. On
 installed apps on Klik PRO's small, human-tested list are shown; there is no general
 app search, unsupported-app list, Browse flow, or Convert action.
 
+### Repair, archive, and restore
+
+Unlock **Advanced** to open **App Profile Maintenance**. Every managed profile is
+classified independently:
+
+- **Healthy** — its owned data and generated launcher both validate.
+- **Missing launcher — repair available** — profile data is still present, so Klik
+  PRO can rebuild only the launcher without changing the login.
+- **Archived — data preserved** — the launcher and runtime assignments are inactive,
+  while the profile recipe, login data, assignment choices, and custom icon remain
+  available for Restore.
+- **Profile data is missing** — Klik PRO reports the problem and refuses to guess or
+  recreate user data.
+
+Archive and Restore are intentionally non-destructive. v1.2.1 does not permanently
+delete profile data. The configuration remains the source of truth, while the vault
+manifest and generated launchers are derived state that Klik PRO safely reconciles
+after an interrupted operation or relaunch.
+
 ### How the durable data folder works
 
 The Advanced tab keeps its data-location controls behind a lock and a risk
@@ -420,7 +443,7 @@ setups Klik PRO has been tested against:
 | | |
 |---|---|
 | macOS | 26.5.2 (build 25F84) |
-| Klik PRO | v1.2.0 (build 4), universal Apple Silicon + Intel build |
+| Klik PRO | v1.2.1 (build 5), universal Apple Silicon + Intel build |
 | Primary mouse | Logitech MX Master 3 (Mac edition), firmware `MPM19.01_0015`, connected over Bluetooth (BLE) |
 | Additional tested mouse | Logi M650, firmware `RBM16.10_0014` |
 | Vendor software / driver | None — no mouse driver or manufacturer software installed |

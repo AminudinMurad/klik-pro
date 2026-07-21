@@ -19,7 +19,8 @@ so you can summon it in one action.
   opens it immediately.
 - Klik PRO generates a small launcher and an isolated profile automatically.
 - Existing launchers are listed without being converted or modified. Generated
-  launchers can be renamed or removed; removal retains profile data for recovery.
+  launchers can be renamed, repaired, archived, or restored. v1.2.1 maintenance
+  never permanently deletes profile data.
 - Every working mouse control chooses either Keyboard Shortcut or Open App. An
   occupied assignment requires Force Release & Assign.
 
@@ -41,8 +42,25 @@ bundle pointed at a different profile folder:
 - **For a Verified app, the profile is tested to retain its login across
   relaunches and application updates** — the original bundle identity means the
   app's keychain entry still resolves.
-- Removing an instance deletes the launcher and (optionally) its profile; the
-  original is untouched.
+- Archiving an instance removes its generated launcher and runtime access while
+  preserving its profile, identity, assignments, and custom icon. The original
+  app is untouched.
+
+## Maintenance and recovery
+
+Unlock **Advanced** to review managed profiles under **App Profile Maintenance**.
+Klik PRO validates owned data separately from its generated launcher:
+
+- **Healthy** profiles can be archived safely.
+- **Missing Launcher** profiles can be repaired from their verified recipe and
+  existing data.
+- **Archived** profiles can be restored with the same UUID and saved appearance.
+- **Missing Data** is reported without guessing, recreating, or deleting anything.
+
+Archive and Restore are non-destructive lifecycle changes. Archived profiles do not
+appear in normal profile lists and cannot own an active mouse mapping, hotkey, menu-bar
+icon, or Open action. The configuration is authoritative; launchers and `vault.json`
+are derived state and are reconciled after relaunch if an operation was interrupted.
 
 ## Approved app list
 
@@ -115,11 +133,16 @@ updates, which matters more for the target apps.
 ```
 ~/Library/Application Support/Klik PRO/Launchers/<UUID>.app   # generated launcher (UUID-keyed)
 ~/Library/Application Support/Klik PRO/Profiles/<UUID>/       # isolated per-instance profile
-~/Library/Application Support/Klik PRO/config.json            # instance list (schema 10)
+~/Library/Application Support/Klik PRO/CustomIcons/<UUID>.icns # working custom icon
+~/Library/Application Support/Klik PRO/config.json            # instance list (schema 12)
 ```
 
-Instances, their profiles, hotkeys, and button links will be stored in
-`config.json` (schema 10, migrated from the current schema 9). All structural
+When a durable data folder is configured, new profiles instead use
+`<Data Folder>/Instances/<UUID>/`, with `vault.json` manifest v2 at the folder root
+and a portable `custom-icon.icns` beside the profile data when applicable.
+
+Instances, their lifecycle, profiles, hotkeys, and button links are stored in
+`config.json` schema 12. All structural
 names are keyed by the instance **UUID**; the editable **label** is display-only
 (the App Profiles row, menu-bar title, and the launcher's display name). Klik
 PRO-created profiles live under `Klik PRO/Profiles/<UUID>` with an ownership

@@ -2,6 +2,31 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.2.1
+
+This release gives App Profiles a focused, non-destructive maintenance workflow.
+It makes stale entries understandable and repairable without risking saved logins.
+
+- **App Profile Maintenance in Advanced** — managed profiles now report a clear
+  state: Healthy, Missing Launcher, Missing Data, or Archived.
+- **Repair Launcher** — rebuilds a missing generated launcher from verified profile
+  data while keeping the same profile UUID, login, settings, and custom icon.
+- **Archive and Restore** — Archive removes the generated launcher and deactivates
+  runtime assignments without deleting profile data. Restore regenerates the same
+  profile later, subject to the normal assignment-conflict checks.
+- **Portable custom icons** — profiles stored in a durable data folder retain a
+  recovery copy of their custom icon alongside their owned data.
+- **Safer recovery** — configuration schema 12 and vault manifest v2 preserve
+  lifecycle and appearance metadata. Launch-time reconciliation repairs derived
+  manifest state and completes interrupted archive cleanup without touching login
+  data.
+- **Archived means inactive everywhere** — archived profiles are excluded from
+  mouse mappings, global hotkeys, menu-bar icons, Open actions, and the normal App
+  Profiles lists until restored.
+
+Permanent deletion is deliberately not part of v1.2.1; missing data is reported and
+never guessed at or recreated automatically.
+
 ## 1.2.0
 
 This release brings together a major App Profiles personalisation upgrade and a
