@@ -9,7 +9,8 @@ All notable changes to Klik PRO are documented here.
   replace it with your own PNG or ICO, tint the app's own icon in one of six
   colours, or add a coloured corner badge with the profile's initial (with a
   live preview), and reset to the app icon at any time. Custom icons survive
-  data-folder recovery. The original app is never modified.
+  data-folder recovery and appear consistently in both App Profiles and
+  Mappings. The original app is never modified.
 - **Tidier App Profile cards** — Rename, Change Icon, and Remove now live
   together behind the gear menu, and the everyday controls (Open, Assign, Menu
   Bar Icon) are grouped on one row, so long profile names have more room.

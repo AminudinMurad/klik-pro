@@ -594,6 +594,16 @@ fi
 grep -q 'KlikProManagedLauncher' "$ROOT/tools/build-release.sh"
 grep -q 'final class MappingAppProfilesView' "$ROOT/Sources/AppProfilesUI.swift"
 grep -q 'scrollView.autohidesScrollers = false' "$ROOT/Sources/AppProfilesUI.swift"
+# Both the full App Profiles rows and compact Mappings rows must use the same
+# direct launcher-icon loader. Loading the source bundle in Mappings would hide
+# every managed profile's custom/tinted/badged icon there.
+grep -q 'private func appProfileDisplayIcon(for instance: AppProfileInstance)' \
+  "$ROOT/Sources/AppProfilesUI.swift"
+if [[ "$(grep -c 'iconView.image = appProfileDisplayIcon(for: instance)' \
+  "$ROOT/Sources/AppProfilesUI.swift")" -ne 2 ]]; then
+  echo "App Profiles and Mappings must share the managed profile icon loader" >&2
+  exit 1
+fi
 grep -q 'mappingProfilesView.onOpen' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'mappingProfilesView.setInstances' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'mappingProfilesView.setRuntimeHealth' "$ROOT/Sources/KlikProApp.swift"

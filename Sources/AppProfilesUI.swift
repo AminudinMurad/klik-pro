@@ -28,6 +28,25 @@ private final class FlippedProfileStackView: NSStackView {
     override var isFlipped: Bool { true }
 }
 
+/// Returns the icon that represents one App Profile everywhere in Klik PRO.
+/// Managed profiles own a launcher-specific icon, which may be custom, tinted,
+/// or badged. Read that icns directly so every tab bypasses NSWorkspace's stale
+/// per-path cache and immediately agrees after Change Icon. External launchers
+/// and missing managed icons retain the existing safe fallbacks.
+private func appProfileDisplayIcon(for instance: AppProfileInstance) -> NSImage {
+    let launcherIconURL = URL(fileURLWithPath: instance.launcherPath, isDirectory: true)
+        .appendingPathComponent("Contents/Resources/AppIcon.icns")
+    if instance.launcherKind == .managed,
+       let launcherIcon = NSImage(contentsOf: launcherIconURL) {
+        return launcherIcon
+    }
+    if instance.launcherKind == .managed,
+       FileManager.default.fileExists(atPath: instance.launcherPath) {
+        return NSWorkspace.shared.icon(forFile: instance.launcherPath)
+    }
+    return NSWorkspace.shared.icon(forFile: instance.source.bundleURL)
+}
+
 final class AppProfileButton: NSButton {
     var onPress: (() -> Void)?
 
@@ -353,22 +372,7 @@ final class AppProfileInstanceRowView: NSView {
         let iconSize: CGFloat = 54
         iconView.frame = NSRect(x: 14, y: (rowHeight - iconSize) / 2, width: iconSize, height: iconSize)
         iconView.imageScaling = .scaleProportionallyUpOrDown
-        // A managed profile carries its own (possibly custom/tinted/badged) icon
-        // in its launcher bundle. Read it straight from the bundle's AppIcon.icns
-        // rather than via NSWorkspace, whose per-path icon cache would otherwise
-        // keep showing the previous icon in-process right after Change Icon.
-        // External/legacy rows (and a missing icns) fall back to the app icon.
-        let launcherIconURL = URL(fileURLWithPath: instance.launcherPath, isDirectory: true)
-            .appendingPathComponent("Contents/Resources/AppIcon.icns")
-        if instance.launcherKind == .managed,
-           let launcherIcon = NSImage(contentsOf: launcherIconURL) {
-            iconView.image = launcherIcon
-        } else if instance.launcherKind == .managed,
-                  FileManager.default.fileExists(atPath: instance.launcherPath) {
-            iconView.image = NSWorkspace.shared.icon(forFile: instance.launcherPath)
-        } else {
-            iconView.image = NSWorkspace.shared.icon(forFile: instance.source.bundleURL)
-        }
+        iconView.image = appProfileDisplayIcon(for: instance)
         titleField.font = .systemFont(ofSize: 14, weight: .semibold)
         titleField.textColor = .appTextPrimary
         titleField.stringValue = instance.label
@@ -532,7 +536,7 @@ private final class MappingAppProfileOpenRowView: NSView {
         let iconSize: CGFloat = 54
         iconView.frame = NSRect(x: 14, y: (rowHeight - iconSize) / 2, width: iconSize, height: iconSize)
         iconView.imageScaling = .scaleProportionallyUpOrDown
-        iconView.image = NSWorkspace.shared.icon(forFile: instance.source.bundleURL)
+        iconView.image = appProfileDisplayIcon(for: instance)
 
         let gap: CGFloat = 8
         let buttonH: CGFloat = 28
