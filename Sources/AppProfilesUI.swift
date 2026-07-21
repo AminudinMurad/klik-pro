@@ -939,6 +939,10 @@ final class AppProfilesContentView: NSView {
 /// Locked behind a padlock by default so the data-location controls can't be
 /// changed by accident; unlocking reveals two sections — choose/clear the folder
 /// new profiles are stored in, and scan/adopt an existing Klik PRO data folder.
+private final class FlippedMaintenanceView: NSView {
+    override var isFlipped: Bool { true }
+}
+
 final class AdvancedSettingsContentView: NSView {
     // Locked-state views. The lock icon itself is the control — pressing it asks
     // for an explicit risk confirmation before the data-location options appear.
@@ -972,12 +976,25 @@ final class AdvancedSettingsContentView: NSView {
     )
     private let scanButton = AppProfileButton(title: "Scan & Adopt…", frame: .zero)
 
+    // Unlocked-state views — lifecycle and repair. Rows are rebuilt from the
+    // persisted configuration so this surface never acts on unsaved mappings.
+    private let maintenanceLabel = NSTextField(labelWithString: "APP PROFILE MAINTENANCE")
+    private let maintenanceBody = NSTextField(wrappingLabelWithString:
+        "Repair a missing launcher, or archive a profile without deleting its login data. "
+        + "Archived profiles can be restored later with the same identity and custom icon."
+    )
+    private let maintenanceScroll = NSScrollView()
+    private let maintenanceDocument = FlippedMaintenanceView()
+
     private let statusField = NSTextField(wrappingLabelWithString: "")
 
     var onUnlock: (() -> Void)?
     var onChooseFolder: (() -> Void)?
     var onClearFolder: (() -> Void)?
     var onScanAndAdopt: (() -> Void)?
+    var onRepair: ((AppProfileInstance) -> Void)?
+    var onArchive: ((AppProfileInstance) -> Void)?
+    var onRestore: ((AppProfileInstance) -> Void)?
 
     private var isLocked = true
     /// Whether the tab is currently locked — read by the tab bar to show a lock glyph.
@@ -985,7 +1002,8 @@ final class AdvancedSettingsContentView: NSView {
     private var lockedViews: [NSView] { [lockButton, lockTitle, lockBody, lockHint] }
     private var unlockedViews: [NSView] {
         [dataRootLabel, dataRootBody, dataRootValueField, chooseButton, clearButton,
-         recoverLabel, recoverBody, scanButton, statusField]
+         recoverLabel, recoverBody, scanButton, maintenanceLabel, maintenanceBody,
+         maintenanceScroll, statusField]
     }
 
     override var isFlipped: Bool { true }
@@ -1036,7 +1054,15 @@ final class AdvancedSettingsContentView: NSView {
         scanButton.frame = NSRect(x: 28, y: 300, width: 170, height: 28)
         scanButton.onPress = { [weak self] in self?.onScanAndAdopt?() }
 
-        statusField.frame = NSRect(x: 28, y: 348, width: width - 56, height: 40)
+        styleSectionLabel(maintenanceLabel, frame: NSRect(x: 28, y: 354, width: width - 56, height: 16))
+        styleBody(maintenanceBody, frame: NSRect(x: 28, y: 378, width: width - 56, height: 36))
+        maintenanceScroll.frame = NSRect(x: 28, y: 424, width: width - 56, height: 190)
+        maintenanceScroll.drawsBackground = false
+        maintenanceScroll.hasVerticalScroller = true
+        maintenanceScroll.autohidesScrollers = true
+        maintenanceScroll.documentView = maintenanceDocument
+
+        statusField.frame = NSRect(x: 28, y: 626, width: width - 56, height: 40)
         statusField.font = .systemFont(ofSize: 12)
         statusField.textColor = .appTextSecondary
 
@@ -1096,6 +1122,76 @@ final class AdvancedSettingsContentView: NSView {
         statusField.textColor = color
     }
 
+    func setMaintenanceInstances(
+        _ instances: [AppProfileInstance],
+        health: [UUID: AppProfileMaintenanceHealth]
+    ) {
+        maintenanceDocument.subviews.forEach { $0.removeFromSuperview() }
+        let ordered = instances
+            .filter { $0.launcherKind == .managed }
+            .sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
+        let rowHeight: CGFloat = 54
+        let documentHeight = max(maintenanceScroll.contentSize.height, CGFloat(ordered.count) * rowHeight)
+        maintenanceDocument.frame = NSRect(
+            x: 0, y: 0, width: maintenanceScroll.contentSize.width, height: documentHeight
+        )
+        if ordered.isEmpty {
+            let empty = NSTextField(labelWithString: "No managed App Profiles yet.")
+            empty.frame = NSRect(x: 12, y: 16, width: 300, height: 18)
+            empty.font = .systemFont(ofSize: 12)
+            empty.textColor = .appTextSecondary
+            maintenanceDocument.addSubview(empty)
+            return
+        }
+
+        for (index, instance) in ordered.enumerated() {
+            let y = CGFloat(index) * rowHeight
+            let name = NSTextField(labelWithString: instance.label)
+            name.frame = NSRect(x: 12, y: y + 8, width: 250, height: 18)
+            name.font = .systemFont(ofSize: 13, weight: .semibold)
+            name.textColor = .appTextPrimary
+            maintenanceDocument.addSubview(name)
+
+            let state = health[instance.id] ?? .missingData
+            let detail = NSTextField(labelWithString: state.displayName)
+            detail.frame = NSRect(x: 12, y: y + 28, width: 280, height: 16)
+            detail.font = .systemFont(ofSize: 11)
+            detail.textColor = state.displayColor
+            maintenanceDocument.addSubview(detail)
+
+            let actionTitle: String
+            let action: () -> Void
+            switch state {
+            case .missingLauncher:
+                actionTitle = "Repair"
+                action = { [weak self] in self?.onRepair?(instance) }
+            case .recoverableArchived:
+                actionTitle = "Restore"
+                action = { [weak self] in self?.onRestore?(instance) }
+            case .healthy:
+                actionTitle = "Archive"
+                action = { [weak self] in self?.onArchive?(instance) }
+            case .missingData:
+                actionTitle = "Unavailable"
+                action = {}
+            }
+            let button = AppProfileButton(title: actionTitle, frame: NSRect(
+                x: maintenanceScroll.contentSize.width - 118, y: y + 13, width: 104, height: 28
+            ))
+            button.isEnabled = state != .missingData
+            button.onPress = action
+            maintenanceDocument.addSubview(button)
+
+            if index + 1 < ordered.count {
+                let divider = NSBox(frame: NSRect(x: 8, y: y + rowHeight - 1,
+                                                  width: maintenanceScroll.contentSize.width - 16,
+                                                  height: 1))
+                divider.boxType = .separator
+                maintenanceDocument.addSubview(divider)
+            }
+        }
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         let card = bounds.insetBy(dx: 0.5, dy: 0.5)
         NSColor.controlBackgroundColor.setFill()
@@ -1107,6 +1203,27 @@ final class AdvancedSettingsContentView: NSView {
         if !isLocked {
             NSColor.separatorColor.setFill()
             NSBezierPath(rect: NSRect(x: 28, y: 186, width: bounds.width - 56, height: 1)).fill()
+            NSBezierPath(rect: NSRect(x: 28, y: 342, width: bounds.width - 56, height: 1)).fill()
+        }
+    }
+}
+
+private extension AppProfileMaintenanceHealth {
+    var displayName: String {
+        switch self {
+        case .healthy: return "Healthy"
+        case .recoverableArchived: return "Archived — data preserved"
+        case .missingLauncher: return "Missing launcher — repair available"
+        case .missingData: return "Profile data is missing"
+        }
+    }
+
+    var displayColor: NSColor {
+        switch self {
+        case .healthy: return KlikProBrand.green
+        case .recoverableArchived: return .appTextSecondary
+        case .missingLauncher: return .systemOrange
+        case .missingData: return .systemRed
         }
     }
 }

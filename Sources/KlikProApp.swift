@@ -2913,6 +2913,8 @@ final class ToggleView: NSView {
         refreshSupportedAppCandidates()
         healManagedAppProfilesIfNeeded()
         recoverVaultOnLaunchIfNeeded()
+        reconcileAppProfileDerivedState()
+        refreshAppProfileHealth()
 
         // Launch at login controls only the next login. The helper may still be
         // running now to provide mouse shortcuts and menu-bar icons.
@@ -3205,6 +3207,15 @@ final class ToggleView: NSView {
         advancedView.onScanAndAdopt = { [weak self] in
             self?.scanAndAdoptVaultFolder()
         }
+        advancedView.onRepair = { [weak self] instance in
+            self?.repairAppProfile(instance)
+        }
+        advancedView.onArchive = { [weak self] instance in
+            self?.confirmArchiveAppProfile(instance)
+        }
+        advancedView.onRestore = { [weak self] instance in
+            self?.restoreAppProfile(instance)
+        }
         contentView.mappingProfilesView.onOpen = { [weak self] instance in
             self?.launchAppProfile(instance)
         }
@@ -3488,6 +3499,17 @@ final class ToggleView: NSView {
         appProfileManager = makeAppProfileManager(forDataRoot: config.dataRoot)
     }
 
+    private func reconcileAppProfileDerivedState() {
+        guard !previewRenderingIsActive else { return }
+        let complete = appProfileManager.reconcileDerivedState(config: persistedConfig)
+        if !complete {
+            advancedView.setStatus(
+                "Some derived App Profile files could not be reconciled. Open Advanced to review them.",
+                color: .systemOrange
+            )
+        }
+    }
+
     /// On-launch durable-vault recovery (RFC §5.3–5.4; owner decision: auto-adopt
     /// only when a single valid vault is located). Runs the discovery ladder using
     /// **positive evidence of prior configuration only** — the remembered
@@ -3688,6 +3710,135 @@ final class ToggleView: NSView {
             let message = (error as? AppProfileManagerError).map(appProfileErrorMessage)
                 ?? "That folder could not be adopted."
             advancedView.setStatus(message, color: .systemRed)
+        }
+    }
+
+    private func repairAppProfile(_ instance: AppProfileInstance) {
+        guard !hasUnsavedConfigurationChanges else {
+            showAppProfileAlert(
+                title: "Save current changes first",
+                message: "Save or restore your current changes before repairing an App Profile."
+            )
+            return
+        }
+        guard beginAppProfileLifecycle() else { return }
+        let currentConfig = persistedConfig
+        advancedView.setStatus("Repairing \(instance.label)…")
+        appProfileQueue.async { [weak self] in
+            guard let self else { return }
+            do {
+                let updated = try self.appProfileManager.repairLauncher(
+                    instanceID: instance.id, config: currentConfig
+                )
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.config = updated
+                    self.persistedConfig = updated
+                    self.appProfilesView.setInstances(updated.instances)
+                    self.advancedView.setStatus("Repaired \(instance.label).", color: KlikProBrand.green)
+                    self.refreshAppProfileHealth()
+                }
+            } catch let error as AppProfileManagerError {
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.advancedView.setStatus(self.appProfileErrorMessage(error), color: .systemRed)
+                    self.refreshAppProfileHealth()
+                }
+            } catch {
+                DispatchQueue.main.async { self.finishAppProfileLifecycle() }
+            }
+        }
+    }
+
+    private func confirmArchiveAppProfile(_ instance: AppProfileInstance) {
+        guard !hasUnsavedConfigurationChanges else {
+            showAppProfileAlert(
+                title: "Save current changes first",
+                message: "Save or restore your current changes before archiving an App Profile."
+            )
+            return
+        }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Archive \(instance.label)?"
+        alert.informativeText = "Klik PRO will remove its launcher and deactivate its assignments, but preserve its login data, assignment choices, and custom icon so it can be restored later."
+        alert.addButton(withTitle: "Archive")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard beginAppProfileLifecycle() else { return }
+        let currentConfig = persistedConfig
+        advancedView.setStatus("Archiving \(instance.label)…")
+        appProfileQueue.async { [weak self] in
+            guard let self else { return }
+            do {
+                let result = try self.appProfileManager.archive(
+                    instanceID: instance.id, config: currentConfig
+                )
+                let applied = applySavedConfig()
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.config = result.config
+                    self.persistedConfig = result.config
+                    self.appProfilesView.setInstances(result.config.instances)
+                    let clean = result.launcherCleanupCompleted
+                    self.advancedView.setStatus(
+                        applied && clean
+                            ? "Archived \(instance.label). Its data is preserved."
+                            : "Archived \(instance.label); launcher cleanup or helper apply is pending.",
+                        color: applied && clean ? KlikProBrand.green : .systemOrange
+                    )
+                    self.refreshAppProfileHealth()
+                }
+            } catch let error as AppProfileManagerError {
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.advancedView.setStatus(self.appProfileErrorMessage(error), color: .systemRed)
+                    self.refreshAppProfileHealth()
+                }
+            } catch {
+                DispatchQueue.main.async { self.finishAppProfileLifecycle() }
+            }
+        }
+    }
+
+    private func restoreAppProfile(_ instance: AppProfileInstance) {
+        guard !hasUnsavedConfigurationChanges else {
+            showAppProfileAlert(
+                title: "Save current changes first",
+                message: "Save or restore your current changes before restoring an App Profile."
+            )
+            return
+        }
+        guard beginAppProfileLifecycle() else { return }
+        let currentConfig = persistedConfig
+        advancedView.setStatus("Restoring \(instance.label)…")
+        appProfileQueue.async { [weak self] in
+            guard let self else { return }
+            do {
+                let updated = try self.appProfileManager.restore(
+                    instanceID: instance.id, config: currentConfig
+                )
+                let applied = applySavedConfig()
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.config = updated
+                    self.persistedConfig = updated
+                    self.appProfilesView.setInstances(updated.instances)
+                    self.advancedView.setStatus(
+                        applied ? "Restored \(instance.label)." : "Restored; helper apply is pending.",
+                        color: applied ? KlikProBrand.green : .systemOrange
+                    )
+                    self.refreshAppProfileHealth()
+                }
+            } catch let error as AppProfileManagerError {
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.advancedView.setStatus(self.appProfileErrorMessage(error), color: .systemRed)
+                    self.refreshAppProfileHealth()
+                }
+            } catch {
+                DispatchQueue.main.async { self.finishAppProfileLifecycle() }
+            }
         }
     }
 
@@ -4269,7 +4420,9 @@ final class ToggleView: NSView {
         let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 390, height: 42))
         let picker = NSPopUpButton(frame: NSRect(x: 0, y: 6, width: 390, height: 30))
         for button in QuickLaunchMouseButton.allCases {
-            let owner = persistedConfig.instances.first { $0.mouseButton == button }
+            let owner = persistedConfig.instances.first {
+                $0.state == .active && $0.mouseButton == button
+            }
             let state = owner.map { "Used: \($0.label)" } ?? "Available"
             picker.addItem(withTitle: "\(button.title) Button — \(state)")
         }
@@ -4282,7 +4435,9 @@ final class ToggleView: NSView {
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let button = QuickLaunchMouseButton.allCases[picker.indexOfSelectedItem]
-        let currentOwner = persistedConfig.instances.first { $0.mouseButton == button && $0.id != instance.id }
+        let currentOwner = persistedConfig.instances.first {
+            $0.state == .active && $0.mouseButton == button && $0.id != instance.id
+        }
         if let currentOwner {
             let confirmation = NSAlert()
             confirmation.alertStyle = .warning
@@ -4638,15 +4793,23 @@ final class ToggleView: NSView {
             appProfilesView.setRuntimeHealth(
                 Dictionary(uniqueKeysWithValues: instances.map { ($0.id, .ready) })
             )
+            advancedView.setMaintenanceInstances(
+                instances,
+                health: Dictionary(uniqueKeysWithValues: instances.map { ($0.id, .healthy) })
+            )
             return
         }
         appProfileQueue.async { [weak self] in
             guard let self else { return }
-            let health = Dictionary(uniqueKeysWithValues: instances.map {
+            let runtimeHealth = Dictionary(uniqueKeysWithValues: instances.map {
                 ($0.id, self.appProfileRuntime.health(for: $0))
             })
+            let maintenanceHealth = Dictionary(uniqueKeysWithValues: instances.map {
+                ($0.id, self.appProfileManager.maintenanceHealth(for: $0))
+            })
             DispatchQueue.main.async {
-                self.appProfilesView.setRuntimeHealth(health)
+                self.appProfilesView.setRuntimeHealth(runtimeHealth)
+                self.advancedView.setMaintenanceInstances(instances, health: maintenanceHealth)
             }
         }
     }

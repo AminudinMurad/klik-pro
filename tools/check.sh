@@ -146,7 +146,8 @@ grep -q 'normalized.schemaVersion = 12' "$ROOT/Sources/KlikProConfig.swift"
 grep -q 'createPreV2BackupIfNeeded(originalData: data)' "$ROOT/Sources/KlikProConfig.swift"
 grep -q 'O_WRONLY | O_CREAT | O_EXCL' "$ROOT/Sources/KlikProConfig.swift"
 
-# Durable Data Vault (Phase 1) pins: additive schema 11, fail-closed vault
+# Durable Data Vault (Phase 1) pins: schema-11 storage remains intact under the
+# additive schema-12 lifecycle model, with a fail-closed vault
 # location gate, unchanged default derivation, and manifest-gated adopt.
 grep -q 'enum AppProfileStorage' "$ROOT/Sources/Duplication/VaultDataRoot.swift"
 grep -q 'func vaultPathRejectionReason' "$ROOT/Sources/Duplication/VaultDataRoot.swift"
@@ -171,6 +172,18 @@ grep -q 'throw AppProfileManagerError.vaultManifestInvalid' \
   "$ROOT/Sources/Duplication/AppProfileManager.swift"
 grep -q 'VaultManifest.read(vaultRoot: vaultRoot)' \
   "$ROOT/Sources/Duplication/AppProfileManager.swift"
+
+# v1.2.1 lifecycle maintenance: archived rows are excluded from runtime, while
+# Advanced exposes only non-destructive repair/archive/restore actions and a
+# launch-time reconciliation pass repairs derived manifest/launcher state.
+grep -q 'enum AppProfileState' "$ROOT/Sources/Duplication/AppProfileInstance.swift"
+grep -q 'func reconcileDerivedState(config:' "$ROOT/Sources/Duplication/AppProfileManager.swift"
+grep -q 'func repairLauncher(' "$ROOT/Sources/Duplication/AppProfileManager.swift"
+grep -q 'func archive(' "$ROOT/Sources/Duplication/AppProfileManager.swift"
+grep -q 'func restore(' "$ROOT/Sources/Duplication/AppProfileManager.swift"
+grep -q 'advancedView.onRepair' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'advancedView.onArchive' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'advancedView.onRestore' "$ROOT/Sources/KlikProApp.swift"
 
 # Durable Data Vault (Phase 2) pins: the dormant backend is wired in through a
 # single testable factory, and the locked Advanced tab drives it. The factory

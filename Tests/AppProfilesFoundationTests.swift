@@ -2975,6 +2975,23 @@ private struct AppProfilesFoundationTests {
                "Repair must never modify profile data")
         expect(persisted?.instances.first { $0.id == id }?.state == .active,
                "the restored/repaired lifecycle state must persist")
+
+        var pendingArchive = repaired
+        let pendingIndex = pendingArchive.instances.firstIndex { $0.id == id }!
+        pendingArchive.instances[pendingIndex].state = .archived
+        pendingArchive.instances[pendingIndex].archivedAt = Date(timeIntervalSince1970: 5678)
+        let manifestURL = fixture.vault.appendingPathComponent(vaultManifestFileName)
+        try! FileManager.default.removeItem(at: manifestURL)
+        expect(vaulted.manager.reconcileDerivedState(config: pendingArchive),
+               "reconciliation must complete for a writable vault")
+        expect(!FileManager.default.fileExists(atPath: repairedRow.launcherPath),
+               "reconciliation must finish pending archived-launcher cleanup")
+        expect(FileManager.default.fileExists(atPath: sentinel.path)
+               && FileManager.default.fileExists(atPath: durableIcon.path),
+               "reconciliation must preserve profile data and durable custom icons")
+        expect(VaultManifest.read(vaultRoot: fixture.vault)?
+                .instances.first { $0.id == id }?.archived == true,
+               "reconciliation must rebuild vault.json from config truth")
     }
 
     /// Phase 2 wiring decision: `makeLauncherGenerator(forDataRoot:)` is the one

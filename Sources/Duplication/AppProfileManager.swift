@@ -616,6 +616,32 @@ struct AppProfileManager {
         return updated
     }
 
+    /// Repairs derived lifecycle state from the persisted config. This is safe
+    /// to run repeatedly: config remains the source of truth, archived launchers
+    /// are removed without touching profile data or custom icons, and vault.json
+    /// is rewritten from the current rows when a vault is configured.
+    @discardableResult
+    func reconcileDerivedState(config: KlikProConfig) -> Bool {
+        var complete = true
+        for instance in config.instances where
+            instance.state == .archived
+                && instance.launcherKind == .managed
+                && instance.profileOwnership == .managed {
+            do {
+                if let staged = try generator.stageLauncherRemoval(for: instance) {
+                    try generator.commitLauncherRemoval(staged, preserveCustomIcon: true)
+                }
+            } catch {
+                complete = false
+            }
+            generator.removeHomeSymlinks(for: instance.id, storage: instance.storage)
+        }
+        if config.instances.contains(where: { $0.storage == .vault }) {
+            complete = updateVaultManifest(config: config) && complete
+        }
+        return complete
+    }
+
     /// The launcher is first moved to a hidden UUID-keyed staging path. A failed
     /// config write restores it; a successful write commits deletion. M1 deliberately
     /// retains the profile directory and its data.
