@@ -86,6 +86,7 @@ if [[ "$MODE" == "all" ]]; then
   render_preview "$ROOT/assets/screenshot-settings.png" settings
   render_preview "$ROOT/assets/screenshot-advanced-locked.png" advanced
   render_preview "$ROOT/assets/screenshot-advanced.png" advanced "" 0 0 1
+  xcrun swift "$ROOT/tools/render-app-profiles-showcase.swift"
 fi
 
 # Onboarding fixtures cover all three steps. Step 3 renders the actual first-run

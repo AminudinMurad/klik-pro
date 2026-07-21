@@ -57,6 +57,14 @@ or initial badge so every account is recognisable at a glance:
 
 <img src="assets/screenshot-app-profiles.png?v=1.2.0-b4" width="940" alt="Klik PRO App Profiles tab showing individually styled profile icons, Open and Assign Button controls, per-profile menu-bar toggles, and a gear menu for profile management">
 
+**Icon customisation** — distinguish profiles with colour tints or initial badges,
+manage them from the per-profile gear menu, and see the same identity immediately in
+Mappings:
+
+<p align="center">
+  <img src="assets/app-profiles-icon-showcase.gif?v=1.2.0-b4" width="600" alt="Klik PRO animation showing tinted and initial-badged App Profile icons, profile management controls, and matching icons in the Mappings tab">
+</p>
+
 **Settings** — launch-at-login, menu-icon visibility, update-check, and guided Accessibility setup/reset controls:
 
 <img src="assets/screenshot-settings.png?v=1.2.0-b4" width="940" alt="Klik PRO Settings tab with separated Recheck control and outlined Granted permission status">

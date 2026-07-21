@@ -712,6 +712,8 @@ grep -q 'about.png' "$ROOT/tools/render-previews.sh"
 # README shows the animated onboarding flow (GIF) at the same display width.
 grep -q 'onboarding-flow.gif' "$ROOT/README.md"
 grep -Eq 'onboarding-flow\.gif[^\"]*" width="462"' "$ROOT/README.md"
+grep -q 'app-profiles-icon-showcase.gif' "$ROOT/README.md"
+[[ -s "$ROOT/assets/app-profiles-icon-showcase.gif" ]]
 # The locked-state Advanced screenshot documents the new lock/warning gate.
 grep -q 'screenshot-advanced-locked.png' "$ROOT/README.md"
 grep -q 'roundedRect: borderRect' "$ROOT/tools/PreviewMain.swift"

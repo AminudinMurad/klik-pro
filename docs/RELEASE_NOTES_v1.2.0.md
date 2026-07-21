@@ -5,6 +5,8 @@ testing and refinement across the complete launch, management, and recovery work
 Profiles are easier to recognise, more consistent across the app, and more reliable
 when opened repeatedly from different parts of macOS.
 
+![Klik PRO 1.2.0 App Profiles icon customisation](https://raw.githubusercontent.com/AminudinMurad/klik-pro/v1.2.0/assets/app-profiles-icon-showcase.gif)
+
 ## Highlights
 
 - **Give every App Profile its own identity.** Use a custom PNG or ICO, tint the
