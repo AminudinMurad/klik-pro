@@ -163,6 +163,7 @@ private struct AppProfilesFoundationTests {
         testVaultHealParityAndPortability()
         testVaultAdoptionRegeneratesFromManifest()
         testVaultInstanceRemovalAndManifestWriteFailSafe()
+        testArchiveRestoreAndRepairPreserveVaultData()
         testDataRootWiringFactorySelectsGenerator()
         testSettledProcessScanResolvesTransientAmbiguity()
         print("App Profiles foundation tests passed")
@@ -197,9 +198,9 @@ private struct AppProfilesFoundationTests {
 
     private static func testSchema10DefaultsAndSynchronization() {
         let defaults = KlikProConfig.default
-        expect(defaults.schemaVersion == 11, "new configs must use schema 11")
+        expect(defaults.schemaVersion == 12, "new configs must use schema 12")
         expect(defaults.dataRoot == nil, "new configs must default to no vault (Application Support)")
-        expect(defaults.instances.count == 2, "schema 11 must contain both legacy targets")
+        expect(defaults.instances.count == 2, "schema 12 must contain both legacy targets")
 
         for target in QuickLaunchTarget.allCases {
             guard let instance = defaults.instances.first(where: {
@@ -304,7 +305,7 @@ private struct AppProfilesFoundationTests {
         defer { unsetenv("KLIK_PRO_CONFIG_DIRECTORY") }
 
         let migrated = KlikProConfigStore.load()
-        expect(migrated.schemaVersion == 11, "schema 9 must migrate through to schema 11")
+        expect(migrated.schemaVersion == 12, "schema 9 must migrate through to schema 12")
         expect(migrated.instances.count == 2, "migration must add two legacy rows")
         expect(!migrated.chatGPTHotkey.enabled, "migration must preserve customized hotkeys")
 
@@ -320,8 +321,8 @@ private struct AppProfilesFoundationTests {
             KlikProConfig.self,
             from: Data(contentsOf: configURL)
         )
-        expect(saved.schemaVersion == 11 && saved.instances.count == 2,
-               "the atomically replaced config must be schema 11")
+        expect(saved.schemaVersion == 12 && saved.instances.count == 2,
+               "the atomically replaced config must be schema 12")
 
         var later = migrated
         later.middleButton.enabled.toggle()
@@ -2323,8 +2324,27 @@ private struct AppProfilesFoundationTests {
                "a schema-10 config must decode with dataRoot = nil")
         expect(decoded.instances.allSatisfy { $0.storage == .applicationSupport },
                "every schema-10 instance must migrate as .applicationSupport")
-        expect(normalizedQuickLaunchConfig(decoded).schemaVersion == 11,
-               "normalization must bump migrated configs to schema 11")
+        expect(normalizedQuickLaunchConfig(decoded).schemaVersion == 12,
+               "normalization must bump migrated configs to schema 12")
+
+        // Schema 11 → 12 is lifecycle-only and must default every existing row
+        // to active without inventing an archive timestamp.
+        var schema11Object = try! JSONSerialization.jsonObject(with: encoder.encode(defaults))
+            as! [String: Any]
+        schema11Object["schemaVersion"] = 11
+        var schema11Instances = schema11Object["instances"] as! [[String: Any]]
+        for index in schema11Instances.indices {
+            schema11Instances[index].removeValue(forKey: "state")
+            schema11Instances[index].removeValue(forKey: "archivedAt")
+        }
+        schema11Object["instances"] = schema11Instances
+        let schema11Data = try! JSONSerialization.data(withJSONObject: schema11Object)
+        let lifecycleMigrated = try! JSONDecoder().decode(KlikProConfig.self, from: schema11Data)
+        expect(lifecycleMigrated.instances.allSatisfy {
+            $0.state == .active && $0.archivedAt == nil
+        }, "schema 11 rows must migrate to active with no archive timestamp")
+        expect(normalizedQuickLaunchConfig(lifecycleMigrated).schemaVersion == 12,
+               "normalization must bump schema 11 configs to schema 12")
 
         // Schema-11 round trip: dataRoot and per-instance storage survive.
         var vaulted = defaults
@@ -2455,6 +2475,29 @@ private struct AppProfilesFoundationTests {
                && manifest.instances[0].compatibilityRuleID == fixture.rule.id
                && manifest.instances[0].homeSymlinkPrefix == "claude",
                "the manifest must record the vault instance's re-derivable identity")
+        expect(manifest.instances[0].archived == false
+               && manifest.instances[0].menuColor == nil
+               && manifest.instances[0].customIcon == false,
+               "new manifest lifecycle/icon fields must default safely")
+        var v1ManifestObject = try! JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(manifest)
+        ) as! [String: Any]
+        v1ManifestObject["schemaVersion"] = 1
+        var v1Records = v1ManifestObject["instances"] as! [[String: Any]]
+        for index in v1Records.indices {
+            v1Records[index].removeValue(forKey: "archived")
+            v1Records[index].removeValue(forKey: "menuColor")
+            v1Records[index].removeValue(forKey: "customIcon")
+        }
+        v1ManifestObject["instances"] = v1Records
+        let v1Manifest = try! JSONDecoder().decode(
+            VaultManifest.self,
+            from: JSONSerialization.data(withJSONObject: v1ManifestObject)
+        )
+        expect(v1Manifest.instances[0].archived == false
+               && v1Manifest.instances[0].menuColor == nil
+               && v1Manifest.instances[0].customIcon == false,
+               "manifest schema 1 must decode with safe lifecycle/icon defaults")
         expect(!manifest.instances.contains { $0.id == baseID },
                "Application Support instances must never enter the vault manifest")
 
@@ -2854,6 +2897,84 @@ private struct AppProfilesFoundationTests {
             [.posixPermissions: 0o700],
             ofItemAtPath: fixture.vault.path
         )
+    }
+
+    private static func testArchiveRestoreAndRepairPreserveVaultData() {
+        let fixture = makeVaultFixture("archive-restore-repair")
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        var persisted: KlikProConfig?
+        let vaulted = makeVaultManager(
+            fixture,
+            vaultRoot: fixture.vault,
+            persist: { persisted = $0; return true }
+        )
+        var config = KlikProConfig.default
+        config.dataRoot = fixture.vault.path
+        let id = UUID()
+        let created = try! vaulted.manager.create(
+            from: vaulted.manager.candidate(for: fixture.source),
+            label: "Claude Archive",
+            config: config,
+            instanceID: id
+        )
+        let profile = URL(fileURLWithPath: created.instance.profileDirectory!, isDirectory: true)
+        let sentinel = profile.appendingPathComponent("Login Data")
+        try! Data("must-survive".utf8).write(to: sentinel)
+        let iconPNG = fixture.root.appendingPathComponent("custom.png")
+        writeTestPNG(width: 512, height: 512, to: iconPNG)
+        let withIcon = try! vaulted.manager.updateManagedIcon(
+            instanceID: id,
+            edit: .image(iconPNG),
+            config: created.config
+        )
+        let workingIcon = vaulted.generator.customIconURL(for: id)
+        let durableIcon = try! vaulted.generator.vaultCustomIconURL(for: id)
+        expect(FileManager.default.fileExists(atPath: workingIcon.path)
+               && FileManager.default.fileExists(atPath: durableIcon.path),
+               "a vault custom icon must have working and durable copies")
+
+        let archived = try! vaulted.manager.archive(
+            instanceID: id,
+            at: Date(timeIntervalSince1970: 1234),
+            config: withIcon
+        )
+        let archivedRow = archived.config.instances.first { $0.id == id }!
+        expect(archivedRow.state == .archived && archivedRow.archivedAt != nil,
+               "Archive must keep the row and persist archived lifecycle state")
+        expect(!FileManager.default.fileExists(atPath: archivedRow.launcherPath),
+               "Archive must remove only the generated launcher")
+        expect(FileManager.default.fileExists(atPath: sentinel.path)
+               && FileManager.default.fileExists(atPath: workingIcon.path)
+               && FileManager.default.fileExists(atPath: durableIcon.path),
+               "Archive must preserve profile data and both custom-icon copies")
+        let archivedManifest = VaultManifest.read(vaultRoot: fixture.vault)!
+        expect(archivedManifest.instances.first { $0.id == id }?.archived == true,
+               "Archive must retain and mark the vault manifest record")
+        expect(vaulted.manager.maintenanceHealth(for: archivedRow) == .recoverableArchived,
+               "an archived row with owned data must be recoverable")
+
+        let restored = try! vaulted.manager.restore(instanceID: id, config: archived.config)
+        let restoredRow = restored.instances.first { $0.id == id }!
+        expect(restoredRow.state == .active && restoredRow.archivedAt == nil,
+               "Restore must reactivate the same UUID")
+        expect(FileManager.default.fileExists(atPath: restoredRow.launcherPath)
+               && (try! Data(contentsOf: sentinel)) == Data("must-survive".utf8),
+               "Restore must rebuild the launcher without changing profile data")
+
+        let staged = try! vaulted.generator.stageLauncherRemoval(for: restoredRow)!
+        try! vaulted.generator.commitLauncherRemoval(staged, preserveCustomIcon: true)
+        expect(vaulted.manager.maintenanceHealth(for: restoredRow) == .missingLauncher,
+               "manual launcher deletion must classify as Missing Launcher")
+        let repaired = try! vaulted.manager.repairLauncher(instanceID: id, config: restored)
+        let repairedRow = repaired.instances.first { $0.id == id }!
+        expect(repairedRow.id == id
+               && repairedRow.state == .active
+               && FileManager.default.fileExists(atPath: repairedRow.launcherPath),
+               "Repair must rebuild the launcher for the same active UUID")
+        expect(try! Data(contentsOf: sentinel) == Data("must-survive".utf8),
+               "Repair must never modify profile data")
+        expect(persisted?.instances.first { $0.id == id }?.state == .active,
+               "the restored/repaired lifecycle state must persist")
     }
 
     /// Phase 2 wiring decision: `makeLauncherGenerator(forDataRoot:)` is the one

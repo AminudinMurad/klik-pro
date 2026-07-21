@@ -604,6 +604,14 @@ struct KlikProConfig: Codable, Equatable {
         } else {
             dataRoot = try container.decodeIfPresent(String.self, forKey: .dataRoot)
         }
+        // Schema 11 → 12 is also additive. AppProfileInstance defaults missing
+        // lifecycle fields to active/nil, so no profile is re-keyed or moved.
+        if schemaVersion < 12 {
+            for index in instances.indices {
+                instances[index].state = .active
+                instances[index].archivedAt = nil
+            }
+        }
     }
 
     init(
@@ -661,7 +669,7 @@ let defaultBrowserForwardCombo = KeyCombo(
 extension KlikProConfig {
     static let `default`: KlikProConfig = {
         var config = KlikProConfig(
-            schemaVersion: 11,
+            schemaVersion: 12,
             onboardingCompleted: false,
             // Fresh installs begin with every Settings toggle OFF. First-run onboarding
             // asks the user to turn each on (or skip). Existing configs keep their stored
@@ -771,6 +779,7 @@ enum KlikProConfigStore {
         let requiresSingleServiceMigration = decoded.schemaVersion < 9
         let requiresAppProfilesMigration = decoded.schemaVersion < 10
         let requiresVaultMigration = decoded.schemaVersion < 11
+        let requiresLifecycleMigration = decoded.schemaVersion < 12
         var normalized = addingDiscoveredExternalDualApps(
             to: normalizedQuickLaunchConfig(decoded)
         )
@@ -791,10 +800,9 @@ enum KlikProConfigStore {
             if createPreV2BackupIfNeeded(originalData: data) {
                 _ = save(normalized)
             }
-        } else if requiresVaultMigration {
-            // Schema 10 → 11 is purely additive (dataRoot defaults nil, every
-            // instance defaults .applicationSupport), so the version bump is
-            // rewritten without the destructive-migration backup convention.
+        } else if requiresVaultMigration || requiresLifecycleMigration {
+            // Schema 10 → 11 and 11 → 12 are purely additive, so the version
+            // bump is rewritten without the destructive-migration backup convention.
             _ = save(normalized)
         }
         // The "all Settings toggles start OFF" policy applies once to existing users too.
@@ -1947,6 +1955,7 @@ func appProfileAssignmentsAreValid(_ config: KlikProConfig) -> Bool {
     var instanceIDs = Set<UUID>()
     for instance in config.instances {
         guard instanceIDs.insert(instance.id).inserted else { return false }
+        guard instance.state == .active else { continue }
         if let button = instance.mouseButton,
            !mouseOwners.insert(button).inserted {
             return false
@@ -1974,7 +1983,9 @@ func activeAppProfileInstance(
     // retained for source compatibility with the v1 hotkey/menu lifecycle.
     _ = specialFeatureActive
     let matches = config.instances.filter {
-        activeInstanceIDs.contains($0.id) && $0.mouseButton?.shortcutSlot == slot
+        $0.state == .active
+            && activeInstanceIDs.contains($0.id)
+            && $0.mouseButton?.shortcutSlot == slot
     }
     return matches.count == 1 ? matches[0] : nil
 }
@@ -2013,6 +2024,7 @@ func launchableAppProfileInstanceIDs(
 ) -> Set<UUID> {
     guard appProfileAssignmentsAreValid(config) else { return [] }
     return Set(config.instances.compactMap { instance -> UUID? in
+        guard instance.state == .active else { return nil }
         if let target = instance.legacyQuickLaunchTarget {
             return legacyTargetIsAvailable(target) ? instance.id : nil
         }
@@ -2025,7 +2037,7 @@ func launchableAppProfileInstanceIDs(
 /// fail closed. The on-disk file is not rewritten until the user explicitly saves.
 func normalizedQuickLaunchConfig(_ config: KlikProConfig) -> KlikProConfig {
     var normalized = config
-    normalized.schemaVersion = 11
+    normalized.schemaVersion = 12
     normalized.instances = synchronizedLegacyQuickLaunchInstances(in: normalized)
     return normalized
 }
@@ -2140,7 +2152,9 @@ func slotOpensAppProfileInstance(_ slot: ShortcutSlot, in config: KlikProConfig)
     // gating) by activeQuickLaunchTarget; including them would wrongly silence a
     // forward/back shortcut conflict while the Special Feature is off.
     return config.instances.contains {
-        $0.mouseButton == button && $0.launcherKind == .managed
+        $0.state == .active
+            && $0.mouseButton == button
+            && $0.launcherKind == .managed
     }
 }
 

@@ -11,6 +11,11 @@ enum AppProfileOwnership: String, Codable, Equatable {
     case external
 }
 
+enum AppProfileState: String, Codable, Equatable {
+    case active
+    case archived
+}
+
 enum AppProfileMenuColor: String, Codable, CaseIterable, Equatable {
     case blue
     case green
@@ -66,6 +71,10 @@ struct AppProfileInstance: Identifiable, Codable, Equatable {
     var launcherPath: String
     var profileDirectory: String?
     var profileOwnership: AppProfileOwnership
+    /// Schema 12 lifecycle state. Archived rows retain their full recipe and
+    /// assignments, but every runtime consumer must treat them as ineligible.
+    var state: AppProfileState
+    var archivedAt: Date?
     var source: AppProfileSource
     /// Schema 11: marks where this instance's data lives so healing and path
     /// derivation pick the right root. `profileDirectory` and
@@ -84,7 +93,7 @@ struct AppProfileInstance: Identifiable, Codable, Equatable {
     var compatibilityRuleID: String?
 
     private enum CodingKeys: String, CodingKey {
-        case id, label, launcherKind, launcherPath, profileOwnership, source
+        case id, label, launcherKind, launcherPath, profileOwnership, state, archivedAt, source
         case profileDirectory = "profileDir"
         case storage
         case environmentOverrides = "envOverrides"
@@ -107,6 +116,8 @@ struct AppProfileInstance: Identifiable, Codable, Equatable {
             AppProfileOwnership.self,
             forKey: .profileOwnership
         )
+        state = try container.decodeIfPresent(AppProfileState.self, forKey: .state) ?? .active
+        archivedAt = try container.decodeIfPresent(Date.self, forKey: .archivedAt)
         source = try container.decode(AppProfileSource.self, forKey: .source)
         storage = try container.decodeIfPresent(AppProfileStorage.self, forKey: .storage)
             ?? .applicationSupport
@@ -147,6 +158,8 @@ struct AppProfileInstance: Identifiable, Codable, Equatable {
         launcherPath: String,
         profileDirectory: String?,
         profileOwnership: AppProfileOwnership,
+        state: AppProfileState = .active,
+        archivedAt: Date? = nil,
         source: AppProfileSource,
         storage: AppProfileStorage = .applicationSupport,
         environmentOverrides: [String: String] = [:],
@@ -166,6 +179,8 @@ struct AppProfileInstance: Identifiable, Codable, Equatable {
         self.launcherPath = launcherPath
         self.profileDirectory = profileDirectory
         self.profileOwnership = profileOwnership
+        self.state = state
+        self.archivedAt = archivedAt
         self.source = source
         self.storage = storage
         self.environmentOverrides = environmentOverrides

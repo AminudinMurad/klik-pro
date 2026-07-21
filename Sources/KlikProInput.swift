@@ -45,6 +45,7 @@ private var claudeAvailable = quickLaunchTargetIsAvailable(.claude)
 private let appProfileAssignmentStateIsValid = appProfileAssignmentsAreValid(config)
 private var activeAppProfileInstanceIDs: Set<UUID> = appProfileAssignmentStateIsValid
     ? Set(config.instances.compactMap { instance -> UUID? in
+        guard instance.state == .active else { return nil }
         if let target = instance.legacyQuickLaunchTarget {
             return quickLaunchTargetIsAvailable(target) ? instance.id : nil
         }
@@ -79,6 +80,7 @@ private func refreshQuickLaunchAvailability() -> QuickLaunchTargetStateChange {
     )
     activeAppProfileInstanceIDs = appProfileAssignmentStateIsValid
         ? Set(config.instances.compactMap { instance -> UUID? in
+            guard instance.state == .active else { return nil }
             if let target = instance.legacyQuickLaunchTarget {
                 return quickLaunchTargetIsAvailable(target) ? instance.id : nil
             }
@@ -649,7 +651,8 @@ private final class MenuBarController: NSObject {
     override init() {
         super.init()
 
-        for (index, instance) in config.instances.enumerated() where instance.pinToMenuBar {
+        for (index, instance) in config.instances.enumerated()
+            where instance.state == .active && instance.pinToMenuBar {
             guard activeAppProfileInstanceIDs.contains(instance.id) else { continue }
             let item = NSStatusBar.system.statusItem(withLength: 22)
             let tag = index + 1
@@ -1505,7 +1508,8 @@ private struct KlikProInputMain {
             }
 
             let managedInstances = config.instances.filter {
-                $0.launcherKind == .managed
+                $0.state == .active
+                    && $0.launcherKind == .managed
                     && $0.hotkey.enabled
                     && activeAppProfileInstanceIDs.contains($0.id)
             }

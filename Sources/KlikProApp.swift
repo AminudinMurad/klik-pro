@@ -1819,10 +1819,11 @@ final class SettingsContentView: NSView {
         claudeButtonPicker.setUnavailable(config.chatGPTMouseButton, owner: .chatGPT)
 
         let availableInstances = config.instances.filter {
+            guard $0.state == .active else { return false }
             // In preview rendering the seeded legacy instances have no on-disk
             // launcher, so include them anyway to keep the rows consistent with
             // the App Profiles chips in screenshots.
-            previewRenderingIsActive
+            return previewRenderingIsActive
                 || $0.launcherKind == .managed
                 || FileManager.default.fileExists(atPath: $0.launcherPath)
         }.sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
@@ -1832,7 +1833,9 @@ final class SettingsContentView: NSView {
         ]
         rows.forEach { button, row in
             row.setLinked(to: nil)
-            let assigned = config.instances.first { $0.mouseButton == button }
+            let assigned = config.instances.first {
+                $0.state == .active && $0.mouseButton == button
+            }
             row.setOpenAppOptions(availableInstances, assignedID: assigned?.id)
         }
         _ = featureActive
@@ -3356,8 +3359,12 @@ final class ToggleView: NSView {
     }
 
     private func setDualAppMapping(instanceID: UUID?, button: QuickLaunchMouseButton) {
-        let currentOwner = config.instances.first { $0.mouseButton == button }
-        let selected = instanceID.flatMap { id in config.instances.first { $0.id == id } }
+        let currentOwner = config.instances.first {
+            $0.state == .active && $0.mouseButton == button
+        }
+        let selected = instanceID.flatMap { id in
+            config.instances.first { $0.state == .active && $0.id == id }
+        }
         let previousButton = selected?.mouseButton
         let releasesDifferentOwner = currentOwner?.id != nil && currentOwner?.id != instanceID
         let movesSelectedApp = previousButton != nil && previousButton != button
@@ -4708,6 +4715,10 @@ final class ToggleView: NSView {
             return "No data folder is configured or mounted, so nothing could be scanned."
         case .vaultManifestInvalid:
             return "That folder is not a Klik PRO data folder (no valid vault.json), so it was not adopted."
+        case .invalidLifecycleState:
+            return "That App Profile is not in the required active or archived state for this action."
+        case .repairUnavailable:
+            return "Klik PRO could not find verified profile data to rebuild this launcher safely."
         }
     }
 

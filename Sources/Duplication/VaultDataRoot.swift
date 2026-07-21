@@ -113,13 +113,61 @@ struct VaultManifestInstanceRecord: Codable, Equatable {
     var compatibilityRuleID: String
     /// Cached convenience only; adopt re-derives the prefix from the rule.
     var homeSymlinkPrefix: String?
+    /// Manifest schema 2 lifecycle and portable icon recovery metadata.
+    var archived: Bool
+    var menuColor: AppProfileMenuColor?
+    var customIcon: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case id, label, sourceBundleIdentifier, sourceTeamIdentifier
+        case sourceBundleURL, compatibilityRuleID, homeSymlinkPrefix
+        case archived, menuColor, customIcon
+    }
+
+    init(
+        id: UUID,
+        label: String,
+        sourceBundleIdentifier: String,
+        sourceTeamIdentifier: String?,
+        sourceBundleURL: String,
+        compatibilityRuleID: String,
+        homeSymlinkPrefix: String?,
+        archived: Bool = false,
+        menuColor: AppProfileMenuColor? = nil,
+        customIcon: Bool = false
+    ) {
+        self.id = id
+        self.label = label
+        self.sourceBundleIdentifier = sourceBundleIdentifier
+        self.sourceTeamIdentifier = sourceTeamIdentifier
+        self.sourceBundleURL = sourceBundleURL
+        self.compatibilityRuleID = compatibilityRuleID
+        self.homeSymlinkPrefix = homeSymlinkPrefix
+        self.archived = archived
+        self.menuColor = menuColor
+        self.customIcon = customIcon
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        label = try container.decode(String.self, forKey: .label)
+        sourceBundleIdentifier = try container.decode(String.self, forKey: .sourceBundleIdentifier)
+        sourceTeamIdentifier = try container.decodeIfPresent(String.self, forKey: .sourceTeamIdentifier)
+        sourceBundleURL = try container.decode(String.self, forKey: .sourceBundleURL)
+        compatibilityRuleID = try container.decode(String.self, forKey: .compatibilityRuleID)
+        homeSymlinkPrefix = try container.decodeIfPresent(String.self, forKey: .homeSymlinkPrefix)
+        archived = try container.decodeIfPresent(Bool.self, forKey: .archived) ?? false
+        menuColor = try container.decodeIfPresent(AppProfileMenuColor.self, forKey: .menuColor)
+        customIcon = try container.decodeIfPresent(Bool.self, forKey: .customIcon) ?? false
+    }
 }
 
 /// The vault's self-describing manifest. The manifest is the authority for
 /// which instances a vault holds; Application Support keeps only a cache copy
 /// of the active config.
 struct VaultManifest: Codable, Equatable {
-    static let currentSchemaVersion = 1
+    static let currentSchemaVersion = 2
 
     var schemaVersion: Int
     var instances: [VaultManifestInstanceRecord]

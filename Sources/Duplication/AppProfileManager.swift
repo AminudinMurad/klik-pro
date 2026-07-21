@@ -22,6 +22,8 @@ enum AppProfileManagerError: Error, Equatable {
     /// The candidate folder carries no valid `vault.json`, so it is refused:
     /// arbitrary or foreign folders are never adopted.
     case vaultManifestInvalid
+    case invalidLifecycleState
+    case repairUnavailable
 }
 
 struct AppProfileCandidate: Identifiable, Equatable {
@@ -49,6 +51,18 @@ struct VaultAdoptionResult: Equatable {
     /// directory, missing source app, rule mismatch, label collision). Their
     /// vault data is never touched; a later adopt can pick them up.
     let skippedInstanceIDs: [UUID]
+}
+
+enum AppProfileMaintenanceHealth: Equatable {
+    case healthy
+    case recoverableArchived
+    case missingLauncher
+    case missingData
+}
+
+struct AppProfileArchiveResult: Equatable {
+    let config: KlikProConfig
+    let launcherCleanupCompleted: Bool
 }
 
 /// Registry-gated App Profile lifecycle service. It re-inspects a scanned bundle
@@ -405,6 +419,15 @@ struct AppProfileManager {
         guard persist(updated) else {
             throw AppProfileManagerError.persistenceFailed
         }
+        if updated.instances[index].storage == .vault {
+            switch edit {
+            case .reset:
+                generator.removeVaultCustomIcon(for: updated.instances[index])
+            default:
+                _ = generator.synchronizeCustomIconToVault(for: updated.instances[index])
+            }
+            updateVaultManifest(config: updated)
+        }
         return updated
     }
 
@@ -446,7 +469,7 @@ struct AppProfileManager {
     /// the common user-facing entry point shared by the App Profiles Open button,
     /// Spotlight, and the Dock; the launcher performs its own source/rule checks.
     func generatedLauncherURL(for instance: AppProfileInstance) throws -> URL {
-        guard instance.launcherKind == .managed else {
+        guard instance.launcherKind == .managed, instance.state == .active else {
             throw AppProfileManagerError.externalInstance
         }
         do {
@@ -454,6 +477,143 @@ struct AppProfileManager {
         } catch {
             throw AppProfileManagerError.launcherUnavailable
         }
+    }
+
+    func maintenanceHealth(for instance: AppProfileInstance) -> AppProfileMaintenanceHealth {
+        guard instance.launcherKind == .managed,
+              instance.profileOwnership == .managed else {
+            return .healthy
+        }
+        guard (try? generator.validatedProfileURL(for: instance)) != nil else {
+            return .missingData
+        }
+        if instance.state == .archived {
+            return .recoverableArchived
+        }
+        return (try? generator.validatedLauncherURL(for: instance)) == nil
+            ? .missingLauncher
+            : .healthy
+    }
+
+    /// Rebuilds only a missing generated launcher. The owned profile directory
+    /// is validated but never created, moved, or modified.
+    func repairLauncher(
+        instanceID: UUID,
+        config: KlikProConfig
+    ) throws -> KlikProConfig {
+        guard let index = config.instances.firstIndex(where: { $0.id == instanceID }),
+              config.instances[index].state == .active,
+              maintenanceHealth(for: config.instances[index]) == .missingLauncher else {
+            throw AppProfileManagerError.repairUnavailable
+        }
+        let source = try verifiedSource(for: config.instances[index])
+        let materialization: ManagedLauncherMaterialization
+        do {
+            materialization = try generator.regenerateLauncher(
+                instance: config.instances[index],
+                sourceApp: source
+            )
+        } catch {
+            throw AppProfileManagerError.materializationFailed
+        }
+        var updated = config
+        updated.instances[index].iconPath = materialization.iconURL?.path
+        guard persist(updated) else {
+            if let staged = try? generator.stageLauncherRemoval(for: updated.instances[index]) {
+                try? generator.commitLauncherRemoval(staged, preserveCustomIcon: true)
+            }
+            throw AppProfileManagerError.persistenceFailed
+        }
+        if updated.instances[index].storage == .vault {
+            updateVaultManifest(config: updated)
+        }
+        return updated
+    }
+
+    /// Archives a managed profile without touching its data or assignments.
+    /// Config persistence is the commit point; launcher/reference cleanup is
+    /// idempotent and may be completed by a later reconciliation pass.
+    func archive(
+        instanceID: UUID,
+        at date: Date = Date(),
+        config: KlikProConfig
+    ) throws -> AppProfileArchiveResult {
+        guard let index = config.instances.firstIndex(where: { $0.id == instanceID }),
+              config.instances[index].launcherKind == .managed,
+              config.instances[index].profileOwnership == .managed else {
+            throw AppProfileManagerError.externalInstance
+        }
+        guard config.instances[index].state == .active else {
+            return AppProfileArchiveResult(config: config, launcherCleanupCompleted: true)
+        }
+        var updated = config
+        updated.instances[index].state = .archived
+        updated.instances[index].archivedAt = date
+        updated.instances[index].pinToMenuBar = false
+        guard persist(updated) else {
+            throw AppProfileManagerError.persistenceFailed
+        }
+        if updated.instances[index].storage == .vault {
+            updateVaultManifest(config: updated)
+        }
+        var cleanupCompleted = true
+        do {
+            if let staged = try generator.stageLauncherRemoval(for: updated.instances[index]) {
+                try generator.commitLauncherRemoval(staged, preserveCustomIcon: true)
+            }
+        } catch {
+            cleanupCompleted = false
+        }
+        generator.removeHomeSymlinks(
+            for: updated.instances[index].id,
+            storage: updated.instances[index].storage
+        )
+        return AppProfileArchiveResult(
+            config: updated,
+            launcherCleanupCompleted: cleanupCompleted
+        )
+    }
+
+    func restore(
+        instanceID: UUID,
+        config: KlikProConfig
+    ) throws -> KlikProConfig {
+        guard let index = config.instances.firstIndex(where: { $0.id == instanceID }),
+              config.instances[index].state == .archived else {
+            throw AppProfileManagerError.invalidLifecycleState
+        }
+        var updated = config
+        updated.instances[index].state = .active
+        updated.instances[index].archivedAt = nil
+        guard appProfileAssignmentsAreValid(updated) else {
+            throw AppProfileManagerError.invalidAssignments
+        }
+        let source = try verifiedSource(for: config.instances[index])
+        var generated = false
+        if (try? generator.validatedLauncherURL(for: config.instances[index])) == nil {
+            do {
+                let materialization = try generator.regenerateLauncher(
+                    instance: config.instances[index],
+                    sourceApp: source
+                )
+                updated.instances[index].iconPath = materialization.iconURL?.path
+                generated = true
+            } catch {
+                throw AppProfileManagerError.materializationFailed
+            }
+        }
+        guard persist(updated) else {
+            if generated,
+               let staged = try? generator.stageLauncherRemoval(for: updated.instances[index]) {
+                try? generator.commitLauncherRemoval(staged, preserveCustomIcon: true)
+            }
+            throw AppProfileManagerError.persistenceFailed
+        }
+        createHomeSymlinkIfRuleRequests(for: updated.instances[index])
+        if updated.instances[index].storage == .vault {
+            updateVaultManifest(config: updated)
+        }
+        return updated
     }
 
     /// The launcher is first moved to a hidden UUID-keyed staging path. A failed
@@ -655,7 +815,8 @@ struct AppProfileManager {
         var changed = false
         for index in updated.instances.indices {
             let instance = updated.instances[index]
-            guard instance.launcherKind == .managed,
+            guard instance.state == .active,
+                  instance.launcherKind == .managed,
                   instance.profileOwnership == .managed,
                   let ruleID = instance.compatibilityRuleID,
                   let rule = registry.rule(withID: ruleID) else {
@@ -798,6 +959,23 @@ struct AppProfileManager {
                 skipped.append(record.id)
                 continue
             }
+            instance.state = record.archived ? .archived : .active
+            instance.menuColor = record.menuColor
+            if record.customIcon {
+                guard generator.restoreCustomIconFromVault(for: instance) else {
+                    skipped.append(record.id)
+                    continue
+                }
+            }
+            if instance.state == .archived {
+                instance.pinToMenuBar = false
+                instance.iconPath = generator.hasCustomIcon(for: instance.id)
+                    ? generator.customIconURL(for: instance.id).path
+                    : nil
+                updated.instances.append(instance)
+                adopted.append(instance)
+                continue
+            }
             if (try? generator.validatedLauncherURL(for: instance)) != nil {
                 // A surviving launcher is never trusted: its baked payload is
                 // rewritten against the vault's current path.
@@ -881,6 +1059,9 @@ struct AppProfileManager {
     @discardableResult
     private func updateVaultManifest(config: KlikProConfig) -> Bool {
         guard let vaultRoot = generator.vaultRootURL else { return false }
+        for instance in config.instances where instance.storage == .vault {
+            _ = generator.synchronizeCustomIconToVault(for: instance)
+        }
         let records = config.instances
             .filter {
                 $0.storage == .vault
@@ -897,7 +1078,10 @@ struct AppProfileManager {
                     compatibilityRuleID: instance.compatibilityRuleID ?? "",
                     homeSymlinkPrefix: instance.compatibilityRuleID.flatMap {
                         registry.rule(withID: $0)?.homeSymlinkPrefix
-                    }
+                    },
+                    archived: instance.state == .archived,
+                    menuColor: instance.menuColor,
+                    customIcon: generator.hasVaultCustomIcon(for: instance.id)
                 )
             }
         return VaultManifest(
@@ -933,6 +1117,22 @@ struct AppProfileManager {
             )
         }
         return caller.merging(derived) { _, ruleValue in ruleValue }
+    }
+
+    private func verifiedSource(for instance: AppProfileInstance) throws -> InstalledApp {
+        let sourceURL = URL(fileURLWithPath: instance.source.bundleURL, isDirectory: true)
+            .standardizedFileURL
+        guard let current = inspectApplication(sourceURL),
+              current.bundleURL.standardizedFileURL == sourceURL,
+              current.bundleIdentifier == instance.source.bundleIdentifier else {
+            throw AppProfileManagerError.sourceChanged
+        }
+        let currentCandidate = candidate(for: current)
+        guard currentCandidate.canCreate,
+              currentCandidate.eligibility.compatibilityRuleID == instance.compatibilityRuleID else {
+            throw AppProfileManagerError.creationDisabled(currentCandidate.eligibility.reason)
+        }
+        return current
     }
 
     private func sameSource(_ current: InstalledApp, _ selected: InstalledApp) -> Bool {

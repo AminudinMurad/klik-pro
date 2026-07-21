@@ -669,9 +669,10 @@ final class MappingAppProfilesView: NSView {
         }
         let rowWidth = max(320, scrollView.contentSize.width - 4)
         let visible = instances.filter { instance in
-            instance.launcherKind == .managed
+            instance.state == .active
+                && (instance.launcherKind == .managed
                 || previewRenderingIsActive
-                || FileManager.default.fileExists(atPath: instance.launcherPath)
+                || FileManager.default.fileExists(atPath: instance.launcherPath))
         }.sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
 
         if visible.isEmpty {
@@ -860,9 +861,10 @@ final class AppProfilesContentView: NSView {
         // sitting right against it.
         let rowWidth = max(430, scrollView.contentSize.width - 20)
         let visible = instances.filter { instance in
-            instance.launcherKind == .managed
+            instance.state == .active
+                && (instance.launcherKind == .managed
                 || previewRenderingIsActive
-                || FileManager.default.fileExists(atPath: instance.launcherPath)
+                || FileManager.default.fileExists(atPath: instance.launcherPath))
         }
         if visible.isEmpty {
             let empty = NSTextField(labelWithString: "No App Profiles yet")

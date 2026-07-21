@@ -902,6 +902,58 @@ struct LauncherGenerator {
         fileManager.fileExists(atPath: customIconURL(for: id).path)
     }
 
+    func vaultCustomIconURL(for id: UUID) throws -> URL {
+        try vaultInstanceDirectoryURL(for: id)
+            .appendingPathComponent("custom-icon.icns", isDirectory: false)
+    }
+
+    func hasVaultCustomIcon(for id: UUID) -> Bool {
+        guard let url = try? vaultCustomIconURL(for: id) else { return false }
+        return fileManager.fileExists(atPath: url.path)
+    }
+
+    /// Keeps an exact portable copy beside a vault instance's owned data.
+    /// Machine-local `iconPath` is never used as recovery truth.
+    @discardableResult
+    func synchronizeCustomIconToVault(for instance: AppProfileInstance) -> Bool {
+        guard instance.storage == .vault,
+              let durableURL = try? vaultCustomIconURL(for: instance.id) else {
+            return false
+        }
+        if fileManager.fileExists(atPath: durableURL.path) { return true }
+        let workingURL = customIconURL(for: instance.id)
+        guard let data = fileManager.contents(atPath: workingURL.path) else { return false }
+        do {
+            try data.write(to: durableURL, options: .atomic)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    @discardableResult
+    func restoreCustomIconFromVault(for instance: AppProfileInstance) -> Bool {
+        guard instance.storage == .vault,
+              let durableURL = try? vaultCustomIconURL(for: instance.id),
+              let data = fileManager.contents(atPath: durableURL.path) else {
+            return false
+        }
+        let workingURL = customIconURL(for: instance.id)
+        do {
+            try createPrivateDirectory(workingURL.deletingLastPathComponent())
+            try data.write(to: workingURL, options: .atomic)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    func removeVaultCustomIcon(for instance: AppProfileInstance) {
+        guard instance.storage == .vault,
+              let durableURL = try? vaultCustomIconURL(for: instance.id) else { return }
+        try? fileManager.removeItem(at: durableURL)
+    }
+
     /// The square canvas tint/badge rendering composites onto before it is
     /// downsampled into the .icns element sizes.
     static let renderCanvasSize = 512
@@ -1308,7 +1360,10 @@ struct LauncherGenerator {
         )
     }
 
-    func commitLauncherRemoval(_ removal: ManagedLauncherRemoval) throws {
+    func commitLauncherRemoval(
+        _ removal: ManagedLauncherRemoval,
+        preserveCustomIcon: Bool = false
+    ) throws {
         guard isSafeRemovalStage(removal) else {
             throw LauncherGeneratorError.unsafeRemoval
         }
@@ -1319,8 +1374,11 @@ struct LauncherGenerator {
         } catch {
             throw LauncherGeneratorError.unsafeRemoval
         }
-        // The profile is gone for good; its persisted custom icon goes with it.
-        try? fileManager.removeItem(at: customIconURL(for: removal.instanceID))
+        if !preserveCustomIcon {
+            // Permanent removal drops the working icon copy. Archive passes
+            // preserveCustomIcon so Restore can reproduce the exact launcher.
+            try? fileManager.removeItem(at: customIconURL(for: removal.instanceID))
+        }
     }
 
     func rollbackLauncherRemoval(_ removal: ManagedLauncherRemoval) throws {

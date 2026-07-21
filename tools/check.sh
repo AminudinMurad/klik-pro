@@ -142,7 +142,7 @@ if sed -n '/func resolvedEnvironment/,/^    }/p' "$ROOT/Sources/Duplication/Engi
   echo "Rule environment expansion must never reference labels" >&2
   exit 1
 fi
-grep -q 'normalized.schemaVersion = 11' "$ROOT/Sources/KlikProConfig.swift"
+grep -q 'normalized.schemaVersion = 12' "$ROOT/Sources/KlikProConfig.swift"
 grep -q 'createPreV2BackupIfNeeded(originalData: data)' "$ROOT/Sources/KlikProConfig.swift"
 grep -q 'O_WRONLY | O_CREAT | O_EXCL' "$ROOT/Sources/KlikProConfig.swift"
 
@@ -208,7 +208,7 @@ grep -q 'NSOpenPanel()' "$ROOT/Sources/KlikProApp.swift"
 adopt_block="$(sed -n '/private func chooseVaultDataFolder/,/private func createManagedAppProfile/p' \
   "$ROOT/Sources/KlikProApp.swift")"
 grep -q 'vaultPathRejectionReason(path)' <<<"$adopt_block"
-grep -q 'where instance.pinToMenuBar' \
+grep -q 'where instance.state == .active && instance.pinToMenuBar' \
   "$ROOT/Sources/KlikProInput.swift"
 grep -q 'updateCheckRequestedNotification' "$ROOT/Sources/KlikProConfig.swift"
 grep -q 'title: "Check for updates…"' "$ROOT/Sources/KlikProInput.swift"

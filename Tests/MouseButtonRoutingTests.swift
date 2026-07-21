@@ -224,8 +224,8 @@ private struct MouseButtonRoutingTests {
         expect(shortcutSlot(forMouseButtonNumber: 5) == nil,
                "unmanaged button 5 must pass through")
 
-        expect(KlikProConfig.default.schemaVersion == 11,
-               "new configurations must use schema 11 (Durable Data Vault fields)")
+        expect(KlikProConfig.default.schemaVersion == 12,
+               "new configurations must use schema 12 (App Profile lifecycle fields)")
         expect(!KlikProConfig.default.onboardingCompleted,
                "a new configuration must begin with onboarding pending")
         expect(!KlikProConfig.default.showMenuBarIcon,
@@ -276,8 +276,8 @@ private struct MouseButtonRoutingTests {
             expect(!decoded.thumbWheel.firefoxEnabled,
                    "a legacy config must preserve its Firefox behavior from the generic fallback")
             let normalized = normalizedQuickLaunchConfig(decoded)
-            expect(normalized.schemaVersion == 11,
-                   "schema-4 configs must normalize through the layered migrations to schema 11")
+            expect(normalized.schemaVersion == 12,
+                   "schema-4 configs must normalize through the layered migrations to schema 12")
             expect(normalized.instances.count == 2,
                    "pre-v2 configs must receive both legacy-external instance rows")
             expect(normalized.middleButton == legacyConfig.middleButton,
@@ -531,6 +531,24 @@ private struct MouseButtonRoutingTests {
             = duplicateHotkeyConfig.chatGPTHotkey
         expect(!appProfileAssignmentsAreValid(duplicateHotkeyConfig),
                "duplicate enabled instance hotkeys must fail closed")
+        var archivedConfig = instanceNativeConfig
+        archivedConfig.instances[archivedConfig.instances.count - 1].state = .archived
+        archivedConfig.instances[archivedConfig.instances.count - 1].archivedAt = Date()
+        expect(appProfileAssignmentsAreValid(archivedConfig),
+               "archived assignments must not participate in the active conflict set")
+        expect(activeAppProfileInstance(
+            for: .gestureButton,
+            in: archivedConfig,
+            activeInstanceIDs: [managedID],
+            specialFeatureActive: true
+        ) == nil, "an archived profile must never receive mouse routing")
+        expect(launchableAppProfileInstanceIDs(
+            in: archivedConfig,
+            legacyTargetIsAvailable: { _ in false },
+            instanceIsLaunchable: { _ in true }
+        ).isEmpty, "an archived profile must never enter the launchable instance set")
+        expect(!slotOpensAppProfileInstance(.gestureButton, in: archivedConfig),
+               "an archived mouse assignment must not suppress its underlying shortcut")
         var launchPairState = MouseButtonDispatchState()
         _ = launchPairState.begin(buttonNumber: 2, dispatch: launchDispatch)
         expect(launchPairState.end(
