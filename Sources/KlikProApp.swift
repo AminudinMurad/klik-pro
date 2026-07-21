@@ -3024,6 +3024,30 @@ final class ToggleView: NSView {
     func showUnlockedAdvancedPreview() {
         guard previewRenderingIsActive else { return }
         advancedView.setLocked(false)
+        guard let base = persistedConfig.instances.first else { return }
+        let fixtures: [(String, AppProfileState, AppProfileMaintenanceHealth)] = [
+            ("Claude Work", .active, .healthy),
+            ("ChatGPT Test", .active, .missingLauncher),
+            ("Claude Archive", .archived, .recoverableArchived),
+        ]
+        let instances = fixtures.enumerated().map { index, fixture -> AppProfileInstance in
+            var instance = base
+            instance.id = UUID(uuidString: String(
+                format: "10000000-0000-0000-0000-%012d", index + 1
+            ))!
+            instance.label = fixture.0
+            instance.launcherKind = .managed
+            instance.profileOwnership = .managed
+            instance.state = fixture.1
+            instance.archivedAt = fixture.1 == .archived ? Date(timeIntervalSince1970: 1) : nil
+            return instance
+        }
+        advancedView.setMaintenanceInstances(
+            instances,
+            health: Dictionary(uniqueKeysWithValues: zip(instances, fixtures).map {
+                ($0.0.id, $0.1.2)
+            })
+        )
     }
 
     func showSupportedAppProfilesPreview() {
