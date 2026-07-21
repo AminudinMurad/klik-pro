@@ -19,7 +19,7 @@ help support continued development and mouse/browser compatibility testing:**
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/aminudinmurad)
 [![PayPal](https://img.shields.io/badge/PayPal-Support-003087?logo=paypal&logoColor=white)](https://www.paypal.com/paypalme/aminudinmurad)
 
-[Features](#features) · [Install](#install-pre-built-release) · [Shortcuts](#default-shortcuts) · [App Profiles](#app-profiles) · [How it works](#how-it-works) · [Building](#building) · [Tested with](#tested-with) · [Support](#support-development) · [Contributing](#contributing) · [License](#license)
+[Features](#features) · [Install](#install-pre-built-release) · [Shortcuts](#default-shortcuts) · [App Profiles](#app-profiles) · [Changelog](CHANGELOG.md) · [How it works](#how-it-works) · [Building](#building) · [Tested with](#tested-with) · [Support](#support-development) · [Contributing](#contributing) · [License](#license)
 
 </div>
 
@@ -43,29 +43,31 @@ assigned buttons remain active. Actual button and wheel support varies by hardwa
 an opt-in Accessibility step), with Back navigation and no dead-ends:
 
 <p align="center">
-  <img src="assets/onboarding-flow.gif?v=1.1.1-b3" width="462" alt="Klik PRO first-launch onboarding animation cycling through its three steps: Welcome, Preferences, and an opt-in Accessibility step">
+  <img src="assets/onboarding-flow.gif?v=1.2.0-b4" width="462" alt="Klik PRO first-launch onboarding animation cycling through its three steps: Welcome, Preferences, and an opt-in Accessibility step">
 </p>
 
 **Supported controls** — configure compatible mouse controls and see live conflict
 checks:
 
-<img src="assets/screenshot-mappings.png?v=1.1.1-b3" width="940" alt="Klik PRO Mappings tab with supported mouse controls and shortcut settings">
+<img src="assets/screenshot-mappings.png?v=1.2.0-b4" width="940" alt="Klik PRO Mappings tab with supported mouse controls, shortcut settings, and App Profiles using their individual icons">
 
-**App Profiles** — generate isolated extra instances of ChatGPT or Claude, each with its own login; open, assign to a mouse button, or manage each one:
+**App Profiles** — generate isolated extra instances of ChatGPT or Claude, each with
+its own login; open or assign each profile, and give it a custom PNG/ICO, colour tint,
+or initial badge so every account is recognisable at a glance:
 
-<img src="assets/screenshot-app-profiles.png?v=1.1.1-b3" width="940" alt="Klik PRO App Profiles tab with ChatGPT and Claude generators and a managed list of profiles offering Open, Assign Button, and per-profile menu-bar toggles">
+<img src="assets/screenshot-app-profiles.png?v=1.2.0-b4" width="940" alt="Klik PRO App Profiles tab showing individually styled profile icons, Open and Assign Button controls, per-profile menu-bar toggles, and a gear menu for profile management">
 
 **Settings** — launch-at-login, menu-icon visibility, update-check, and guided Accessibility setup/reset controls:
 
-<img src="assets/screenshot-settings.png?v=1.1.1-b3" width="940" alt="Klik PRO Settings tab with separated Recheck control and outlined Granted permission status">
+<img src="assets/screenshot-settings.png?v=1.2.0-b4" width="940" alt="Klik PRO Settings tab with separated Recheck control and outlined Granted permission status">
 
 **Advanced — durable data folder (lock-gated).** The Advanced tab is locked by default. Its options change where App Profile data is stored on disk, so clicking the padlock shows a risk confirmation before anything unlocks:
 
-<img src="assets/screenshot-advanced-locked.png?v=1.1.1-b3" width="940" alt="Klik PRO Advanced tab locked: a padlock, a warning that these options change where App Profile data is stored on disk and can leave profiles unfindable, and a Click the lock to unlock hint">
+<img src="assets/screenshot-advanced-locked.png?v=1.2.0-b4" width="940" alt="Klik PRO Advanced tab locked: a padlock, a warning that these options change where App Profile data is stored on disk and can leave profiles unfindable, and a Click the lock to unlock hint">
 
 Once unlocked, point new App Profiles at a durable data folder so their logins survive uninstalling Klik PRO, or scan an existing folder to recover profiles after a reinstall — existing profiles are never moved:
 
-<img src="assets/screenshot-advanced.png?v=1.1.1-b3" width="940" alt="Klik PRO Advanced tab unlocked, showing a durable data folder picker for new App Profiles and a Scan and Adopt control to recover profiles from an existing Klik PRO data folder">
+<img src="assets/screenshot-advanced.png?v=1.2.0-b4" width="940" alt="Klik PRO Advanced tab unlocked, showing a durable data folder picker for new App Profiles and a Scan and Adopt control to recover profiles from an existing Klik PRO data folder">
 
 ## Features
 
@@ -99,9 +101,11 @@ Once unlocked, point new App Profiles at a durable data folder so their logins s
   disables when its app or launcher wrapper is missing; a stale picker assignment
   can still be cleared with **None**.
 - **App Profiles** — generate a second icon for ChatGPT or Claude with its own separate
-  login and settings. The original app is never copied, cloned, or modified; the
-  generated launcher can be renamed, pinned to the Dock or menu bar, assigned to a
-  mouse button, or removed at any time. See [App Profiles](#app-profiles).
+  login and settings. The original app is never copied, cloned, or modified. Each
+  generated launcher can be renamed; styled with a custom PNG/ICO, one of six colour
+  tints, or an initial badge; pinned to the Dock or menu bar; assigned to a mouse
+  button; or removed at any time. Its identity stays consistent across App Profiles,
+  Mappings, the menu bar, Launchpad, and Finder. See [App Profiles](#app-profiles).
 - **Caffeinate** — an optional keep-awake menu on the Klik PRO menu-bar icon
   (30 minutes, 1 hour, 2 hours, or until turned off), powered by macOS's own
   `caffeinate`, with a coffee-cup status icon while active.
@@ -109,10 +113,10 @@ Once unlocked, point new App Profiles at a durable data folder so their logins s
 
 ## Install (pre-built release)
 
-The current release is **Klik PRO v1.1.1 (build 3)**, provided as one universal
+The current release is **Klik PRO v1.2.0 (build 4)**, provided as one universal
 macOS app for Apple Silicon and Intel Macs. The DMG is the recommended download;
 the ZIP contains the same app as an alternative.
-**[Download Klik PRO v1.1.1](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.1.1).**
+**[Download Klik PRO v1.2.0](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.2.0).**
 
 Klik PRO is **not notarized or signed with an Apple Developer ID** — it's an
 ad-hoc-signed, self-built utility — so a downloaded copy is quarantined and
@@ -241,8 +245,9 @@ LaunchAgent, plus a separate settings app:
   saved Special Feature setting and enables or disables the optional capabilities in
   the same process. Upgrades automatically unload and remove the legacy separate menu
   helper, if one is still installed.
-- **Settings app** (`Sources/KlikProApp.swift`) — a small AppKit window with two
-  tabs plus a one-time welcome sheet for fresh installations. The sheet
+- **Settings app** (`Sources/KlikProApp.swift`) — a small AppKit window with four
+  tabs—Mappings, Settings, App Profiles, and a lock-gated Advanced tab—plus a
+  one-time welcome sheet for fresh installations. The sheet
   explains the required Accessibility approval, the ready-to-try defaults, and where
   to customize them. **Mappings** records shortcuts for the four supported mouse controls,
   toggles them on/off, checks for conflicts, switches the optional Quick Launch toggle,
@@ -277,9 +282,16 @@ original app in `/Applications` is never copied, cloned, renamed, or modified.
 
 The **Mappings** tab uses the same two-column structure: mouse-button shortcuts and
 thumb-wheel tab switching stay on the left, while a scrollable profile list on the
-right provides **Open** and **Assign Button** for each profile. The remaining
-management actions — Rename, Remove, and the Menu bar toggle — stay on the App
-Profiles tab.
+right provides **Open** and **Assign Button** for each profile. Both tabs render the
+same current profile icon immediately after a change. The remaining management
+actions and the **Menu Bar Icon** toggle stay on the App Profiles tab.
+
+For generated profiles, the gear menu groups **Rename**, **Change Icon**, and
+**Remove**. **Change Icon** accepts PNG or ICO artwork, offers six colour tints of the
+original app icon, and can add a coloured corner badge using the profile's initial;
+the live preview shows the result before it is applied. **Reset to App Icon** restores
+the source app artwork. Custom icon data is kept with the profile and survives
+durable-folder recovery; the original ChatGPT or Claude app remains untouched.
 
 The naming dialog includes an unchecked **Add launcher icon to Dock** option for
 users who want the generated launcher pinned immediately. Each row in **Your App
@@ -309,6 +321,13 @@ profile; existing hand-made folders with the same name are never touched.
 Profiles generated by an earlier version gain their folder and link
 automatically, in place, the next time the Klik PRO app opens — no removal or
 regeneration needed.
+
+Opening a running profile from Klik PRO, its menu-bar icon, the Dock, Launchpad, or
+Finder reopens that profile's window and brings the same process forward instead of
+starting a duplicate. Existing generated launchers are refreshed in place when used,
+without changing their profile data or login. A pinned Dock tile may continue showing
+macOS's cached old icon until that tile is clicked or the user next logs in; the menu
+bar, Launchpad, Finder, App Profiles, and Mappings update immediately.
 
 Existing ChatGPT and Claude launchers remain untouched and appear under **Your App
 Profiles** with **Open** and **Assign Button**. Generated entries also offer
@@ -352,9 +371,6 @@ Possible directions for future releases — not committed, and subject to change
 - **Built-in system controls.** Preconfigured actions you can assign to a mouse button
   — brightness, volume, media playback, and the like — without recording a keyboard
   shortcut yourself.
-- **Custom App Profile icons.** Give a generated profile its own icon — not just a
-  custom name — so each instance is easy to tell apart in the Dock, Spotlight, and
-  the menu bar.
 
 Have a request? [Open an issue](https://github.com/AminudinMurad/klik-pro/issues).
 
@@ -396,7 +412,7 @@ setups Klik PRO has been tested against:
 | | |
 |---|---|
 | macOS | 26.5.2 (build 25F84) |
-| Klik PRO | v1.1.1 (build 3), universal Apple Silicon + Intel build |
+| Klik PRO | v1.2.0 (build 4), universal Apple Silicon + Intel build |
 | Primary mouse | Logitech MX Master 3 (Mac edition), firmware `MPM19.01_0015`, connected over Bluetooth (BLE) |
 | Additional tested mouse | Logi M650, firmware `RBM16.10_0014` |
 | Vendor software / driver | None — no mouse driver or manufacturer software installed |

@@ -3056,14 +3056,41 @@ final class ToggleView: NSView {
             ("Claude G", claude, .legacyExternal, nil),
             ("Claude 3", claude, .managed, nil),
         ]
+        let previewLauncherRoot = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("KlikPROPreviewLaunchers-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
         let expandedInstances = previewSeeds.enumerated().compactMap { index, seed -> AppProfileInstance? in
-            let (label, base, kind, button) = seed
+            let (label, base, _, button) = seed
             guard var instance = base else { return nil }
             instance.id = UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", index + 1))!
             instance.label = label
-            instance.launcherKind = kind
-            instance.profileOwnership = kind == .managed ? .managed : .external
+            // Public v1.2 previews deliberately use managed rows so the new gear
+            // menu and per-profile icon identity are both visible. The temporary
+            // launcher resources never touch the user's real profiles.
+            instance.launcherKind = .managed
+            instance.profileOwnership = .managed
             instance.mouseButton = button
+            let launcherURL = previewLauncherRoot.appendingPathComponent("\(label).app", isDirectory: true)
+            let resourcesURL = launcherURL.appendingPathComponent("Contents/Resources", isDirectory: true)
+            instance.launcherPath = launcherURL.path
+            if let source = NSWorkspace.shared.icon(forFile: instance.source.bundleURL)
+                .cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                let palette: [AppProfileMenuColor] = [.purple, .green, .blue, .orange, .pink, .gray]
+                let rendered = index.isMultiple(of: 2)
+                    ? LauncherGenerator.badgedIcon(
+                        source,
+                        color: palette[index].iconColor,
+                        letter: label.components(separatedBy: " ").last ?? label
+                    )
+                    : LauncherGenerator.tintedIcon(source, color: palette[index].iconColor)
+                if let rendered,
+                   let data = try? LauncherGenerator.makeICNSData(from: rendered) {
+                    try? FileManager.default.createDirectory(
+                        at: resourcesURL,
+                        withIntermediateDirectories: true
+                    )
+                    try? data.write(to: resourcesURL.appendingPathComponent("AppIcon.icns"))
+                }
+            }
             return instance
         }
         appProfilesView.setInstances(expandedInstances)

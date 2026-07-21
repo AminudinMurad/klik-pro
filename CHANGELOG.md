@@ -4,6 +4,10 @@ All notable changes to Klik PRO are documented here.
 
 ## 1.2.0
 
+This release brings together a major App Profiles personalisation upgrade and a
+careful reliability pass across profile launching, recovery, Dock integration,
+and post-update Accessibility guidance.
+
 - **More App Profile icon options** — each generated profile can now carry its
   own icon. Open the new per-profile gear menu and choose **Change Icon** to
   replace it with your own PNG or ICO, tint the app's own icon in one of six

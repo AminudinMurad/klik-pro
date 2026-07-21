@@ -84,6 +84,7 @@ if [[ "$MODE" == "all" ]]; then
   render_preview "$ROOT/assets/screenshot-mappings.png" mappings "" 1
   render_preview "$ROOT/assets/screenshot-app-profiles.png" profiles "" 1
   render_preview "$ROOT/assets/screenshot-settings.png" settings
+  render_preview "$ROOT/assets/screenshot-advanced-locked.png" advanced
   render_preview "$ROOT/assets/screenshot-advanced.png" advanced "" 0 0 1
 fi
 

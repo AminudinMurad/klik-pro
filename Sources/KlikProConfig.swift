@@ -2227,7 +2227,11 @@ func evaluateShortcutConflicts(
         // A button that opens an App Profile instance is in Open-App mode: its
         // stored shortcut is dormant (the button launches the app, never emits
         // the combo), so it is neither a conflict itself nor a source of one.
-        if slotOpensAppProfileInstance(slot, in: candidate) { result[slot] = .ok; continue }
+        if !specialFeatureActive,
+           slotOpensAppProfileInstance(slot, in: candidate) {
+            result[slot] = .ok
+            continue
+        }
 
         let intentionalCounterpart = linkedShortcutCounterpart(
             of: slot,
@@ -2240,6 +2244,14 @@ func evaluateShortcutConflicts(
             guard other != slot else { return false }
             guard other != intentionalCounterpart else { return false }
             guard !managedLaunchSlots.contains(other) else { return false }
+            // A managed App Profile assignment remains an Open-App action even
+            // when the caller has not supplied the runtime launchability set.
+            // Its stored keyboard combo is dormant and must not make another
+            // shortcut appear duplicated.
+            if !specialFeatureActive,
+               slotOpensAppProfileInstance(other, in: candidate) {
+                return false
+            }
             let otherMapping = mapping(
                 for: other,
                 in: candidate,
