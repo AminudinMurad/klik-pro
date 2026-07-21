@@ -66,6 +66,8 @@ struct LauncherGenerator {
     static let profileOwnershipMarkerName = ".klik-pro-owned-profile"
     static let payloadResourceName = "LaunchSpec.plist"
     static let executableName = "KlikProManagedLauncher"
+    static let appleEventsUsageDescription =
+        "Klik PRO reopens the selected App Profile's existing window without launching a duplicate."
 
     let applicationSupportURL: URL
     let visibleLaunchersRootURL: URL
@@ -355,6 +357,69 @@ struct LauncherGenerator {
             }
         } catch {
             try? original.write(to: payloadURL, options: .atomic)
+            _ = signLauncher(launcherURL)
+            throw LauncherGeneratorError.materializationFailed
+        }
+    }
+
+    /// Refreshes an older generated launcher with the current embedded runner and
+    /// required Apple-events purpose string, then re-signs it. Profile data,
+    /// custom icon, label, and baked LaunchSpec payload are never touched.
+    /// Returns true when a refresh was applied, false when already current.
+    /// Fail-safe: executable bytes, metadata, and permissions are restored if
+    /// re-signing fails.
+    @discardableResult
+    func refreshLauncherRuntimeIfStale(for instance: AppProfileInstance) throws -> Bool {
+        guard let runner = launcherExecutableURL,
+              fileManager.isExecutableFile(atPath: runner.path) else {
+            throw LauncherGeneratorError.launcherExecutableUnavailable
+        }
+        let launcherURL = try validatedLauncherURL(for: instance)
+        let embedded = launcherURL
+            .appendingPathComponent("Contents/MacOS", isDirectory: true)
+            .appendingPathComponent(Self.executableName, isDirectory: false)
+        let current = try Data(contentsOf: runner)
+        let existing = try Data(contentsOf: embedded)
+        let attributes = try fileManager.attributesOfItem(atPath: embedded.path)
+        guard let originalPermissions = (attributes[.posixPermissions] as? NSNumber)?.intValue else {
+            throw LauncherGeneratorError.materializationFailed
+        }
+        let infoURL = launcherURL.appendingPathComponent("Contents/Info.plist")
+        let originalInfo = try Data(contentsOf: infoURL)
+        guard var info = try? PropertyListSerialization.propertyList(
+            from: originalInfo, options: [], format: nil
+        ) as? [String: Any] else {
+            throw LauncherGeneratorError.materializationFailed
+        }
+        let runnerIsCurrent = existing == current
+        let purposeStringIsCurrent = info["NSAppleEventsUsageDescription"] as? String
+            == Self.appleEventsUsageDescription
+        if runnerIsCurrent && purposeStringIsCurrent { return false }
+        do {
+            if !runnerIsCurrent {
+                try current.write(to: embedded, options: .atomic)
+                try fileManager.setAttributes(
+                    [.posixPermissions: 0o755], ofItemAtPath: embedded.path
+                )
+            }
+            if !purposeStringIsCurrent {
+                info["NSAppleEventsUsageDescription"] = Self.appleEventsUsageDescription
+                let updatedInfo = try PropertyListSerialization.data(
+                    fromPropertyList: info, format: .xml, options: 0
+                )
+                try updatedInfo.write(to: infoURL, options: .atomic)
+            }
+            guard signLauncher(launcherURL) else {
+                throw LauncherGeneratorError.materializationFailed
+            }
+            refreshLaunchServicesRegistration(for: launcherURL)
+            return true
+        } catch {
+            try? existing.write(to: embedded, options: .atomic)
+            try? fileManager.setAttributes(
+                [.posixPermissions: originalPermissions], ofItemAtPath: embedded.path
+            )
+            try? originalInfo.write(to: infoURL, options: .atomic)
             _ = signLauncher(launcherURL)
             throw LauncherGeneratorError.materializationFailed
         }
@@ -698,6 +763,7 @@ struct LauncherGenerator {
                 "CFBundleVersion": "1",
                 "LSMinimumSystemVersion": "13.0",
                 "LSUIElement": true,
+                "NSAppleEventsUsageDescription": Self.appleEventsUsageDescription,
             ]
             if copiedIcon != nil { info["CFBundleIconFile"] = "AppIcon" }
             let infoData = try PropertyListSerialization.data(

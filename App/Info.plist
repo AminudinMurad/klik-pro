@@ -28,5 +28,7 @@
 	<string>public.app-category.utilities</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Klik PRO reopens the selected App Profile's existing window without launching a duplicate.</string>
 </dict>
 </plist>

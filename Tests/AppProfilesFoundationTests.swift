@@ -1630,6 +1630,25 @@ private struct AppProfilesFoundationTests {
             atPath: linksRoot.appendingPathComponent(".claude-a").path
         )) == nil, "no visible link must exist before the rule requests one")
 
+        let launcherURL = URL(
+            fileURLWithPath: created.instance.launcherPath, isDirectory: true
+        )
+        let embeddedRunner = launcherURL
+            .appendingPathComponent("Contents/MacOS", isDirectory: true)
+            .appendingPathComponent(LauncherGenerator.executableName)
+        let launcherInfoURL = launcherURL.appendingPathComponent("Contents/Info.plist")
+        var legacyInfo = try! PropertyListSerialization.propertyList(
+            from: Data(contentsOf: launcherInfoURL), options: [], format: nil
+        ) as! [String: Any]
+        legacyInfo.removeValue(forKey: "NSAppleEventsUsageDescription")
+        try! PropertyListSerialization.data(
+            fromPropertyList: legacyInfo, format: .xml, options: 0
+        ).write(to: launcherInfoURL, options: .atomic)
+        try! Data("fixture-runner-v2".utf8).write(to: runner, options: .atomic)
+        try! FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: runner.path
+        )
+
         // Today's rule: the same id now requires the sibling home + link.
         var newRule = oldRule
         newRule.requiredEnvironment = ["CLAUDE_CONFIG_DIR": "{codexHomeDir}"]
@@ -1677,11 +1696,54 @@ private struct AppProfilesFoundationTests {
         expect(FileManager.default.fileExists(
             atPath: generator.profileURL(for: id).path
         ), "healing must never touch the profile data directory")
+        expect(try! Data(contentsOf: embeddedRunner) == Data("fixture-runner-v2".utf8),
+               "healing must refresh the embedded runner for existing launchers")
+        let healedInfo = try! PropertyListSerialization.propertyList(
+            from: Data(contentsOf: launcherInfoURL), options: [], format: nil
+        ) as! [String: Any]
+        expect(healedInfo["NSAppleEventsUsageDescription"] as? String
+                == LauncherGenerator.appleEventsUsageDescription,
+               "healing must add the required Apple-events purpose string")
+        expect(FileManager.default.isExecutableFile(atPath: embeddedRunner.path),
+               "a refreshed embedded runner must remain executable")
 
         // Idempotence: a second heal changes nothing and persists nothing.
         let again = newManager.healManagedInstances(config: healed)
         expect(again == healed, "an already-healed config must be returned unchanged")
         expect(persistCount == 1, "an already-healed config must not persist again")
+
+        // A failed re-sign must restore the previous executable bytes, metadata,
+        // and mode instead of leaving an unlaunchable half-updated bundle.
+        try! Data("fixture-runner-v3".utf8).write(to: runner, options: .atomic)
+        try! FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: runner.path
+        )
+        let infoBeforeFailedRefresh = try! Data(contentsOf: launcherInfoURL)
+        var signAttempts = 0
+        let failingGenerator = LauncherGenerator(
+            applicationSupportURL: support,
+            homeSymlinkRootURL: linksRoot,
+            launcherExecutableURL: runner,
+            signLauncher: { _ in
+                signAttempts += 1
+                return signAttempts > 1
+            }
+        )
+        do {
+            _ = try failingGenerator.refreshLauncherRuntimeIfStale(for: healedInstance!)
+            expect(false, "a failed launcher re-sign must surface an error")
+        } catch LauncherGeneratorError.materializationFailed {
+            // Expected.
+        } catch {
+            expect(false, "unexpected launcher-refresh rollback error: \(error)")
+        }
+        expect(signAttempts == 2, "rollback must attempt to re-sign the restored launcher")
+        expect(try! Data(contentsOf: embeddedRunner) == Data("fixture-runner-v2".utf8),
+               "rollback must restore the previous embedded runner bytes")
+        expect(FileManager.default.isExecutableFile(atPath: embeddedRunner.path),
+               "rollback must restore executable permissions")
+        expect(try! Data(contentsOf: launcherInfoURL) == infoBeforeFailedRefresh,
+               "rollback must restore the previous launcher metadata")
     }
 
     private static func testRealAdHocLauncherMaterialization() {

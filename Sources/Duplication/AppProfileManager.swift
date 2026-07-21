@@ -708,6 +708,13 @@ struct AppProfileManager {
             if rule.homeSymlinkPrefix != nil {
                 createHomeSymlinkIfRuleRequests(for: updated.instances[index])
             }
+            // Upgrade the launcher's embedded runner in place when an older
+            // Klik PRO generated it, so runner-side fixes (e.g. reopening the
+            // running instance instead of spawning a duplicate) reach existing
+            // profiles from every launch surface. Idempotent, best-effort, and
+            // never touches profile data — so it stays outside the `changed`
+            // gate below (a pure filesystem refresh, not a config change).
+            _ = try? generator.refreshLauncherRuntimeIfStale(for: updated.instances[index])
         }
         guard changed else { return updated }
         guard persist(updated) else { return config }

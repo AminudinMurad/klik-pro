@@ -2722,6 +2722,10 @@ final class ToggleWindowController: NSWindowController {
         content.ensureBackgroundHelperRunningAtLaunch()
     }
 
+    func guideAccessibilityRegrantAfterUpdateIfNeeded() {
+        content.guideAccessibilityRegrantAfterUpdateIfNeeded()
+    }
+
     required init?(coder: NSCoder) {
         nil
     }
@@ -3100,6 +3104,10 @@ final class ToggleView: NSView {
                 self.config.caffeinateMenuEnabled = false
             }
             self.configurationDidChange()
+            // Turning the icon on relies on the helper; if it is not trusted
+            // (typically a stale grant after an update), explain the re-grant
+            // instead of leaving only the bare system prompt.
+            if on { self.guideAccessibilityRegrantIfStillMissing() }
         }
         preferencesView.caffeinateRow.onToggleChange = { [weak self] on in
             guard let self = self else { return }
@@ -3887,18 +3895,28 @@ final class ToggleView: NSView {
             .replacingOccurrences(of: "'", with: "&apos;")
     }
 
-    /// After an icon change, a pinned launcher's Dock tile keeps the Dock's own
-    /// cached image until the Dock reloads — `stampIcon`'s touch + lsregister
-    /// refresh Finder/LaunchPad but not the Dock. If (and only if) the launcher is
-    /// a Dock persistent-app, reload the Dock so the new icon shows immediately,
-    /// mirroring how pinning already refreshes it. Unpinned launchers are left
-    /// untouched so no Dock flash happens for users who never pinned.
-    private static func refreshDockIconIfPinned(launcherPath: String) {
-        guard dockPersistentAppsContain(path: launcherPath) else { return }
-        _ = runProcess("/usr/bin/killall", ["Dock"])
+    /// Resolves a Dock entry's stored `_CFURLString` to a filesystem path. The
+    /// Dock persists it as a percent-encoded file URL (e.g.
+    /// `file:///Users/.../Klik%20PRO/Claude%20A.app/`), so it must be parsed as a
+    /// URL — a raw substring/path comparison misses every launcher whose name
+    /// contains a space (all of them). Falls back to treating it as a plain path.
+    private static func dockEntryFilePath(_ storedString: String) -> String? {
+        if let url = URL(string: storedString), url.isFileURL {
+            return url.standardizedFileURL.path
+        }
+        return URL(fileURLWithPath: storedString).standardizedFileURL.path
     }
 
     private static func dockPersistentAppsContain(path launcherPath: String) -> Bool {
+        // Read via the `defaults` subprocess (always current) rather than
+        // CFPreferencesCopyAppValue, which can hand a long-running process a
+        // stale cached snapshot of another app's domain. Match against the
+        // Dock's own storage form — a percent-encoded file URL for the .app
+        // directory (e.g. `file:///Users/.../Klik%20PRO/Claude%20T.app/`) — so a
+        // launcher whose name has a space (all of them) is still found; a raw
+        // path substring never matches.
+        let encoded = URL(fileURLWithPath: launcherPath, isDirectory: true)
+            .standardizedFileURL.absoluteString
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
         process.arguments = ["read", "com.apple.dock", "persistent-apps"]
@@ -3911,9 +3929,14 @@ final class ToggleView: NSView {
         } catch {
             return false
         }
-        guard process.terminationStatus == 0 else { return false }
-        let output = pipe.fileHandleForReading.readDataToEndOfFile()
-        return String(data: output, encoding: .utf8)?.contains(launcherPath) == true
+        guard process.terminationStatus == 0,
+              let output = String(
+                data: pipe.fileHandleForReading.readDataToEndOfFile(),
+                encoding: .utf8
+              ) else {
+            return false
+        }
+        return output.contains(encoded)
     }
 
     private static func renameDockLauncherIfPresent(
@@ -3937,7 +3960,7 @@ final class ToggleView: NSView {
             guard var tileData = entries[index]["tile-data"] as? [String: Any],
                   var fileData = tileData["file-data"] as? [String: Any],
                   let storedPath = fileData["_CFURLString"] as? String,
-                  URL(fileURLWithPath: storedPath).standardizedFileURL.path == previousPath else {
+                  dockEntryFilePath(storedPath) == previousPath else {
                 continue
             }
             fileData["_CFURLString"] = updatedPath
@@ -4160,13 +4183,6 @@ final class ToggleView: NSView {
                     config: currentConfig
                 )
                 let applied = applySavedConfig()
-                // stampIcon already refreshed Finder/LaunchPad (touch +
-                // lsregister); the Dock caches a pinned launcher's tile image and
-                // won't re-read it, so reload the Dock — but only when this
-                // launcher is actually pinned, so unpinned users get no flash. Runs
-                // on this background queue (defaults read + killall) to keep the
-                // main thread responsive.
-                Self.refreshDockIconIfPinned(launcherPath: instance.launcherPath)
                 DispatchQueue.main.async {
                     self.finishAppProfileLifecycle()
                     self.config = updated
@@ -4954,6 +4970,88 @@ final class ToggleView: NSView {
         }
     }
 
+    // MARK: Accessibility re-grant guidance (after an app update)
+
+    // Klik PRO is ad-hoc signed, so each update changes the helper's code
+    // signature and macOS drops its Accessibility grant — even though the old
+    // "Klik PRO Helper" entry still shows enabled. The bare system prompt that
+    // then appears is confusing, so we proactively explain the remove-and-
+    // re-grant steps. Shown at most once per launch.
+    private var didGuideAccessibilityRegrantThisSession = false
+    private static let lastRunBundleVersionKey = "klikpro.lastRunBundleVersion"
+
+    /// Records the running build and reports an update. Existing installations
+    /// upgrading to the first build that carries this key have no previous value,
+    /// so their already-completed onboarding distinguishes them from a true fresh
+    /// install. This must run before first-launch onboarding is presented.
+    private func consumeBundleVersionChanged() -> Bool {
+        let current = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""
+        let previous = UserDefaults.standard.string(forKey: Self.lastRunBundleVersionKey)
+        UserDefaults.standard.set(current, forKey: Self.lastRunBundleVersionKey)
+        return previous.map { $0 != current } ?? config.onboardingCompleted
+    }
+
+    /// Launch hook: after an update, if the user relies on the helper (menu-bar
+    /// icon on) but it is no longer trusted, walk them through the re-grant
+    /// instead of leaving the raw system prompt unexplained.
+    func guideAccessibilityRegrantAfterUpdateIfNeeded() {
+        guard !previewRenderingIsActive else { return }
+        let updated = consumeBundleVersionChanged()
+        guard updated, config.onboardingCompleted, config.showMenuBarIcon else { return }
+        guideAccessibilityRegrantIfStillMissing()
+    }
+
+    /// Menu-bar toggle turned ON (or launch-after-update): give the helper a
+    /// moment to report its trust status, then guide the user if it is still not
+    /// trusted. No-op when already granted, already shown this launch, or a sheet
+    /// is up. Only reads the helper's status log and asks for a recheck — it
+    /// never restarts or otherwise churns the helper.
+    func guideAccessibilityRegrantIfStillMissing() {
+        guard !previewRenderingIsActive,
+              config.onboardingCompleted,
+              !didGuideAccessibilityRegrantThisSession,
+              let window = window,
+              window.attachedSheet == nil else { return }
+        DistributedNotificationCenter.default().post(
+            name: accessibilityStatusCheckRequestedNotification,
+            object: nil
+        )
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in
+            guard let self = self,
+                  !self.didGuideAccessibilityRegrantThisSession,
+                  !helperAccessibilityGranted(),
+                  let window = self.window,
+                  window.attachedSheet == nil else { return }
+            self.didGuideAccessibilityRegrantThisSession = true
+            self.presentAccessibilityRegrantGuidance(in: window)
+        }
+    }
+
+    private func presentAccessibilityRegrantGuidance(in window: NSWindow) {
+        let alert = NSAlert()
+        alert.messageText = "Klik PRO Helper needs Accessibility permission"
+        alert.informativeText = """
+        Klik PRO Helper isn’t currently trusted for Accessibility, so mouse \
+        buttons and hotkeys won’t work until it’s granted.
+
+        If you just updated Klik PRO, macOS may still show “Klik PRO Helper” as \
+        enabled even though the updated helper needs to be granted again. To fix it:
+
+        1. Open Privacy & Security → Accessibility.
+        2. If “Klik PRO Helper” is already listed, select it and click “–” to remove it.
+        3. Turn Klik PRO Helper on (enable it) when it reappears or when prompted.
+        """
+        alert.addButton(withTitle: "Open Accessibility Settings")
+        alert.addButton(withTitle: "Later")
+        alert.beginSheetModal(for: window) { response in
+            guard response == .alertFirstButtonReturn,
+                  let url = URL(
+                    string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+                  ) else { return }
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     private func setQuickLaunchMouseButton(
         _ button: QuickLaunchMouseButton?,
         for target: QuickLaunchTarget
@@ -5448,6 +5546,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.controller?.checkForUpdatesFromMenuBar()
         }
         DispatchQueue.main.async { [weak self] in
+            self?.controller?.guideAccessibilityRegrantAfterUpdateIfNeeded()
             self?.controller?.showFirstLaunchOnboardingIfNeeded()
         }
     }

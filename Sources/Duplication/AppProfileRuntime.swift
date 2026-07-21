@@ -373,16 +373,28 @@ struct AppProfileRuntime {
             withExtendedLifetime(operationLock) {
                 completion(.failure(.ambiguousProcesses))
             }
+        case .complete(let pids) where pids.count == 1:
+            // Exactly one verified instance of this profile is already running.
+            // Reopen ITS window and focus it — never a new process. Codex-family
+            // apps self-dedupe a repeat launch (their own per-profile
+            // single-instance lock), but Claude for Desktop enforces no such lock,
+            // so a createsNewApplicationInstance launch would spawn a genuine
+            // duplicate (the v1.2.0 report). Sending the reopen ('rapp') Apple
+            // event to the known pid restores a closed window in that exact
+            // instance without duplicating; a plain activate alone only raised a
+            // windowless app.
+            activate(
+                pid: pids[0],
+                reopenWindow: true,
+                context: context,
+                operationLock: operationLock,
+                completion: completion
+            )
         case .complete:
-            // Zero processes → launch fresh; exactly one → reopen the existing
-            // instance. Both go through openApplication with the profile's
-            // --user-data-dir and createsNewApplicationInstance, so an already-
-            // running (possibly windowless) Electron instance is told by its own
-            // single-instance lock to restore/create a window — matching the
-            // Dock/Launchpad launcher. A raw NSRunningApplication.activate only
-            // raised the app without reopening a window, so a menu-bar click on a
-            // windowless instance appeared to do nothing. The brief extra process
-            // a reopen spawns is absorbed by the settled re-scan above.
+            // Zero processes → launch a fresh instance for this profile through
+            // openApplication with the profile's --user-data-dir and
+            // createsNewApplicationInstance (the app's window is created on first
+            // launch anyway). The already-running case is handled above.
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.arguments = ["--user-data-dir=" + context.profileURL.path]
             configuration.environment = instance.environmentOverrides
@@ -449,8 +461,30 @@ struct AppProfileRuntime {
         }
     }
 
+    /// Sends the Core "reopen" Apple event (`kAEReopenApplication`, 'rapp') to a
+    /// specific already-running instance so an app whose window was closed
+    /// recreates/restores it in THAT process — the same event LaunchServices
+    /// sends on a Dock click. Used instead of spawning a new instance for apps
+    /// that enforce no per-profile single-instance lock (e.g. Claude for
+    /// Desktop). Best-effort: any failure just falls through to a plain activate.
+    static func sendReopenEvent(to pid: pid_t) {
+        // Four-char codes: 'aevt' (kCoreEventClass) / 'rapp'
+        // (kAEReopenApplication). Return/transaction IDs use the documented
+        // sentinels (kAutoGenerateReturnID = -1, kAnyTransactionID = 0) so the
+        // Carbon constants need not be imported here.
+        let event = NSAppleEventDescriptor(
+            eventClass: 0x6165_7674,
+            eventID: 0x7261_7070,
+            targetDescriptor: NSAppleEventDescriptor(processIdentifier: pid),
+            returnID: -1,
+            transactionID: 0
+        )
+        _ = try? event.sendEvent(options: [.noReply], timeout: 2)
+    }
+
     private func activate(
         pid: pid_t,
+        reopenWindow: Bool = false,
         context: ManagedContext,
         operationLock: ManagedInstanceLock,
         completion: @escaping (Result<pid_t, AppProfileRuntimeError>) -> Void
@@ -465,6 +499,8 @@ struct AppProfileRuntime {
             }
             return
         }
+        // Only sent to a pid we just verified as this profile's own instance.
+        if reopenWindow { Self.sendReopenEvent(to: pid) }
         guard application.activate(options: []) else {
             withExtendedLifetime(operationLock) {
                 completion(.failure(.activationFailed))

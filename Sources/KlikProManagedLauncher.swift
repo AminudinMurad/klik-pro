@@ -55,6 +55,37 @@ enum KlikProManagedLauncher {
               ) == .verified(ruleID: payload.compatibilityRuleID) else {
             exit(27)
         }
+        guard let expectedExecutablePath = Bundle(url: sourceURL)?.executableURL?
+            .standardizedFileURL.path else {
+            exit(27)
+        }
+
+        // If a verified instance of THIS profile is already running, reopen its
+        // window and focus it instead of spawning a duplicate. Codex-family apps
+        // self-dedupe a repeat launch (their own per-profile single-instance
+        // lock), but Claude for Desktop enforces no such lock — so without this
+        // check createsNewApplicationInstance would create a second Claude on
+        // every Dock/Launchpad/Finder click. The known-pid reopen matches the
+        // menu-bar launch path and the normal Dock-click behavior.
+        if let existing = NSWorkspace.shared.runningApplications.first(where: { app in
+            app.bundleURL?.standardizedFileURL == sourceURL
+                && verifies(
+                    pid: app.processIdentifier,
+                    expectedExecutablePath: expectedExecutablePath,
+                    expectedProfileArgument: expectedProfileArgument
+                )
+        }) {
+            sendReopenEvent(to: existing.processIdentifier)
+            guard existing.activate(options: []) else { exit(24) }
+            let deadline = Date(timeIntervalSinceNow: 1.5)
+            while Date() < deadline,
+                  NSWorkspace.shared.frontmostApplication?.processIdentifier
+                    != existing.processIdentifier {
+                RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
+            }
+            exit(NSWorkspace.shared.frontmostApplication?.processIdentifier
+                == existing.processIdentifier ? 0 : 25)
+        }
 
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.arguments = payload.arguments
@@ -219,6 +250,25 @@ enum KlikProManagedLauncher {
         }
         return String(decoding: data, as: UTF8.self)
             == instanceID.uuidString.uppercased()
+    }
+
+    /// Sends the Core "reopen" Apple event (`kAEReopenApplication`, 'rapp') to a
+    /// specific already-running instance so an app whose window was closed
+    /// recreates/restores it in THAT process — the same event LaunchServices
+    /// sends on a Dock click. Best-effort: a failure just leaves the plain
+    /// activate to raise whatever windows already exist.
+    private static func sendReopenEvent(to pid: pid_t) {
+        // Four-char codes: 'aevt' (kCoreEventClass) / 'rapp'
+        // (kAEReopenApplication); return/transaction IDs use the documented
+        // sentinels (kAutoGenerateReturnID = -1, kAnyTransactionID = 0).
+        let event = NSAppleEventDescriptor(
+            eventClass: 0x6165_7674,
+            eventID: 0x7261_7070,
+            targetDescriptor: NSAppleEventDescriptor(processIdentifier: pid),
+            returnID: -1,
+            transactionID: 0
+        )
+        _ = try? event.sendEvent(options: [.noReply], timeout: 2)
     }
 
     private static func verifies(

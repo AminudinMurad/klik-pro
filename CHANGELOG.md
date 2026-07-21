@@ -13,6 +13,32 @@ All notable changes to Klik PRO are documented here.
 - **Tidier App Profile cards** — Rename, Change Icon, and Remove now live
   together behind the gear menu, and the everyday controls (Open, Assign, Menu
   Bar Icon) are grouped on one row, so long profile names have more room.
+- **Fixed — menu-bar launch during a process race.** Launching or focusing a
+  profile from its menu-bar icon no longer fails when the profile momentarily
+  shows more than one process (an instance still starting, or an old one
+  exiting); the check now settles and retries, and only genuinely persistent
+  ambiguity is refused.
+- **Fixed — relaunching a profile no longer opens a duplicate.** Launching a
+  profile that is already running now reopens that instance's window and brings
+  it to the front, instead of starting a second copy. This applies from every
+  surface — the menu-bar icon, the Dock, Launchpad, and Finder. Previously this
+  worked for apps that block their own duplicates (such as ChatGPT/Codex) but
+  not for Claude, which allowed a new Claude to start on every relaunch. A closed
+  window is reopened in the same running instance, so a relaunch never appears to
+  do nothing. Existing profiles get the fix automatically: their launcher's
+  runner is refreshed in place on the next launch, without touching the profile
+  or its login.
+- **More reliable Dock pinning and rename.** Klik PRO now recognises the Dock's
+  percent-encoded launcher paths, avoiding a false “Dock icon was not added”
+  message and keeping a pinned launcher's path and label in sync after rename.
+  After changing a pinned profile's icon, macOS may retain the old Dock preview
+  until that profile is clicked or the user next logs in; the menu bar,
+  Launchpad, and Finder update immediately.
+- **Clearer Accessibility re-grant after updates.** When Klik PRO Helper needs
+  Accessibility permission again after an update — a case where macOS may still
+  show it as enabled even though it must be re-granted — Klik PRO now explains
+  the exact steps to remove and re-enable it, instead of leaving only the bare
+  system prompt.
 
 ## 1.1.1
 

@@ -91,6 +91,25 @@ printf '%s\n' "$production_block" | grep -qF 'homeSymlinkPrefix: "codex"'
 grep -q 'M1 removes only Klik PRO' "$ROOT/Sources/Duplication/LauncherGenerator.swift"
 grep -q 'currentCandidate.canCreate' "$ROOT/Sources/Duplication/AppProfileManager.swift"
 grep -q 'eligibility.compatibilityRuleID != nil' "$ROOT/Sources/Duplication/AppProfileRuntime.swift"
+# A relaunch of an already-running profile must reopen that instance, never spawn
+# a duplicate — apps like Claude for Desktop enforce no single-instance lock of
+# their own. Menu-bar path reopens the one running pid; the Dock/Launchpad/Finder
+# runner scans for it before ever creating a new instance.
+grep -q 'reopenWindow: true' "$ROOT/Sources/Duplication/AppProfileRuntime.swift"
+grep -q 'sendReopenEvent(to: existing.processIdentifier)' \
+  "$ROOT/Sources/KlikProManagedLauncher.swift"
+# Reopen Apple events require a purpose string in both the main app and every
+# generated launcher. Existing launchers embed their own runner and metadata, so
+# healing must update both in place without touching profile data.
+[[ "$(plutil -extract NSAppleEventsUsageDescription raw -o - "$ROOT/App/Info.plist")" \
+  == "Klik PRO reopens the selected App Profile's existing window without launching a duplicate." ]]
+grep -q '"NSAppleEventsUsageDescription": Self.appleEventsUsageDescription' \
+  "$ROOT/Sources/Duplication/LauncherGenerator.swift"
+grep -q 'func refreshLauncherRuntimeIfStale' "$ROOT/Sources/Duplication/LauncherGenerator.swift"
+grep -q 'refreshLauncherRuntimeIfStale(for: updated.instances\[index\])' \
+  "$ROOT/Sources/Duplication/AppProfileManager.swift"
+grep -q 'rollback must restore executable permissions' \
+  "$ROOT/Tests/AppProfilesFoundationTests.swift"
 grep -q 'SecStaticCodeCheckValidity' "$ROOT/Sources/Duplication/AppScanner.swift"
 grep -q 'kSecCodeInfoEntitlementsDict' "$ROOT/Sources/Duplication/AppScanner.swift"
 grep -q 'app.sandboxEntitlement == true' "$ROOT/Sources/Duplication/EngineDetector.swift"
@@ -107,6 +126,13 @@ fi
 grep -q 'ruleResolvedEnvironment(' "$ROOT/Sources/Duplication/AppProfileManager.swift"
 grep -q 'func healManagedInstances' "$ROOT/Sources/Duplication/AppProfileManager.swift"
 grep -q 'healManagedAppProfilesIfNeeded()' "$ROOT/Sources/KlikProApp.swift"
+# Ad-hoc signing drops the helper's Accessibility grant on every update while the
+# stale entry still shows enabled; the app must explain the re-grant rather than
+# leave only the bare system prompt.
+grep -q 'func guideAccessibilityRegrantAfterUpdateIfNeeded()' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'guideAccessibilityRegrantIfStillMissing()' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'previous.map { \$0 != current } ?? config.onboardingCompleted' \
+  "$ROOT/Sources/KlikProApp.swift"
 grep -qF '{profileDir}' "$ROOT/Sources/Duplication/EngineDetector.swift"
 grep -qF '{codexHomeDir}' "$ROOT/Sources/Duplication/EngineDetector.swift"
 grep -qF '"CodexHomes"' "$ROOT/Sources/Duplication/LauncherGenerator.swift"
@@ -193,6 +219,18 @@ grep -q 'func checkForUpdatesFromMenuBar()' "$ROOT/Sources/KlikProApp.swift"
 # returns after a menu-bar Quit (it stops + disables the helper).
 grep -q 'controller?.ensureBackgroundHelperRunningAtLaunch()' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'func ensureBackgroundHelperRunningAtLaunch()' "$ROOT/Sources/KlikProApp.swift"
+# The Dock stores launcher paths as percent-encoded file URLs, so pin detection
+# and rename migration must parse them as URLs — a raw path substring match misses
+# every launcher whose name has a space.
+grep -q 'func dockEntryFilePath' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'url.isFileURL' "$ROOT/Sources/KlikProApp.swift"
+# Do not restore the failed hidden-launch experiment: it fired a launcher process
+# after Apply but did not invalidate the Dock's cached tile.
+if grep -Rqs 'KLIK_PRO_DOCK_ICON_REFRESH' \
+  "$ROOT/Sources/KlikProApp.swift" "$ROOT/Sources/KlikProManagedLauncher.swift"; then
+  echo "The failed Dock icon no-op refresh path must remain removed" >&2
+  exit 1
+fi
 if grep -Eq 'title: "Instances"|openAppProfileInstance|instanceIDsByMenuTag|showsInKlikProInstancesMenu' \
   "$ROOT/Sources/KlikProInput.swift" "$ROOT/Sources/KlikProConfig.swift"; then
   echo "The main Klik PRO menu-bar context menu must not expose an Instances submenu" >&2
