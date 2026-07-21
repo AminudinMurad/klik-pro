@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 extension NSColor {
     /// A small global legibility boost (owner request): slightly darker/crisper
@@ -167,6 +168,67 @@ final class AppProfileButton: NSButton {
     @objc private func pressed() { onPress?() }
 }
 
+/// The small gear at a managed profile card's top-right corner. It holds the
+/// infrequent management actions (Rename, Change Icon, Remove) so row 2 stays
+/// uncrowded. Shares the hover/press pill cue with `AppProfileButton`.
+final class AppProfileGearButton: NSButton {
+    var onPress: (() -> Void)?
+    private var hoverTrackingArea: NSTrackingArea?
+    private var isHovered = false
+    private var isPressedDown = false
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        isBordered = false
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        imagePosition = .imageOnly
+        let symbol = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Manage")
+        symbol?.isTemplate = true
+        image = symbol?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+        )
+        contentTintColor = .appTextSecondary
+        target = self
+        action = #selector(pressed)
+        updateBackground()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea { removeTrackingArea(hoverTrackingArea) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self, userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) { isHovered = true; updateBackground() }
+    override func mouseExited(with event: NSEvent) { isHovered = false; updateBackground() }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+    override func highlight(_ flag: Bool) {
+        super.highlight(flag); isPressedDown = flag; updateBackground()
+    }
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance(); updateBackground()
+    }
+
+    private func updateBackground() {
+        let active = isHovered || isPressedDown
+        let alpha: CGFloat = isPressedDown ? 0.36 : (isHovered ? 0.18 : 0)
+        let base = active ? KlikProBrand.green : NSColor.appTextPrimary
+        layer?.backgroundColor = base.withAlphaComponent(alpha).cgColor
+        contentTintColor = active ? KlikProBrand.green : .appTextSecondary
+    }
+
+    @objc private func pressed() { onPress?() }
+}
+
 private final class DualAppGeneratorCard: NSView {
     private let iconView = NSImageView()
     private let nameField = NSTextField(labelWithString: "")
@@ -260,16 +322,16 @@ final class AppProfileInstanceRowView: NSView {
     private let titleField = NSTextField(labelWithString: "")
     private let openButton = AppProfileButton(title: "Open", frame: .zero)
     private let assignButton = AppProfileButton(title: "Assign Button", frame: .zero)
-    private let menuBarLabel = NSTextField(labelWithString: "Menu bar")
+    private let menuBarLabel = NSTextField(labelWithString: "Menu Bar Icon")
     private let menuBarToggle: ToggleSwitchView
-    private let renameButton = AppProfileButton(title: "Rename", frame: .zero)
-    private let removeButton = AppProfileButton(title: "Remove", frame: .zero)
+    private let gearButton = AppProfileGearButton(frame: .zero)
     private(set) var instance: AppProfileInstance
     var onOpen: ((AppProfileInstance) -> Void)?
     var onAssign: ((AppProfileInstance) -> Void)?
     var onToggleMenuBar: ((AppProfileInstance) -> Void)?
     var onRename: ((AppProfileInstance) -> Void)?
     var onRemove: ((AppProfileInstance) -> Void)?
+    var onChangeIcon: ((AppProfileInstance) -> Void)?
 
     override var isFlipped: Bool { true }
 
@@ -291,7 +353,22 @@ final class AppProfileInstanceRowView: NSView {
         let iconSize: CGFloat = 54
         iconView.frame = NSRect(x: 14, y: (rowHeight - iconSize) / 2, width: iconSize, height: iconSize)
         iconView.imageScaling = .scaleProportionallyUpOrDown
-        iconView.image = NSWorkspace.shared.icon(forFile: instance.source.bundleURL)
+        // A managed profile carries its own (possibly custom/tinted/badged) icon
+        // in its launcher bundle. Read it straight from the bundle's AppIcon.icns
+        // rather than via NSWorkspace, whose per-path icon cache would otherwise
+        // keep showing the previous icon in-process right after Change Icon.
+        // External/legacy rows (and a missing icns) fall back to the app icon.
+        let launcherIconURL = URL(fileURLWithPath: instance.launcherPath, isDirectory: true)
+            .appendingPathComponent("Contents/Resources/AppIcon.icns")
+        if instance.launcherKind == .managed,
+           let launcherIcon = NSImage(contentsOf: launcherIconURL) {
+            iconView.image = launcherIcon
+        } else if instance.launcherKind == .managed,
+                  FileManager.default.fileExists(atPath: instance.launcherPath) {
+            iconView.image = NSWorkspace.shared.icon(forFile: instance.launcherPath)
+        } else {
+            iconView.image = NSWorkspace.shared.icon(forFile: instance.source.bundleURL)
+        }
         titleField.font = .systemFont(ofSize: 14, weight: .semibold)
         titleField.textColor = .appTextPrimary
         titleField.stringValue = instance.label
@@ -305,41 +382,35 @@ final class AppProfileInstanceRowView: NSView {
         // Wider than the other controls so the assignment label ("Gesture Button")
         // fits alongside the chain-link indicator without truncating.
         let assignW: CGFloat = 132
-        let menuCaptionW: CGFloat = 56
+        let menuCaptionW: CGFloat = 82   // fits "Menu Bar Icon" at 11pt
         let toggleW: CGFloat = 40
-        let renameW: CGFloat = 62
-        let removeW: CGFloat = 66
+        let gearSize: CGFloat = 26
         let rightEdge = width - 18   // right padding so controls clear the card border
 
-        // Row 1 (top): Menu bar label + toggle, flushed to the right edge.
-        let toggleY: CGFloat = vpad
-        let toggleX = rightEdge - toggleW
-        menuBarLabel.frame = NSRect(
-            x: toggleX - 4 - menuCaptionW, y: toggleY + 3, width: menuCaptionW, height: 16
+        // Row 1 (top): only the gear (managed rows), pinned to the top-right corner.
+        // The name owns the rest of the row, so long labels get far more room.
+        gearButton.isHidden = !managed
+        gearButton.frame = NSRect(
+            x: rightEdge - gearSize, y: vpad - 2, width: gearSize, height: gearSize
         )
-        menuBarLabel.font = .systemFont(ofSize: 11, weight: .medium)
-        menuBarLabel.textColor = .appTextSecondary
-        menuBarLabel.alignment = .right
-        menuBarToggle.frame = NSRect(x: toggleX, y: toggleY, width: toggleW, height: 22)
+
+        // Row 2 (bottom): one right-flushed group — Open · Assign · Menu Bar Icon
+        // label + toggle, with the toggle on the card edge.
+        let buttonY = rowHeight - vpad - buttonH
+        let toggleX = rightEdge - toggleW
+        menuBarToggle.frame = NSRect(x: toggleX, y: buttonY + 3, width: toggleW, height: 22)
         menuBarToggle.setAccessibilityLabel(
             instance.pinToMenuBar ? "Hide from menu bar" : "Show in menu bar"
         )
-
-        // Row 2 (bottom): action buttons, flushed to the right edge. Left→right for
-        // managed rows: Rename, Remove, Open, Assign — with Assign on the right edge.
-        let buttonY = rowHeight - vpad - buttonH
-        let assignX = rightEdge - assignW
+        let menuLabelX = toggleX - 6 - menuCaptionW
+        menuBarLabel.frame = NSRect(x: menuLabelX, y: buttonY + 6, width: menuCaptionW, height: 16)
+        menuBarLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        menuBarLabel.textColor = .appTextSecondary
+        menuBarLabel.alignment = .right
+        let assignX = menuLabelX - gap - assignW
         let openX = assignX - gap - openW
         openButton.frame = NSRect(x: openX, y: buttonY, width: openW, height: buttonH)
         assignButton.frame = NSRect(x: assignX, y: buttonY, width: assignW, height: buttonH)
-        renameButton.isHidden = !managed
-        removeButton.isHidden = !managed
-        if managed {
-            let removeX = openX - gap - removeW
-            let renameX = removeX - gap - renameW
-            renameButton.frame = NSRect(x: renameX, y: buttonY, width: renameW, height: buttonH)
-            removeButton.frame = NSRect(x: removeX, y: buttonY, width: removeW, height: buttonH)
-        }
 
         // The assign control shows the assignment IN its own label (normal color,
         // no separate green caption) with a chain-link indicator: linked when a
@@ -359,12 +430,14 @@ final class AppProfileInstanceRowView: NSView {
             )
             assignButton.setAccessibilityLabel("Assign a mouse button")
         }
-        // The name sits on the first row beside the icon, aligned with the Menu bar
-        // toggle, and is capped to end before the Menu bar label (truncates if long).
+        // The name owns row 1 beside the icon, ending before the gear (or the
+        // card edge on external rows that have no gear), so long labels get far
+        // more room than when they shared the row with the toggle.
         let nameX = iconView.frame.maxX + 14
+        let nameRightLimit = managed ? gearButton.frame.minX : rightEdge
         titleField.frame = NSRect(
-            x: nameX, y: toggleY,
-            width: max(80, menuBarLabel.frame.minX - nameX - gap), height: 22
+            x: nameX, y: vpad,
+            width: max(80, nameRightLimit - nameX - gap), height: 22
         )
         openButton.onPress = { [weak self] in
             guard let self else { return }; self.onOpen?(self.instance)
@@ -380,18 +453,47 @@ final class AppProfileInstanceRowView: NSView {
             self.menuBarToggle.isOn = self.instance.pinToMenuBar
             self.onToggleMenuBar?(self.instance)
         }
-        renameButton.onPress = { [weak self] in
-            guard let self else { return }; self.onRename?(self.instance)
-        }
-        removeButton.onPress = { [weak self] in
-            guard let self else { return }; self.onRemove?(self.instance)
-        }
+        gearButton.setAccessibilityLabel("Manage \(instance.label)")
+        gearButton.toolTip = "Rename, change icon, or remove"
+        gearButton.onPress = { [weak self] in self?.presentManageMenu() }
         [
             iconView, titleField, openButton, assignButton,
-            menuBarLabel, menuBarToggle, renameButton, removeButton,
+            menuBarLabel, menuBarToggle, gearButton,
         ]
             .forEach(addSubview)
     }
+
+    /// The gear menu: the infrequent management actions live here so row 2 keeps
+    /// only the everyday controls. Remove is destructive and sits below a
+    /// separator; the caller still runs its own confirmation.
+    private func presentManageMenu() {
+        let menu = NSMenu()
+        let rename = NSMenuItem(
+            title: "Rename…", action: #selector(menuRename), keyEquivalent: ""
+        )
+        rename.target = self
+        rename.image = NSImage(systemSymbolName: "pencil", accessibilityDescription: nil)
+        menu.addItem(rename)
+        let changeIcon = NSMenuItem(
+            title: "Change Icon…", action: #selector(menuChangeIcon), keyEquivalent: ""
+        )
+        changeIcon.target = self
+        changeIcon.image = NSImage(systemSymbolName: "photo", accessibilityDescription: nil)
+        menu.addItem(changeIcon)
+        menu.addItem(.separator())
+        let remove = NSMenuItem(
+            title: "Remove…", action: #selector(menuRemove), keyEquivalent: ""
+        )
+        remove.target = self
+        remove.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
+        menu.addItem(remove)
+        let origin = NSPoint(x: gearButton.frame.minX, y: gearButton.frame.maxY + 4)
+        menu.popUp(positioning: nil, at: origin, in: self)
+    }
+
+    @objc private func menuRename() { onRename?(instance) }
+    @objc private func menuChangeIcon() { onChangeIcon?(instance) }
+    @objc private func menuRemove() { onRemove?(instance) }
 
     required init?(coder: NSCoder) { nil }
 }
@@ -620,6 +722,7 @@ final class AppProfilesContentView: NSView {
     var onToggleMenuBar: ((AppProfileInstance) -> Void)?
     var onRename: ((AppProfileInstance) -> Void)?
     var onRemove: ((AppProfileInstance) -> Void)?
+    var onChangeIcon: ((AppProfileInstance) -> Void)?
     var onChangeApp: ((String) -> Void)?
     var onRefreshApps: (() -> Void)?
     var onInstancesChange: (([AppProfileInstance]) -> Void)?
@@ -775,6 +878,7 @@ final class AppProfilesContentView: NSView {
                 row.onToggleMenuBar = { [weak self] in self?.onToggleMenuBar?($0) }
                 row.onRename = { [weak self] in self?.onRename?($0) }
                 row.onRemove = { [weak self] in self?.onRemove?($0) }
+                row.onChangeIcon = { [weak self] in self?.onChangeIcon?($0) }
                 stackView.addArrangedSubview(row)
                 row.widthAnchor.constraint(equalToConstant: rowWidth).isActive = true
                 // Must match AppProfileInstanceRowView's rowHeight, or the card is
@@ -856,7 +960,9 @@ final class AdvancedSettingsContentView: NSView {
     private let recoverLabel = NSTextField(labelWithString: "RECOVER FROM AN EXISTING FOLDER")
     private let recoverBody = NSTextField(wrappingLabelWithString:
         "Already have a Klik PRO data folder from a reinstall or another Mac? "
-        + "Scan it to re-adopt the App Profiles it holds. Existing profiles are left untouched."
+        + "Scan the folder that contains \"vault.json\" (the one you set as your Data "
+        + "Folder above) to re-adopt the App Profiles it holds — not the \".claude\" or "
+        + "\".codex\" links in your Home folder. Existing profiles are left untouched."
     )
     private let scanButton = AppProfileButton(title: "Scan & Adopt…", frame: .zero)
 
@@ -920,11 +1026,11 @@ final class AdvancedSettingsContentView: NSView {
 
         // Section 2 — Recover.
         styleSectionLabel(recoverLabel, frame: NSRect(x: 28, y: 210, width: width - 56, height: 16))
-        styleBody(recoverBody, frame: NSRect(x: 28, y: 234, width: width - 56, height: 36))
-        scanButton.frame = NSRect(x: 28, y: 282, width: 170, height: 28)
+        styleBody(recoverBody, frame: NSRect(x: 28, y: 234, width: width - 56, height: 56))
+        scanButton.frame = NSRect(x: 28, y: 300, width: 170, height: 28)
         scanButton.onPress = { [weak self] in self?.onScanAndAdopt?() }
 
-        statusField.frame = NSRect(x: 28, y: 332, width: width - 56, height: 40)
+        statusField.frame = NSRect(x: 28, y: 348, width: width - 56, height: 40)
         statusField.font = .systemFont(ofSize: 12)
         statusField.textColor = .appTextSecondary
 
@@ -995,6 +1101,213 @@ final class AdvancedSettingsContentView: NSView {
         if !isLocked {
             NSColor.separatorColor.setFill()
             NSBezierPath(rect: NSRect(x: 28, y: 186, width: bounds.width - 56, height: 1)).fill()
+        }
+    }
+}
+
+extension LauncherGenerator.IconColor {
+    var nsColor: NSColor {
+        NSColor(srgbRed: red, green: green, blue: blue, alpha: 1)
+    }
+}
+
+/// One colour dot in the Change Icon dialog. Draws a filled circle in a palette
+/// colour with a selection ring, and reports clicks.
+private final class IconColorSwatch: NSView {
+    let color: AppProfileMenuColor
+    var isSelected = false { didSet { needsDisplay = true } }
+    var onSelect: (() -> Void)?
+
+    init(color: AppProfileMenuColor) {
+        self.color = color
+        super.init(frame: NSRect(x: 0, y: 0, width: 30, height: 30))
+        setAccessibilityLabel(color.title)
+        toolTip = color.title
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let inset: CGFloat = isSelected ? 4 : 1
+        let circle = bounds.insetBy(dx: inset, dy: inset)
+        color.iconColor.nsColor.setFill()
+        NSBezierPath(ovalIn: circle).fill()
+        if isSelected {
+            KlikProBrand.green.setStroke()
+            let ring = NSBezierPath(ovalIn: bounds.insetBy(dx: 1, dy: 1))
+            ring.lineWidth = 2
+            ring.stroke()
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) { onSelect?() }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+}
+
+/// The Change Icon dialog body (used as an NSAlert accessory). Offers three
+/// modes — replace with a PNG/ICO, tint the source icon, or badge it with the
+/// profile's initial — over the shared six-colour palette, with a live preview.
+final class ChangeIconPanelView: NSView {
+    enum Mode: Int { case image, tint, badge }
+
+    private let sourceBundleURL: URL
+    private let badgeLetter: String
+    private let sourceImage: CGImage?
+    private let fallbackImage: NSImage
+
+    private let segmented: NSSegmentedControl
+    private let preview = NSImageView()
+    private let hint = NSTextField(wrappingLabelWithString:
+        "Tint or badge the app's own icon, or choose your own PNG or ICO. "
+        + "The original app is never modified."
+    )
+    private let chooseButton = AppProfileButton(title: "Choose PNG or ICO…", frame: .zero)
+    private let chosenLabel = NSTextField(labelWithString: "No image chosen")
+    private let colorLabel = NSTextField(labelWithString: "Colour")
+    private var swatches: [IconColorSwatch] = []
+
+    private var mode: Mode = .tint
+    private var chosenImageURL: URL?
+    private var selectedColor: AppProfileMenuColor = .blue
+
+    override var isFlipped: Bool { true }
+
+    init(instance: AppProfileInstance) {
+        sourceBundleURL = URL(fileURLWithPath: instance.source.bundleURL, isDirectory: true)
+        badgeLetter = instance.label
+        sourceImage = LauncherGenerator().sourceIconImage(sourceBundleURL: sourceBundleURL)
+        fallbackImage = NSWorkspace.shared.icon(forFile: instance.launcherPath)
+        segmented = NSSegmentedControl(
+            labels: ["Image", "Tint", "Badge"],
+            trackingMode: .selectOne, target: nil, action: nil
+        )
+        super.init(frame: NSRect(x: 0, y: 0, width: 420, height: 226))
+
+        segmented.frame = NSRect(x: 0, y: 0, width: 420, height: 24)
+        segmented.selectedSegment = Mode.tint.rawValue
+        segmented.target = self
+        segmented.action = #selector(modeChanged)
+        // Tint/Badge derive from the source app icon; if it can't be read, only
+        // the Image mode is offered.
+        if sourceImage == nil {
+            segmented.setEnabled(false, forSegment: Mode.tint.rawValue)
+            segmented.setEnabled(false, forSegment: Mode.badge.rawValue)
+            mode = .image
+            segmented.selectedSegment = Mode.image.rawValue
+        }
+
+        preview.frame = NSRect(x: 0, y: 40, width: 96, height: 96)
+        preview.imageScaling = .scaleProportionallyUpOrDown
+        preview.wantsLayer = true
+
+        hint.frame = NSRect(x: 112, y: 44, width: 308, height: 88)
+        hint.font = .systemFont(ofSize: 12)
+        hint.textColor = .appTextSecondary
+
+        chooseButton.frame = NSRect(x: 0, y: 150, width: 180, height: 28)
+        chooseButton.onPress = { [weak self] in self?.chooseImageFile() }
+        chosenLabel.frame = NSRect(x: 190, y: 155, width: 230, height: 18)
+        chosenLabel.font = .systemFont(ofSize: 11)
+        chosenLabel.textColor = .appTextSecondary
+        chosenLabel.lineBreakMode = .byTruncatingMiddle
+
+        colorLabel.frame = NSRect(x: 0, y: 150, width: 420, height: 16)
+        colorLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        colorLabel.textColor = .appTextSecondary
+
+        var x: CGFloat = 0
+        for color in AppProfileMenuColor.allCases {
+            let swatch = IconColorSwatch(color: color)
+            swatch.frame = NSRect(x: x, y: 174, width: 30, height: 30)
+            swatch.isSelected = color == selectedColor
+            swatch.onSelect = { [weak self] in self?.selectColor(color) }
+            swatches.append(swatch)
+            addSubview(swatch)
+            x += 42
+        }
+
+        [segmented, preview, hint, chooseButton, chosenLabel, colorLabel].forEach(addSubview)
+        updateModeControls()
+        updatePreview()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    /// The edit the user configured, or nil when Image mode has no file chosen.
+    var currentEdit: AppProfileManager.IconEdit? {
+        switch mode {
+        case .image:
+            guard let chosenImageURL else { return nil }
+            return .image(chosenImageURL)
+        case .tint:
+            return .tint(selectedColor)
+        case .badge:
+            return .badge(selectedColor)
+        }
+    }
+
+    @objc private func modeChanged() {
+        mode = Mode(rawValue: segmented.selectedSegment) ?? .tint
+        updateModeControls()
+        updatePreview()
+    }
+
+    private func selectColor(_ color: AppProfileMenuColor) {
+        selectedColor = color
+        swatches.forEach { $0.isSelected = $0.color == color }
+        updatePreview()
+    }
+
+    private func chooseImageFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.png, .ico]
+        panel.prompt = "Choose"
+        panel.message = "Choose a square PNG or ICO image, at least 256×256 pixels."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        chosenImageURL = url
+        chosenLabel.stringValue = url.lastPathComponent
+        updatePreview()
+    }
+
+    private func updateModeControls() {
+        let imageMode = mode == .image
+        chooseButton.isHidden = !imageMode
+        chosenLabel.isHidden = !imageMode
+        colorLabel.isHidden = imageMode
+        swatches.forEach { $0.isHidden = imageMode }
+    }
+
+    private func updatePreview() {
+        let size = NSSize(width: 96, height: 96)
+        switch mode {
+        case .image:
+            if let chosenImageURL,
+               let shaped = LauncherGenerator.macOSShapedImage(fromImageAt: chosenImageURL) {
+                preview.image = NSImage(cgImage: shaped, size: size)
+            } else {
+                preview.image = fallbackImage
+            }
+        case .tint:
+            if let sourceImage,
+               let tinted = LauncherGenerator.tintedIcon(
+                sourceImage, color: selectedColor.iconColor
+               ) {
+                preview.image = NSImage(cgImage: tinted, size: size)
+            } else {
+                preview.image = fallbackImage
+            }
+        case .badge:
+            if let sourceImage,
+               let badged = LauncherGenerator.badgedIcon(
+                sourceImage, color: selectedColor.iconColor, letter: badgeLetter
+               ) {
+                preview.image = NSImage(cgImage: badged, size: size)
+            } else {
+                preview.image = fallbackImage
+            }
         }
     }
 }

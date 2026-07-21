@@ -1,10 +1,44 @@
+import CoreGraphics
 import Foundation
+import ImageIO
 
 private func expect(_ condition: @autoclosure () -> Bool, _ message: String) {
     if !condition() {
         fputs("FAIL: \(message)\n", stderr)
         exit(1)
     }
+}
+
+/// Writes a solid-colour PNG of the given pixel dimensions, for exercising the
+/// custom-icon (PNG → .icns) path.
+private func writeTestPNG(width: Int, height: Int, to url: URL) {
+    let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+    let context = CGContext(
+        data: nil, width: width, height: height,
+        bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace,
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    )!
+    context.setFillColor(CGColor(srgbRed: 0.2, green: 0.6, blue: 0.9, alpha: 1))
+    context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+    let image = context.makeImage()!
+    let destination = CGImageDestinationCreateWithURL(
+        url as CFURL, "public.png" as CFString, 1, nil
+    )!
+    CGImageDestinationAddImage(destination, image, nil)
+    _ = CGImageDestinationFinalize(destination)
+}
+
+/// The largest-frame pixel width of an encoded icns (0 if it cannot be read).
+private func icnsFrameCountAndMaxWidth(_ data: Data) -> (count: Int, maxWidth: Int) {
+    guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return (0, 0) }
+    let count = CGImageSourceGetCount(source)
+    var maxWidth = 0
+    for index in 0..<count {
+        if let image = CGImageSourceCreateImageAtIndex(source, index, nil) {
+            maxWidth = max(maxWidth, image.width)
+        }
+    }
+    return (count, maxWidth)
 }
 
 private func temporaryDirectory(_ label: String) -> URL {
@@ -34,6 +68,69 @@ private func makeInstalledApp(
     )
 }
 
+/// A solid-colour opaque bitmap used as an in-memory "source app icon" for the
+/// tint/badge composition tests (no file round-trip needed).
+private func makeTestBitmap(width: Int, height: Int) -> CGImage {
+    let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+    let context = CGContext(
+        data: nil, width: width, height: height,
+        bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace,
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    )!
+    context.setFillColor(CGColor(srgbRed: 0.2, green: 0.4, blue: 0.9, alpha: 1))
+    context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+    return context.makeImage()!
+}
+
+/// A managed generator wired at `support` with signing stubbed to true. Matches
+/// the production wiring except for the signer, which the icon paths under test
+/// do not exercise (isSafeGeneratedLauncher does not verify a real signature).
+private struct ManagedFixture {
+    let root: URL
+    let generator: LauncherGenerator
+    let source: InstalledApp
+}
+
+private func makeManagedFixture(_ label: String) -> ManagedFixture {
+    let root = temporaryDirectory(label)
+    let support = root.appendingPathComponent("Support", isDirectory: true)
+    let runner = root.appendingPathComponent("KlikProManagedLauncher")
+    try! Data("fixture-runner".utf8).write(to: runner)
+    try! FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: runner.path)
+    let source = makeInstalledApp(root: root)
+    let generator = LauncherGenerator(
+        applicationSupportURL: support,
+        launcherExecutableURL: runner,
+        signLauncher: { _ in true }
+    )
+    return ManagedFixture(root: root, generator: generator, source: source)
+}
+
+private func makeManagedInstance(
+    id: UUID, generator: LauncherGenerator, source: InstalledApp
+) -> AppProfileInstance {
+    AppProfileInstance(
+        id: id,
+        label: "Work",
+        launcherKind: .managed,
+        launcherPath: generator.launcherURL(for: id).path,
+        profileDirectory: generator.profileURL(for: id).path,
+        profileOwnership: .managed,
+        source: AppProfileSource(
+            bundleIdentifier: source.bundleIdentifier,
+            bundleURL: source.bundleURL.path
+        ),
+        pinToMenuBar: false,
+        hotkey: ShortcutMapping(
+            enabled: false,
+            combo: KeyCombo(keyCode: 0, keyDisplay: "A",
+                            command: false, option: false, control: true, shift: false)
+        ),
+        mouseButton: nil,
+        compatibilityRuleID: "fixture-rule"
+    )
+}
+
 @main
 private struct AppProfilesFoundationTests {
     static func main() {
@@ -53,6 +150,12 @@ private struct AppProfilesFoundationTests {
         testHealingUpgradesExistingInstancesInPlace()
         testRealAdHocLauncherMaterialization()
         testManagedInstanceReleasesPhantomDuplicateBadge()
+        testMakeICNSDataSizeValidation()
+        testCustomIconSurvivesRematerialization()
+        testCustomIconTintAndBadgeGeometry()
+        testResetRemovesPersistedCustomIcon()
+        testUpdateManagedIconRejectsExternalRow()
+        testUpdateManagedIconMapsInvalidImage()
         testVaultPathDerivationAndDefaultGolden()
         testVaultLocationValidationFailsClosed()
         testSchema11VaultMigrationRoundTrip()
@@ -1627,6 +1730,214 @@ private struct AppProfilesFoundationTests {
         try! generator.removeLauncher(for: instance)
         expect(FileManager.default.fileExists(atPath: materialized.profileURL.path),
                "real launcher removal must also retain profile data")
+    }
+
+    /// The only ImageIO-dependent claim: an under-256 image is rejected, while a
+    /// square and a non-square source both encode into a valid multi-size icns
+    /// whose largest element is 512.
+    private static func testMakeICNSDataSizeValidation() {
+        let root = temporaryDirectory("icns-size-validation")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let tooSmall = root.appendingPathComponent("small.png")
+        writeTestPNG(width: 128, height: 128, to: tooSmall)
+        var rejected = false
+        do {
+            _ = try LauncherGenerator.makeICNSData(fromImageAt: tooSmall)
+        } catch LauncherGeneratorError.iconImageInvalid {
+            rejected = true
+        } catch {
+            expect(false, "small image must fail with iconImageInvalid, not \(error)")
+        }
+        expect(rejected, "an image under 256px on its short side must be rejected")
+
+        let square = root.appendingPathComponent("square.png")
+        writeTestPNG(width: 256, height: 256, to: square)
+        let squareData = try! LauncherGenerator.makeICNSData(fromImageAt: square)
+        let squareInfo = icnsFrameCountAndMaxWidth(squareData)
+        expect(squareInfo.count >= 1 && squareInfo.maxWidth == 512,
+               "a 256px square must encode a valid icns whose largest element is 512")
+
+        let wide = root.appendingPathComponent("wide.png")
+        writeTestPNG(width: 512, height: 300, to: wide)
+        let wideData = try! LauncherGenerator.makeICNSData(fromImageAt: wide)
+        expect(icnsFrameCountAndMaxWidth(wideData).maxWidth == 512,
+               "a non-square source must be aspect-fit into a valid 512-max icns")
+
+        // Pin the exact canonical size set as a regression tripwire. makeICNSData
+        // emits exactly 16/32/128/256/512 — 64 is intentionally omitted because
+        // ImageIO's icns encoder silently drops it. The shipped assertions above
+        // only check count >= 1 / maxWidth, so a silent size-set change (a re-added
+        // 64, an added retina type) would slip through; this catches it.
+        let canonical = root.appendingPathComponent("canonical.png")
+        writeTestPNG(width: 512, height: 512, to: canonical)
+        let canonicalData = try! LauncherGenerator.makeICNSData(fromImageAt: canonical)
+        let canonicalSource = CGImageSourceCreateWithData(canonicalData as CFData, nil)!
+        var canonicalWidths: Set<Int> = []
+        for index in 0..<CGImageSourceGetCount(canonicalSource) {
+            if let image = CGImageSourceCreateImageAtIndex(canonicalSource, index, nil) {
+                canonicalWidths.insert(image.width)
+            }
+        }
+        expect(canonicalWidths == [16, 32, 128, 256, 512],
+               "makeICNSData must emit exactly the 5 canonical sizes 16/32/128/256/512")
+    }
+
+    /// A custom icon persisted under CustomIcons/<UUID>.icns must be preferred by
+    /// buildLauncherBundle, so it survives a launcher re-materialization (heal /
+    /// adopt / legacy conversion) rather than reverting to the source app icon.
+    private static func testCustomIconSurvivesRematerialization() {
+        let root = temporaryDirectory("custom-icon-survives")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let runner = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
+        let generator = LauncherGenerator(
+            applicationSupportURL: root.appendingPathComponent("Support", isDirectory: true),
+            launcherExecutableURL: runner
+        )
+        let source = makeInstalledApp(root: root)
+        let id = UUID()
+        let instance = AppProfileInstance(
+            id: id,
+            label: "Custom icon fixture",
+            launcherKind: .managed,
+            launcherPath: generator.launcherURL(for: id).path,
+            profileDirectory: generator.profileURL(for: id).path,
+            profileOwnership: .managed,
+            source: AppProfileSource(
+                bundleIdentifier: source.bundleIdentifier,
+                bundleURL: source.bundleURL.path
+            ),
+            pinToMenuBar: false,
+            hotkey: ShortcutMapping(
+                enabled: false,
+                combo: KeyCombo(
+                    keyCode: 0, keyDisplay: "A",
+                    command: false, option: false, control: true, shift: false
+                )
+            ),
+            mouseButton: nil,
+            compatibilityRuleID: "signing-fixture-rule"
+        )
+        _ = try! generator.materialize(instance: instance, sourceApp: source)
+
+        let png = root.appendingPathComponent("chosen.png")
+        writeTestPNG(width: 512, height: 512, to: png)
+        let stampedURL = try! generator.setCustomIcon(fromImageAt: png, for: instance)
+        expect(generator.hasCustomIcon(for: id),
+               "setting a custom icon must persist a CustomIcons/<UUID>.icns copy")
+        let persisted = try! Data(contentsOf: generator.customIconURL(for: id))
+        let stampedBytes = try! Data(contentsOf: stampedURL)
+        expect(stampedBytes == persisted,
+               "the stamped bundle icon must equal the persisted custom copy")
+
+        // Simulate a lost launcher that heal/adopt/regenerate would rebuild —
+        // delete the bundle directly (NOT removeLauncher, which is a permanent
+        // removal that deliberately purges the persisted custom copy). The
+        // fixture source app declares no icon, so any AppIcon.icns after the
+        // rebuild can only have come from the persisted custom copy.
+        try! FileManager.default.removeItem(
+            at: URL(fileURLWithPath: instance.launcherPath, isDirectory: true)
+        )
+        expect(generator.hasCustomIcon(for: id),
+               "a rebuild-triggering launcher loss must not remove the persisted custom icon")
+        let regenerated = try! generator.regenerateLauncher(instance: instance, sourceApp: source)
+        let rebuiltIcon = regenerated.launcherURL
+            .appendingPathComponent("Contents/Resources/AppIcon.icns")
+        expect(FileManager.default.fileExists(atPath: rebuiltIcon.path),
+               "re-materialization must restore the custom icon into the rebuilt bundle")
+        expect(try! Data(contentsOf: rebuiltIcon) == persisted,
+               "the re-materialized icon must be the persisted custom copy, not the source icon")
+    }
+
+    /// Tint and badge compositions always emit onto the square render canvas,
+    /// independent of source aspect, and a whitespace-only badge letter must not
+    /// crash or fail to render.
+    private static func testCustomIconTintAndBadgeGeometry() {
+        let source = makeTestBitmap(width: 400, height: 400)
+        let tinted = LauncherGenerator.tintedIcon(source, color: AppProfileMenuColor.green.iconColor)
+        expect(tinted != nil, "tint must produce an image")
+        expect(tinted!.width == LauncherGenerator.renderCanvasSize
+               && tinted!.height == LauncherGenerator.renderCanvasSize,
+               "tinted output must be the square render canvas")
+
+        let badged = LauncherGenerator.badgedIcon(
+            source, color: AppProfileMenuColor.pink.iconColor, letter: "Work")
+        expect(badged != nil && badged!.width == LauncherGenerator.renderCanvasSize,
+               "badge must produce a square render-canvas image")
+
+        let blankBadge = LauncherGenerator.badgedIcon(
+            source, color: AppProfileMenuColor.gray.iconColor, letter: "   ")
+        expect(blankBadge != nil, "a whitespace-only label must still render a (letterless) badge")
+
+        let wideBadge = LauncherGenerator.badgedIcon(
+            makeTestBitmap(width: 800, height: 200),
+            color: AppProfileMenuColor.blue.iconColor, letter: "A")
+        expect(wideBadge != nil && wideBadge!.width == wideBadge!.height,
+               "a non-square source must still yield a square badge composite")
+    }
+
+    /// Reset drops the persisted CustomIcons/<UUID>.icns so future
+    /// re-materializations follow the source again. (The fixture source declares
+    /// no icon, so reset takes the removeIcon path — the file must still be gone.)
+    private static func testResetRemovesPersistedCustomIcon() {
+        let fixture = makeManagedFixture("icon-reset")
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let id = UUID()
+        let instance = makeManagedInstance(id: id, generator: fixture.generator, source: fixture.source)
+        _ = try! fixture.generator.materialize(instance: instance, sourceApp: fixture.source)
+
+        let png = fixture.root.appendingPathComponent("chosen.png")
+        writeTestPNG(width: 300, height: 300, to: png)
+        _ = try! fixture.generator.setCustomIcon(fromImageAt: png, for: instance)
+        expect(fixture.generator.hasCustomIcon(for: id), "precondition: custom icon persisted")
+
+        let sourceURL = URL(fileURLWithPath: instance.source.bundleURL, isDirectory: true)
+        _ = try! fixture.generator.resetCustomIcon(for: instance, sourceBundleURL: sourceURL)
+        expect(!fixture.generator.hasCustomIcon(for: id),
+               "reset must delete the persisted custom icon")
+    }
+
+    /// updateManagedIcon must refuse a non-managed (legacy external) row rather
+    /// than touch the user's own untracked app.
+    private static func testUpdateManagedIconRejectsExternalRow() {
+        let manager = AppProfileManager(persist: { _ in true })
+        let config = KlikProConfig.default
+        let external = config.instances.first { $0.launcherKind == .legacyExternal }
+        expect(external != nil, "the default config must contain a legacy external row to test")
+        do {
+            _ = try manager.updateManagedIcon(
+                instanceID: external!.id, edit: .tint(.blue), config: config)
+            expect(false, "updateManagedIcon must reject a legacy external row")
+        } catch let error as AppProfileManagerError {
+            expect(error == .externalInstance, "external rows must fail as .externalInstance")
+        } catch {
+            expect(false, "unexpected error rejecting external row: \(error)")
+        }
+    }
+
+    /// A too-small chosen image must surface as .iconImageInvalid at the manager
+    /// boundary (LauncherGeneratorError -> AppProfileManagerError).
+    private static func testUpdateManagedIconMapsInvalidImage() {
+        let fixture = makeManagedFixture("icon-invalid-map")
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let id = UUID()
+        let instance = makeManagedInstance(id: id, generator: fixture.generator, source: fixture.source)
+        _ = try! fixture.generator.materialize(instance: instance, sourceApp: fixture.source)
+
+        var config = KlikProConfig.default
+        config.instances.append(instance)
+        let manager = AppProfileManager(generator: fixture.generator, persist: { _ in true })
+
+        let tiny = fixture.root.appendingPathComponent("tiny.png")
+        writeTestPNG(width: 64, height: 64, to: tiny)
+        do {
+            _ = try manager.updateManagedIcon(instanceID: id, edit: .image(tiny), config: config)
+            expect(false, "a 64px image must be rejected")
+        } catch let error as AppProfileManagerError {
+            expect(error == .iconImageInvalid, "invalid image must map to .iconImageInvalid")
+        } catch {
+            expect(false, "unexpected error for invalid image: \(error)")
+        }
     }
 
     // MARK: - Durable Data Vault (schema 11, Phase 1)

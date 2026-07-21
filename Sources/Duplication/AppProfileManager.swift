@@ -15,6 +15,8 @@ enum AppProfileManagerError: Error, Equatable {
     case profileInUse
     case profileCleanupFailed
     case conversionUnavailable
+    /// A user-chosen icon image could not be decoded or is too small.
+    case iconImageInvalid
     /// Adopt was requested without a configured/mounted vault root.
     case vaultUnavailable
     /// The candidate folder carries no valid `vault.json`, so it is refused:
@@ -341,6 +343,69 @@ struct AppProfileManager {
             updateVaultManifest(config: updatedConfig)
         }
         return updatedConfig
+    }
+
+    // MARK: Custom icons
+
+    /// How a managed profile's icon should be produced. `.image` replaces it
+    /// with a user file; `.tint`/`.badge` derive from the source app's own icon;
+    /// `.reset` restores the source icon and drops any persisted custom copy.
+    enum IconEdit {
+        case image(URL)
+        case tint(AppProfileMenuColor)
+        case badge(AppProfileMenuColor)
+        case reset
+    }
+
+    /// Applies an icon edit to one managed instance and persists the result.
+    /// External/legacy rows are rejected. Only the launcher bundle and the
+    /// per-instance persisted icon change — profile data is never touched.
+    func updateManagedIcon(
+        instanceID: UUID,
+        edit: IconEdit,
+        config: KlikProConfig
+    ) throws -> KlikProConfig {
+        guard let index = config.instances.firstIndex(where: { $0.id == instanceID }),
+              config.instances[index].launcherKind == .managed else {
+            throw AppProfileManagerError.externalInstance
+        }
+        let instance = config.instances[index]
+        let sourceURL = URL(fileURLWithPath: instance.source.bundleURL, isDirectory: true)
+            .standardizedFileURL
+        let resolvedIconPath: String?
+        do {
+            switch edit {
+            case .image(let imageURL):
+                resolvedIconPath = try generator
+                    .setCustomIcon(fromImageAt: imageURL, for: instance).path
+            case .tint(let color):
+                resolvedIconPath = try generator.setTintedIcon(
+                    color: color.iconColor, for: instance, sourceBundleURL: sourceURL
+                ).path
+            case .badge(let color):
+                resolvedIconPath = try generator.setBadgedIcon(
+                    color: color.iconColor,
+                    letter: instance.label,
+                    for: instance,
+                    sourceBundleURL: sourceURL
+                ).path
+            case .reset:
+                resolvedIconPath = try generator.resetCustomIcon(
+                    for: instance, sourceBundleURL: sourceURL
+                )?.path
+            }
+        } catch LauncherGeneratorError.iconImageInvalid {
+            throw AppProfileManagerError.iconImageInvalid
+        } catch {
+            throw AppProfileManagerError.materializationFailed
+        }
+
+        var updated = config
+        updated.instances[index].iconPath = resolvedIconPath
+        guard persist(updated) else {
+            throw AppProfileManagerError.persistenceFailed
+        }
+        return updated
     }
 
     func launcherURL(for instance: AppProfileInstance) throws -> URL {

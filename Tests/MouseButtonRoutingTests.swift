@@ -511,6 +511,21 @@ private struct MouseButtonRoutingTests {
         )
         expect(instanceDispatch == .launchInstance(managedID),
                "M2 mouse dispatch must carry the instance UUID instead of a label")
+        // Regression: a button assigned to a managed App Profile instance is in
+        // Open-App mode, so its dormant stored shortcut must NOT raise a false
+        // Duplicate against an identical real shortcut on another button.
+        var dormantAppProfileConflict = instanceNativeConfig
+        dormantAppProfileConflict.middleButton.combo =
+            dormantAppProfileConflict.gestureButton.combo
+        let dormantAppProfileStatuses = evaluateShortcutConflicts(
+            candidate: dormantAppProfileConflict,
+            persisted: dormantAppProfileConflict,
+            browserExtensionShortcuts: [],
+            specialFeatureActive: false
+        )
+        expect(dormantAppProfileStatuses[.middleButton] == .ok
+               && dormantAppProfileStatuses[.gestureButton] == .ok,
+               "an Open-App (managed-instance) button's dormant shortcut must not be a Duplicate")
         var duplicateHotkeyConfig = instanceNativeConfig
         duplicateHotkeyConfig.instances[duplicateHotkeyConfig.instances.count - 1].hotkey
             = duplicateHotkeyConfig.chatGPTHotkey

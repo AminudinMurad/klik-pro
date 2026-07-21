@@ -688,13 +688,27 @@ private final class MenuBarController: NSObject {
         button.tag = tag
         button.sendAction(on: [.leftMouseUp])
 
-        let appURL = URL(fileURLWithPath: instance.source.bundleURL, isDirectory: true)
+        // Prefer the profile launcher's own icon so a Change-Icon choice (custom
+        // PNG/ICO, tint, or badge) shows in the menu bar too. Read the launcher's
+        // AppIcon.icns directly to bypass NSWorkspace's per-path cache, then fall
+        // back to the launcher bundle icon, then the source app icon.
+        let launcherURL = URL(fileURLWithPath: instance.launcherPath, isDirectory: true)
             .standardizedFileURL
-        guard FileManager.default.fileExists(atPath: appURL.path) else {
-            logMessage("Source app disappeared before menu icon setup for UUID \(instance.id)")
+        let sourceURL = URL(fileURLWithPath: instance.source.bundleURL, isDirectory: true)
+            .standardizedFileURL
+        let launcherIcns = launcherURL
+            .appendingPathComponent("Contents/Resources/AppIcon.icns")
+        let icon: NSImage
+        if let custom = NSImage(contentsOf: launcherIcns) {
+            icon = custom
+        } else if FileManager.default.fileExists(atPath: launcherURL.path) {
+            icon = NSWorkspace.shared.icon(forFile: launcherURL.path)
+        } else if FileManager.default.fileExists(atPath: sourceURL.path) {
+            icon = NSWorkspace.shared.icon(forFile: sourceURL.path)
+        } else {
+            logMessage("No launcher or source app before menu icon setup for UUID \(instance.id)")
             return
         }
-        let icon = NSWorkspace.shared.icon(forFile: appURL.path)
         let baseIcon = compactMenuBarApplicationIcon(icon)
         button.image = compactMenuBarApplicationIcon(baseIcon, markerColor: instance.menuColor)
         button.imagePosition = .imageOnly
@@ -1411,7 +1425,11 @@ private struct KlikProInputMain {
         } else {
             logMessage("Klik PRO menu-bar icon hidden by Settings")
         }
-        if specialFeatureActive {
+        // App Profile menu-bar icons are independent of the retired Special
+        // Feature toggle (see activeAppProfileInstance). Create the controller
+        // whenever any instance is active so pinned, ready profiles show their
+        // icons regardless of specialFeatureActive.
+        if !activeAppProfileInstanceIDs.isEmpty {
             quickLaunchMenuBarController = MenuBarController()
         }
 

@@ -2126,6 +2126,24 @@ func linkedShortcutCounterpart(
     }.flatMap { quickLaunchMouseButton(for: $0, in: config)?.shortcutSlot }
 }
 
+/// True when this slot's physical mouse button is assigned to an App Profile
+/// instance (Open-App mode). The button then launches that profile instead of
+/// sending its stored keyboard shortcut, so that shortcut is dormant and must
+/// not count as an active shortcut in conflict/duplicate detection. This mirrors
+/// how the legacy ChatGPT/Claude quick-launch is already treated as dormant, but
+/// covers App Profile instances (which are not QuickLaunchTargets).
+func slotOpensAppProfileInstance(_ slot: ShortcutSlot, in config: KlikProConfig) -> Bool {
+    guard let button = QuickLaunchMouseButton.allCases.first(where: { $0.shortcutSlot == slot })
+    else { return false }
+    // Only managed App Profile instances count here. The legacy ChatGPT/Claude
+    // mirrors are `.legacyExternal` and are already handled (with Special Feature
+    // gating) by activeQuickLaunchTarget; including them would wrongly silence a
+    // forward/back shortcut conflict while the Special Feature is off.
+    return config.instances.contains {
+        $0.mouseButton == button && $0.launcherKind == .managed
+    }
+}
+
 private let reservedSystemShortcuts: [KeyCombo.Signature] = [
     KeyCombo.Signature(keyCode: UInt16(kVK_Space), command: true, option: false, control: false, shift: false),           // Cmd-Space
     KeyCombo.Signature(keyCode: UInt16(kVK_Tab), command: true, option: false, control: false, shift: false),             // Cmd-Tab
@@ -2205,6 +2223,11 @@ func evaluateShortcutConflicts(
             claudeAvailable: claudeAvailable
         )
         guard mine.enabled else { result[slot] = .ok; continue }
+
+        // A button that opens an App Profile instance is in Open-App mode: its
+        // stored shortcut is dormant (the button launches the app, never emits
+        // the combo), so it is neither a conflict itself nor a source of one.
+        if slotOpensAppProfileInstance(slot, in: candidate) { result[slot] = .ok; continue }
 
         let intentionalCounterpart = linkedShortcutCounterpart(
             of: slot,

@@ -1,4 +1,7 @@
+import CoreGraphics
+import CoreText
 import Foundation
+import ImageIO
 
 enum LauncherGeneratorError: Error, Equatable {
     case notManaged
@@ -9,6 +12,9 @@ enum LauncherGeneratorError: Error, Equatable {
     case alreadyExists
     case materializationFailed
     case unsafeRemoval
+    /// A user-supplied icon image could not be decoded, or is smaller than
+    /// `customIconMinimumPixelSize` on its shortest side.
+    case iconImageInvalid
     /// A `.vault` instance was handled by a generator that has no vault root
     /// configured (or the volume is absent). Always fail closed — never fall
     /// back to Application Support paths for vault-stored data.
@@ -666,10 +672,20 @@ struct LauncherGenerator {
                 options: .atomic
             )
 
-            let copiedIcon = try copySourceIconIfAvailable(
-                sourceBundleURL: spec.sourceBundleURL,
-                resourcesURL: resources
-            )
+            // A persisted custom icon (user-chosen via Change Icon) wins over
+            // the source app's icon, so healing and adoption keep it.
+            let copiedIcon: URL?
+            let customIcon = customIconURL(for: spec.instanceID)
+            if fileManager.fileExists(atPath: customIcon.path) {
+                let destination = resources.appendingPathComponent("AppIcon.icns")
+                try fileManager.copyItem(at: customIcon, to: destination)
+                copiedIcon = destination
+            } else {
+                copiedIcon = try copySourceIconIfAvailable(
+                    sourceBundleURL: spec.sourceBundleURL,
+                    resourcesURL: resources
+                )
+            }
             var info: [String: Any] = [
                 "CFBundleDevelopmentRegion": "en",
                 "CFBundleDisplayName": spec.displayName,
@@ -800,6 +816,406 @@ struct LauncherGenerator {
         return launcherURL
     }
 
+    // MARK: Custom icons
+
+    /// Smallest accepted shortest-side for a user-chosen icon image. Anything
+    /// smaller upscales visibly at Finder/Dock sizes and is rejected instead.
+    static let customIconMinimumPixelSize = 256
+
+    /// The persisted copy of a user-chosen icon, already converted to .icns.
+    /// Existence of this file IS the "custom icon" intent: `buildLauncherBundle`
+    /// prefers it over the source app's icon, so healing, adoption, and legacy
+    /// conversion re-materialize the launcher with the custom icon intact.
+    func customIconURL(for id: UUID) -> URL {
+        applicationSupportURL
+            .appendingPathComponent("CustomIcons", isDirectory: true)
+            .appendingPathComponent(id.uuidString.uppercased() + ".icns")
+    }
+
+    func hasCustomIcon(for id: UUID) -> Bool {
+        fileManager.fileExists(atPath: customIconURL(for: id).path)
+    }
+
+    /// The square canvas tint/badge rendering composites onto before it is
+    /// downsampled into the .icns element sizes.
+    static let renderCanvasSize = 512
+
+    /// An icon colour expressed as plain sRGB components (0…1). Foundation-only
+    /// so the shared palette can live on `AppProfileMenuColor` without coupling
+    /// the model to AppKit; both the renderer and the UI build from it.
+    struct IconColor: Equatable {
+        let red: Double
+        let green: Double
+        let blue: Double
+        var cgColor: CGColor { CGColor(srgbRed: red, green: green, blue: blue, alpha: 1) }
+    }
+
+    /// Encodes one already-prepared square image into multi-size .icns data.
+    /// ImageIO's icns encoder requires exact canonical dimensions, so each
+    /// element is re-rendered aspect-fit (padded, never cropped).
+    static func makeICNSData(from image: CGImage) throws -> Data {
+        // Canonical standalone icns element sizes ImageIO's encoder accepts; 64
+        // is deliberately omitted because ImageIO silently drops it (no
+        // unambiguous standalone type), leaving a valid five-frame icon.
+        let sizes = [16, 32, 128, 256, 512]
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            data, "com.apple.icns" as CFString, sizes.count, nil
+        ) else {
+            throw LauncherGeneratorError.iconImageInvalid
+        }
+        for size in sizes {
+            guard let scaled = renderAspectFit(image, into: size) else {
+                throw LauncherGeneratorError.iconImageInvalid
+            }
+            CGImageDestinationAddImage(destination, scaled, nil)
+        }
+        guard CGImageDestinationFinalize(destination) else {
+            throw LauncherGeneratorError.iconImageInvalid
+        }
+        return data as Data
+    }
+
+    /// Decodes a user-chosen PNG/ICO (largest frame) and encodes it as .icns.
+    /// Rejects images whose shortest side is below `customIconMinimumPixelSize`.
+    static func makeICNSData(fromImageAt imageURL: URL) throws -> Data {
+        guard let image = largestImage(atFileURL: imageURL),
+              min(image.width, image.height) >= customIconMinimumPixelSize else {
+            throw LauncherGeneratorError.iconImageInvalid
+        }
+        return try makeICNSData(from: image)
+    }
+
+    /// Loads the source app's own icon as a CGImage (largest frame), for tint
+    /// and badge composition and for the Change Icon preview.
+    func sourceIconImage(sourceBundleURL: URL) -> CGImage? {
+        guard let iconURL = sourceIconURL(sourceBundleURL: sourceBundleURL) else { return nil }
+        return Self.largestImage(atFileURL: iconURL)
+    }
+
+    private static func largestImage(atFileURL url: URL) -> CGImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              CGImageSourceGetCount(source) > 0 else { return nil }
+        var largest: CGImage?
+        for index in 0..<CGImageSourceGetCount(source) {
+            guard let image = CGImageSourceCreateImageAtIndex(source, index, nil) else { continue }
+            if image.width > (largest?.width ?? 0) { largest = image }
+        }
+        return largest
+    }
+
+    /// Shapes an arbitrary image into a macOS-style app icon: the artwork is
+    /// aspect-filled into a rounded-corner (squircle-like) tile, inset with the
+    /// same proportional padding macOS uses (~10%), so a plain square logo reads
+    /// as a real app icon instead of a flat square. Used for user-chosen images
+    /// only — tint/badge derive from the source app icon, which is already shaped.
+    static func macOSIconShaped(_ source: CGImage) -> CGImage? {
+        let size = renderCanvasSize
+        guard let context = squareContext(size) else { return nil }
+        let s = CGFloat(size)
+        let inset = (s * 0.098).rounded()
+        let tile = CGRect(x: inset, y: inset, width: s - 2 * inset, height: s - 2 * inset)
+        let radius = tile.width * 0.2237   // macOS icon-grid corner ratio
+        context.addPath(CGPath(
+            roundedRect: tile, cornerWidth: radius, cornerHeight: radius, transform: nil
+        ))
+        context.clip()
+        // Aspect-fill so the rounded tile is fully covered (no transparent gaps).
+        let scale = max(tile.width / CGFloat(source.width), tile.height / CGFloat(source.height))
+        let width = CGFloat(source.width) * scale
+        let height = CGFloat(source.height) * scale
+        context.draw(source, in: CGRect(
+            x: tile.midX - width / 2, y: tile.midY - height / 2, width: width, height: height
+        ))
+        return context.makeImage()
+    }
+
+    /// Loads a user-chosen image file and returns it shaped as a macOS app icon,
+    /// for the Change Icon live preview (no size validation — that happens on apply).
+    static func macOSShapedImage(fromImageAt url: URL) -> CGImage? {
+        guard let image = largestImage(atFileURL: url) else { return nil }
+        return macOSIconShaped(image)
+    }
+
+    /// Recolours the source icon: the colour's hue and saturation are applied
+    /// while the icon's own shading (luminance) is kept, then the result is
+    /// masked back to the icon's shape so transparent padding stays clear.
+    static func tintedIcon(_ source: CGImage, color: IconColor) -> CGImage? {
+        let size = renderCanvasSize
+        guard let context = squareContext(size) else { return nil }
+        let fitted = aspectFitRect(source, in: size)
+        context.draw(source, in: fitted)
+        context.setBlendMode(.color)
+        context.setFillColor(color.cgColor)
+        context.fill(CGRect(x: 0, y: 0, width: size, height: size))
+        context.setBlendMode(.destinationIn)
+        context.draw(source, in: fitted)
+        return context.makeImage()
+    }
+
+    /// Draws the source icon with a coloured corner badge carrying `letter`
+    /// (its first character, uppercased). A white ring separates the badge from
+    /// the artwork behind it.
+    static func badgedIcon(_ source: CGImage, color: IconColor, letter: String) -> CGImage? {
+        let size = renderCanvasSize
+        guard let context = squareContext(size) else { return nil }
+        context.draw(source, in: aspectFitRect(source, in: size))
+        let s = CGFloat(size)
+        let diameter = s * 0.44
+        let margin = s * 0.03
+        // Origin is bottom-left, so this centre sits in the bottom-right corner.
+        let center = CGPoint(x: s - diameter / 2 - margin, y: diameter / 2 + margin)
+        let ring = s * 0.028
+        let white = CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)
+        context.setFillColor(white)
+        context.fillEllipse(in: CGRect(
+            x: center.x - diameter / 2 - ring, y: center.y - diameter / 2 - ring,
+            width: diameter + 2 * ring, height: diameter + 2 * ring
+        ))
+        context.setFillColor(color.cgColor)
+        context.fillEllipse(in: CGRect(
+            x: center.x - diameter / 2, y: center.y - diameter / 2,
+            width: diameter, height: diameter
+        ))
+        let trimmed = letter.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let first = trimmed.uppercased().first {
+            let font = CTFontCreateWithName("HelveticaNeue-Bold" as CFString, diameter * 0.56, nil)
+            let attributes: [CFString: Any] = [
+                kCTFontAttributeName: font,
+                kCTForegroundColorAttributeName: white,
+            ]
+            guard let attributed = CFAttributedStringCreate(
+                nil, String(first) as CFString, attributes as CFDictionary
+            ) else {
+                return context.makeImage()
+            }
+            let line = CTLineCreateWithAttributedString(attributed)
+            let bounds = CTLineGetImageBounds(line, context)
+            context.textPosition = CGPoint(
+                x: center.x - bounds.width / 2 - bounds.minX,
+                y: center.y - bounds.height / 2 - bounds.minY
+            )
+            CTLineDraw(line, context)
+        }
+        return context.makeImage()
+    }
+
+    private static func squareContext(_ size: Int) -> CGContext? {
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                data: nil, width: size, height: size,
+                bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else { return nil }
+        context.interpolationQuality = .high
+        return context
+    }
+
+    private static func aspectFitRect(_ image: CGImage, in size: Int) -> CGRect {
+        let scale = min(
+            CGFloat(size) / CGFloat(image.width),
+            CGFloat(size) / CGFloat(image.height)
+        )
+        let width = CGFloat(image.width) * scale
+        let height = CGFloat(image.height) * scale
+        return CGRect(
+            x: (CGFloat(size) - width) / 2,
+            y: (CGFloat(size) - height) / 2,
+            width: width, height: height
+        )
+    }
+
+    private static func renderAspectFit(_ image: CGImage, into size: Int) -> CGImage? {
+        guard let context = squareContext(size) else { return nil }
+        context.draw(image, in: aspectFitRect(image, in: size))
+        return context.makeImage()
+    }
+
+    /// Replaces the launcher's icon with a user-chosen PNG/ICO, shaped into the
+    /// macOS app-icon squircle so it matches native icons in Finder/Dock.
+    func setCustomIcon(
+        fromImageAt imageURL: URL,
+        for instance: AppProfileInstance
+    ) throws -> URL {
+        guard let image = Self.largestImage(atFileURL: imageURL),
+              min(image.width, image.height) >= Self.customIconMinimumPixelSize else {
+            throw LauncherGeneratorError.iconImageInvalid
+        }
+        guard let shaped = Self.macOSIconShaped(image) else {
+            throw LauncherGeneratorError.iconImageInvalid
+        }
+        let icnsData = try Self.makeICNSData(from: shaped)
+        return try persistAndStamp(icnsData: icnsData, for: instance)
+    }
+
+    /// Recolours the source app's icon with one of the shared palette colours.
+    func setTintedIcon(
+        color: IconColor,
+        for instance: AppProfileInstance,
+        sourceBundleURL: URL
+    ) throws -> URL {
+        guard let source = sourceIconImage(sourceBundleURL: sourceBundleURL),
+              let tinted = Self.tintedIcon(source, color: color) else {
+            throw LauncherGeneratorError.iconImageInvalid
+        }
+        return try persistAndStamp(icnsData: try Self.makeICNSData(from: tinted), for: instance)
+    }
+
+    /// Adds a coloured, lettered corner badge to the source app's icon.
+    func setBadgedIcon(
+        color: IconColor,
+        letter: String,
+        for instance: AppProfileInstance,
+        sourceBundleURL: URL
+    ) throws -> URL {
+        guard let source = sourceIconImage(sourceBundleURL: sourceBundleURL),
+              let badged = Self.badgedIcon(source, color: color, letter: letter) else {
+            throw LauncherGeneratorError.iconImageInvalid
+        }
+        return try persistAndStamp(icnsData: try Self.makeICNSData(from: badged), for: instance)
+    }
+
+    /// Persists the .icns under `CustomIcons/<UUID>.icns` first so a later
+    /// re-materialization keeps it, then stamps the live bundle. If stamping
+    /// fails, the persisted copy is rolled back so intent always matches what
+    /// is visible.
+    private func persistAndStamp(
+        icnsData: Data,
+        for instance: AppProfileInstance
+    ) throws -> URL {
+        let launcherURL = try validatedLauncherURL(for: instance)
+        let customURL = customIconURL(for: instance.id)
+        let previousCustom = fileManager.fileExists(atPath: customURL.path)
+            ? try? Data(contentsOf: customURL)
+            : nil
+        try createPrivateDirectory(customURL.deletingLastPathComponent())
+        do {
+            try icnsData.write(to: customURL, options: .atomic)
+        } catch {
+            throw LauncherGeneratorError.materializationFailed
+        }
+        do {
+            return try stampIcon(data: icnsData, into: launcherURL)
+        } catch {
+            if let previousCustom {
+                try? previousCustom.write(to: customURL, options: .atomic)
+            } else {
+                try? fileManager.removeItem(at: customURL)
+            }
+            throw error
+        }
+    }
+
+    /// Restores the source app's own icon and deletes the persisted custom
+    /// copy, so future re-materializations follow the source again. Returns the
+    /// bundle icon URL, or nil when the source app declares no icon.
+    func resetCustomIcon(
+        for instance: AppProfileInstance,
+        sourceBundleURL: URL
+    ) throws -> URL? {
+        let launcherURL = try validatedLauncherURL(for: instance)
+        // Drop the persisted copy FIRST and surface a failure: leaving it behind
+        // would let the next heal/adopt/legacy-conversion silently resurrect the
+        // old custom icon, so a reset that can't clear it must not report success.
+        let customURL = customIconURL(for: instance.id)
+        if fileManager.fileExists(atPath: customURL.path) {
+            do {
+                try fileManager.removeItem(at: customURL)
+            } catch {
+                throw LauncherGeneratorError.materializationFailed
+            }
+        }
+        if let sourceIcon = sourceIconURL(sourceBundleURL: sourceBundleURL),
+           let sourceData = try? Data(contentsOf: sourceIcon) {
+            return try stampIcon(data: sourceData, into: launcherURL)
+        }
+        try removeIcon(from: launcherURL)
+        return nil
+    }
+
+    /// Writes new icon bytes into an existing launcher bundle, re-signs it, and
+    /// re-registers it so Finder and the Dock pick the change up. The previous
+    /// bytes and Info.plist are restored if signing fails.
+    private func stampIcon(data: Data, into launcherURL: URL) throws -> URL {
+        let resources = launcherURL
+            .appendingPathComponent("Contents/Resources", isDirectory: true)
+        try createPrivateDirectory(resources)
+        let iconURL = resources.appendingPathComponent("AppIcon.icns")
+        let previousIcon = try? Data(contentsOf: iconURL)
+        let infoURL = launcherURL.appendingPathComponent("Contents/Info.plist")
+        guard let previousInfo = try? Data(contentsOf: infoURL),
+              var info = try? PropertyListSerialization.propertyList(
+                from: previousInfo, options: [], format: nil
+              ) as? [String: Any] else {
+            throw LauncherGeneratorError.materializationFailed
+        }
+        do {
+            try data.write(to: iconURL, options: .atomic)
+            if info["CFBundleIconFile"] as? String != "AppIcon" {
+                info["CFBundleIconFile"] = "AppIcon"
+                let updatedInfo = try PropertyListSerialization.data(
+                    fromPropertyList: info, format: .xml, options: 0
+                )
+                try updatedInfo.write(to: infoURL, options: .atomic)
+            }
+            guard signLauncher(launcherURL) else {
+                throw LauncherGeneratorError.materializationFailed
+            }
+            // Touch the bundle so Finder's icon cache notices the change.
+            try? fileManager.setAttributes(
+                [.modificationDate: Date()], ofItemAtPath: launcherURL.path
+            )
+            refreshLaunchServicesRegistration(for: launcherURL)
+            return iconURL
+        } catch {
+            if let previousIcon {
+                try? previousIcon.write(to: iconURL, options: .atomic)
+            } else {
+                try? fileManager.removeItem(at: iconURL)
+            }
+            try? previousInfo.write(to: infoURL, options: .atomic)
+            _ = signLauncher(launcherURL)
+            throw LauncherGeneratorError.materializationFailed
+        }
+    }
+
+    /// Edge case for reset when the source app declares no icon at all: drop
+    /// the bundle icon and its Info.plist reference, then re-sign.
+    private func removeIcon(from launcherURL: URL) throws {
+        let iconURL = launcherURL
+            .appendingPathComponent("Contents/Resources/AppIcon.icns")
+        let infoURL = launcherURL.appendingPathComponent("Contents/Info.plist")
+        guard let previousInfo = try? Data(contentsOf: infoURL),
+              var info = try? PropertyListSerialization.propertyList(
+                from: previousInfo, options: [], format: nil
+              ) as? [String: Any] else {
+            throw LauncherGeneratorError.materializationFailed
+        }
+        let previousIcon = try? Data(contentsOf: iconURL)
+        do {
+            try? fileManager.removeItem(at: iconURL)
+            info.removeValue(forKey: "CFBundleIconFile")
+            let updatedInfo = try PropertyListSerialization.data(
+                fromPropertyList: info, format: .xml, options: 0
+            )
+            try updatedInfo.write(to: infoURL, options: .atomic)
+            guard signLauncher(launcherURL) else {
+                throw LauncherGeneratorError.materializationFailed
+            }
+            try? fileManager.setAttributes(
+                [.modificationDate: Date()], ofItemAtPath: launcherURL.path
+            )
+            refreshLaunchServicesRegistration(for: launcherURL)
+        } catch {
+            if let previousIcon {
+                try? previousIcon.write(to: iconURL, options: .atomic)
+            }
+            try? previousInfo.write(to: infoURL, options: .atomic)
+            _ = signLauncher(launcherURL)
+            throw LauncherGeneratorError.materializationFailed
+        }
+    }
+
     /// Atomically hides a generated launcher before its config row is removed.
     /// If persistence fails, the caller can put the exact bundle back. Once the
     /// config write succeeds, commit deletes only the hidden, UUID-keyed bundle.
@@ -837,6 +1253,8 @@ struct LauncherGenerator {
         } catch {
             throw LauncherGeneratorError.unsafeRemoval
         }
+        // The profile is gone for good; its persisted custom icon goes with it.
+        try? fileManager.removeItem(at: customIconURL(for: removal.instanceID))
     }
 
     func rollbackLauncherRemoval(_ removal: ManagedLauncherRemoval) throws {
@@ -1175,6 +1593,17 @@ struct LauncherGenerator {
         sourceBundleURL: URL,
         resourcesURL: URL
     ) throws -> URL? {
+        guard let sourceIcon = sourceIconURL(sourceBundleURL: sourceBundleURL) else {
+            return nil
+        }
+        let destination = resourcesURL.appendingPathComponent("AppIcon.icns")
+        try fileManager.copyItem(at: sourceIcon, to: destination)
+        return destination
+    }
+
+    /// Resolves the source app's declared .icns inside its own bundle, or nil
+    /// when the app declares none (or declares an unsafe non-leaf name).
+    private func sourceIconURL(sourceBundleURL: URL) -> URL? {
         let infoURL = sourceBundleURL.appendingPathComponent("Contents/Info.plist")
         guard let data = fileManager.contents(atPath: infoURL.path),
               let info = try? PropertyListSerialization.propertyList(
@@ -1192,9 +1621,7 @@ struct LauncherGenerator {
             .appendingPathComponent("Contents/Resources", isDirectory: true)
             .appendingPathComponent(iconName)
         guard fileManager.fileExists(atPath: sourceIcon.path) else { return nil }
-        let destination = resourcesURL.appendingPathComponent("AppIcon.icns")
-        try fileManager.copyItem(at: sourceIcon, to: destination)
-        return destination
+        return sourceIcon
     }
 
     private static func adHocSign(_ launcherURL: URL) -> Bool {

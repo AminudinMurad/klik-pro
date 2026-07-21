@@ -2,6 +2,18 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.2.0
+
+- **More App Profile icon options** — each generated profile can now carry its
+  own icon. Open the new per-profile gear menu and choose **Change Icon** to
+  replace it with your own PNG or ICO, tint the app's own icon in one of six
+  colours, or add a coloured corner badge with the profile's initial (with a
+  live preview), and reset to the app icon at any time. Custom icons survive
+  data-folder recovery. The original app is never modified.
+- **Tidier App Profile cards** — Rename, Change Icon, and Remove now live
+  together behind the gear menu, and the everyday controls (Open, Assign, Menu
+  Bar Icon) are grouped on one row, so long profile names have more room.
+
 ## 1.1.1
 
 - **Advanced tab is lock-gated with a risk warning** — the Advanced tab now
@@ -19,6 +31,11 @@ All notable changes to Klik PRO are documented here.
   the profiles it holds. On launch, if a previously configured data folder is
   located, its profiles are recovered automatically. Existing profiles are never
   moved; leaving the folder unset keeps the default behaviour unchanged.
+- **Easier data-folder setup and recovery** — the data-folder picker can now
+  create a new folder on the spot, and the recover-an-existing-folder flow makes
+  clear you select the folder that contains `vault.json` (not the `~/.claude-*`
+  or `~/.codex-*` links in your Home folder) and reveals hidden folders so they
+  stay reachable.
 - **Three-step onboarding** — first launch is now a guided flow: Welcome,
   Preferences (the four setting toggles on their own page), and an opt-in
   Accessibility step with **Set Up Accessibility…**, **Skip for Now**, and

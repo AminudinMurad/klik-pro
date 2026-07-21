@@ -29,6 +29,21 @@ enum AppProfileMenuColor: String, Codable, CaseIterable, Equatable {
         case .gray: return "Gray"
         }
     }
+
+    /// The shared swatch colour reused for the menu-bar tint, the Change Icon
+    /// tint, and the badge. Kept as plain sRGB components so this model type
+    /// stays AppKit-free; the generator renders from it and the UI builds an
+    /// NSColor from the same values, so all three always match.
+    var iconColor: LauncherGenerator.IconColor {
+        switch self {
+        case .blue: return .init(red: 0.216, green: 0.541, blue: 0.867)
+        case .green: return .init(red: 0.388, green: 0.600, blue: 0.133)
+        case .orange: return .init(red: 0.937, green: 0.624, blue: 0.153)
+        case .purple: return .init(red: 0.498, green: 0.467, blue: 0.867)
+        case .pink: return .init(red: 0.831, green: 0.325, blue: 0.494)
+        case .gray: return .init(red: 0.533, green: 0.529, blue: 0.502)
+        }
+    }
 }
 
 struct AppProfileSource: Codable, Equatable {

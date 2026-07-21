@@ -3136,6 +3136,9 @@ final class ToggleView: NSView {
         appProfilesView.onRemove = { [weak self] instance in
             self?.confirmRemoveAppProfile(instance)
         }
+        appProfilesView.onChangeIcon = { [weak self] instance in
+            self?.changeAppProfileIcon(instance)
+        }
         appProfilesView.onChangeApp = { [weak self] _ in
             self?.showAppProfileAlert(
                 title: "No other supported app installed",
@@ -3523,9 +3526,13 @@ final class ToggleView: NSView {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
+        // Let the user make a fresh folder right here (e.g. a new "Klik PRO Data"
+        // on an external disk) instead of having to create it in Finder first.
+        panel.canCreateDirectories = true
         panel.prompt = "Choose"
-        panel.message = "Choose a folder to store new App Profiles. "
-            + "Pick a location outside the app, such as Documents or an external disk."
+        panel.message = "Choose or create a folder to store new App Profiles. "
+            + "Pick a location outside the app, such as Documents or an external disk. "
+            + "Use the New Folder button to make a new one."
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let path = url.standardizedFileURL.path
         if let reason = vaultPathRejectionReason(path) {
@@ -3588,8 +3595,14 @@ final class ToggleView: NSView {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
+        // Show hidden items so a data folder that lives in (or under) a dot-folder
+        // stays reachable; users can also toggle with Command-Shift-period.
+        panel.showsHiddenFiles = true
         panel.prompt = "Scan"
-        panel.message = "Choose an existing Klik PRO data folder to re-adopt the App Profiles it holds."
+        panel.message = "Choose the Klik PRO data folder to recover — the folder that "
+            + "contains \"vault.json\" (the one you set as your Data Folder). "
+            + "This is not the \".claude\"/\".codex\" links in your Home folder. "
+            + "Hidden items are shown; toggle them with Command-Shift-period."
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let path = url.standardizedFileURL.path
         if let reason = vaultPathRejectionReason(path) {
@@ -4083,6 +4096,88 @@ final class ToggleView: NSView {
         }
     }
 
+    private func changeAppProfileIcon(_ instance: AppProfileInstance) {
+        guard instance.launcherKind == .managed else { return }
+        guard !saveInProgress, !appProfileLifecycleInProgress else {
+            showAppProfileAlert(
+                title: "Please wait",
+                message: "Finish the current Save or App Profile change before changing an icon."
+            )
+            return
+        }
+        guard !hasUnsavedConfigurationChanges else {
+            showAppProfileAlert(
+                title: "Save current changes first",
+                message: "Save or restore the current mapping changes before changing an icon."
+            )
+            return
+        }
+        let panel = ChangeIconPanelView(instance: instance)
+        let alert = NSAlert()
+        alert.messageText = "Change icon for \(instance.label)"
+        alert.informativeText = "The original app is never modified."
+        alert.accessoryView = panel
+        alert.addButton(withTitle: "Apply")
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Reset to App Icon")
+        let response = alert.runModal()
+        let edit: AppProfileManager.IconEdit
+        switch response {
+        case .alertFirstButtonReturn:
+            guard let chosen = panel.currentEdit else {
+                showAppProfileAlert(
+                    title: "No image chosen",
+                    message: "Choose a PNG or ICO file, or pick Tint or Badge, before applying."
+                )
+                return
+            }
+            edit = chosen
+        case .alertThirdButtonReturn:
+            edit = .reset
+        default:
+            return
+        }
+
+        guard beginAppProfileLifecycle() else { return }
+        let currentConfig = persistedConfig
+        appProfileQueue.async { [weak self] in
+            guard let self else { return }
+            do {
+                let updated = try self.appProfileManager.updateManagedIcon(
+                    instanceID: instance.id,
+                    edit: edit,
+                    config: currentConfig
+                )
+                let applied = applySavedConfig()
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.config = updated
+                    self.persistedConfig = updated
+                    self.appProfilesView.setInstances(updated.instances)
+                    let isReset: Bool
+                    if case .reset = edit { isReset = true } else { isReset = false }
+                    self.appProfilesView.setStatus(
+                        applied
+                            ? (isReset ? "Icon reset to the app icon." : "Icon updated.")
+                            : "Icon changed; helper apply is pending.",
+                        color: applied ? .systemGreen : .systemOrange
+                    )
+                    self.refreshAppProfileHealth()
+                }
+            } catch let error as AppProfileManagerError {
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.showAppProfileAlert(
+                        title: "Icon was not changed",
+                        message: self.appProfileErrorMessage(error)
+                    )
+                }
+            } catch {
+                DispatchQueue.main.async { self.finishAppProfileLifecycle() }
+            }
+        }
+    }
+
     private func assignMouseButton(to instance: AppProfileInstance) {
         // Gate on a settled configuration, exactly like the other App Profile
         // lifecycle actions. This is what keeps the two sections consistent: the
@@ -4546,6 +4641,8 @@ final class ToggleView: NSView {
             return "The profile path, UUID ownership marker, or removal staging check failed. Data was not deleted."
         case .conversionUnavailable:
             return "Only one of the two known legacy external rows can be explicitly converted."
+        case .iconImageInvalid:
+            return "That image could not be used. Choose a square PNG or ICO at least 256×256 pixels."
         case .vaultUnavailable:
             return "No data folder is configured or mounted, so nothing could be scanned."
         case .vaultManifestInvalid:
