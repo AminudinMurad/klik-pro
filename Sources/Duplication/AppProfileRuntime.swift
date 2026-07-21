@@ -373,14 +373,16 @@ struct AppProfileRuntime {
             withExtendedLifetime(operationLock) {
                 completion(.failure(.ambiguousProcesses))
             }
-        case .complete(let pids) where pids.count == 1:
-            activate(
-                pid: pids[0],
-                context: context,
-                operationLock: operationLock,
-                completion: completion
-            )
         case .complete:
+            // Zero processes → launch fresh; exactly one → reopen the existing
+            // instance. Both go through openApplication with the profile's
+            // --user-data-dir and createsNewApplicationInstance, so an already-
+            // running (possibly windowless) Electron instance is told by its own
+            // single-instance lock to restore/create a window — matching the
+            // Dock/Launchpad launcher. A raw NSRunningApplication.activate only
+            // raised the app without reopening a window, so a menu-bar click on a
+            // windowless instance appeared to do nothing. The brief extra process
+            // a reopen spawns is absorbed by the settled re-scan above.
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.arguments = ["--user-data-dir=" + context.profileURL.path]
             configuration.environment = instance.environmentOverrides
