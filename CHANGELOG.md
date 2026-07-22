@@ -2,6 +2,17 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.3.1
+
+A focused assignment-linking fix for original apps and generated App Profiles.
+
+- **Original apps in Mappings** — the Open App selector now includes the installed
+  ChatGPT / Codex and Claude apps alongside generated App Profiles.
+- **Both tabs stay linked** — assignments made from Mappings immediately update App
+  Profiles, and assignments made from App Profiles immediately update Mappings.
+- **One cross-checked owner** — both tabs use the same ownership, conflict, move,
+  Force Release, and clear logic, so one physical button cannot drift between targets.
+
 ## 1.3.0
 
 Original ChatGPT and Claude apps join the App Profiles assignment experience without

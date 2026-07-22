@@ -271,6 +271,9 @@ private struct MouseButtonRoutingTests {
                "assigning a profile must release the original app from that button")
         expect(launchAssignmentOwner(of: .forward, in: unifiedAssignments) == .profile(profileID),
                "the shared owner lookup must report the managed profile")
+        expect(mouseButton(assignedTo: .profile(profileID), in: unifiedAssignments) == .forward
+               && mouseButton(assignedTo: .original(.chatGPT), in: unifiedAssignments) == nil,
+               "Mappings and App Profiles must read back the same profile assignment")
         unifiedAssignments = assigningMouseButton(
             .forward, to: .original(.chatGPT), in: unifiedAssignments
         )
@@ -279,6 +282,9 @@ private struct MouseButtonRoutingTests {
                "assigning the original app must release the managed profile")
         expect(launchAssignmentOwner(of: .forward, in: unifiedAssignments) == .original(.chatGPT),
                "the shared owner lookup must report the original app")
+        expect(mouseButton(assignedTo: .original(.chatGPT), in: unifiedAssignments) == .forward
+               && mouseButton(assignedTo: .profile(profileID), in: unifiedAssignments) == nil,
+               "Mappings and App Profiles must read back the same original-app assignment")
         unifiedAssignments = clearingMouseButton(
             from: .original(.chatGPT), in: unifiedAssignments
         )

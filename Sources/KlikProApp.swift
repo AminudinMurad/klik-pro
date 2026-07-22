@@ -622,14 +622,14 @@ final class RecordableShortcutRowView: NSView {
     let appPicker = NSPopUpButton(frame: .zero)
     var onToggleChange: ((Bool) -> Void)?
     var onComboChange: ((KeyCombo) -> Void)?
-    var onOpenAppChange: ((UUID?) -> Void)?
+    var onOpenAppChange: ((LaunchAssignmentTarget?) -> Void)?
     private let defaultCombo: KeyCombo
     private var linkedTarget: QuickLaunchTarget?
     private var linkedCombo: KeyCombo?
     private var linkedFeatureActive = false
     private var linkedTargetReadiness: QuickLaunchTargetReadiness = .appNotInstalled
-    private var appTargets: [AppProfileInstance] = []
-    private var assignedAppID: UUID?
+    private var appTargets: [(target: LaunchAssignmentTarget, label: String)] = []
+    private var assignedAppTarget: LaunchAssignmentTarget?
     private var updatingActionControls = false
     private var usesCompactTwoLineLayout = false
 
@@ -730,13 +730,17 @@ final class RecordableShortcutRowView: NSView {
         needsDisplay = true
     }
 
-    func setOpenAppOptions(_ instances: [AppProfileInstance], assignedID: UUID?) {
+    func setOpenAppOptions(
+        _ targets: [(target: LaunchAssignmentTarget, label: String)],
+        assignedTarget: LaunchAssignmentTarget?
+    ) {
         updatingActionControls = true
-        appTargets = instances
-        assignedAppID = assignedID
+        appTargets = targets
+        assignedAppTarget = assignedTarget
         appPicker.removeAllItems()
-        instances.forEach { appPicker.addItem(withTitle: $0.label) }
-        if let assignedID, let index = instances.firstIndex(where: { $0.id == assignedID }) {
+        targets.forEach { appPicker.addItem(withTitle: $0.label) }
+        if let assignedTarget,
+           let index = targets.firstIndex(where: { $0.target == assignedTarget }) {
             actionPicker.selectItem(at: 1)
             appPicker.selectItem(at: index)
             recorder.isHidden = true
@@ -761,7 +765,7 @@ final class RecordableShortcutRowView: NSView {
             onOpenAppChange?(nil)
         } else if let first = appTargets.first {
             appPicker.selectItem(at: 0)
-            onOpenAppChange?(first.id)
+            onOpenAppChange?(first.target)
         } else {
             NSSound.beep()
             actionPicker.selectItem(at: 0)
@@ -772,7 +776,7 @@ final class RecordableShortcutRowView: NSView {
         guard !updatingActionControls,
               appPicker.indexOfSelectedItem >= 0,
               appPicker.indexOfSelectedItem < appTargets.count else { return }
-        onOpenAppChange?(appTargets[appPicker.indexOfSelectedItem].id)
+        onOpenAppChange?(appTargets[appPicker.indexOfSelectedItem].target)
     }
 
     func setLinked(
@@ -781,7 +785,7 @@ final class RecordableShortcutRowView: NSView {
         specialFeatureActive: Bool = false,
         targetReadiness: QuickLaunchTargetReadiness = .appNotInstalled
     ) {
-        guard assignedAppID == nil else { return }
+        guard assignedAppTarget == nil else { return }
         linkedTarget = target
         linkedCombo = combo
         linkedFeatureActive = specialFeatureActive
@@ -1832,16 +1836,24 @@ final class SettingsContentView: NSView {
                 || $0.launcherKind == .managed
                 || FileManager.default.fileExists(atPath: $0.launcherPath)
         }.sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
+        let originalTargets: [(target: LaunchAssignmentTarget, label: String)] =
+            QuickLaunchTarget.allCases.compactMap { target in
+                guard quickLaunchTargetIsInstalled(target) else { return nil }
+                return (.original(target), target.title)
+            }
+        let appTargets = originalTargets + availableInstances.map {
+            (target: LaunchAssignmentTarget.profile($0.id), label: $0.label)
+        }
         let rows: [(QuickLaunchMouseButton, RecordableShortcutRowView)] = [
             (.middle, middleButtonRow), (.gesture, gestureButtonRow),
             (.forward, forwardRow), (.back, backRow),
         ]
         rows.forEach { button, row in
             row.setLinked(to: nil)
-            let assigned = config.instances.first {
-                $0.state == .active && $0.mouseButton == button
-            }
-            row.setOpenAppOptions(availableInstances, assignedID: assigned?.id)
+            row.setOpenAppOptions(
+                appTargets,
+                assignedTarget: launchAssignmentOwner(of: button, in: config)
+            )
         }
         _ = featureActive
     }
@@ -3366,17 +3378,17 @@ final class ToggleView: NSView {
             self?.recomputeConflictBadges()
         }
 
-        contentView.middleButtonRow.onOpenAppChange = { [weak self] id in
-            self?.setDualAppMapping(instanceID: id, button: .middle)
+        contentView.middleButtonRow.onOpenAppChange = { [weak self] target in
+            self?.setDualAppMapping(target: target, button: .middle)
         }
-        contentView.gestureButtonRow.onOpenAppChange = { [weak self] id in
-            self?.setDualAppMapping(instanceID: id, button: .gesture)
+        contentView.gestureButtonRow.onOpenAppChange = { [weak self] target in
+            self?.setDualAppMapping(target: target, button: .gesture)
         }
-        contentView.forwardRow.onOpenAppChange = { [weak self] id in
-            self?.setDualAppMapping(instanceID: id, button: .forward)
+        contentView.forwardRow.onOpenAppChange = { [weak self] target in
+            self?.setDualAppMapping(target: target, button: .forward)
         }
-        contentView.backRow.onOpenAppChange = { [weak self] id in
-            self?.setDualAppMapping(instanceID: id, button: .back)
+        contentView.backRow.onOpenAppChange = { [weak self] target in
+            self?.setDualAppMapping(target: target, button: .back)
         }
 
         contentView.chatGPTHotkeyRow.onComboChange = { [weak self] combo in
@@ -3459,23 +3471,24 @@ final class ToggleView: NSView {
             || controlState != persistedControlState
     }
 
-    private func setDualAppMapping(instanceID: UUID?, button: QuickLaunchMouseButton) {
-        let currentOwner = config.instances.first {
-            $0.state == .active && $0.mouseButton == button
-        }
-        let selected = instanceID.flatMap { id in
-            config.instances.first { $0.state == .active && $0.id == id }
-        }
-        let previousButton = selected?.mouseButton
-        let releasesDifferentOwner = currentOwner?.id != nil && currentOwner?.id != instanceID
+    private func setDualAppMapping(
+        target: LaunchAssignmentTarget?,
+        button: QuickLaunchMouseButton
+    ) {
+        let currentOwner = launchAssignmentOwner(of: button, in: config)
+        let previousButton = target.flatMap { mouseButton(assignedTo: $0, in: config) }
+        let releasesDifferentOwner = currentOwner != nil && currentOwner != target
         let movesSelectedApp = previousButton != nil && previousButton != button
         if releasesDifferentOwner || movesSelectedApp {
-            let releasedNames = [currentOwner?.label, movesSelectedApp ? selected?.label : nil]
-                .compactMap { $0 }
-                .reduce(into: [String]()) { names, name in
-                    if !names.contains(name) { names.append(name) }
-                }
-                .joined(separator: " and ")
+            var names: [String] = []
+            if let currentOwner {
+                names.append(launchAssignmentLabel(currentOwner, in: config))
+            }
+            if movesSelectedApp, let target {
+                let selectedName = launchAssignmentLabel(target, in: config)
+                if !names.contains(selectedName) { names.append(selectedName) }
+            }
+            let releasedNames = names.joined(separator: " and ")
             let alert = NSAlert()
             alert.alertStyle = .warning
             alert.messageText = "Force Release the current assignment?"
@@ -3488,29 +3501,10 @@ final class ToggleView: NSView {
             }
         }
 
-        config.instances.indices.forEach { index in
-            if config.instances[index].mouseButton == button
-                || (instanceID != nil && config.instances[index].id == instanceID) {
-                config.instances[index].mouseButton = nil
-            }
-        }
-        if config.chatGPTMouseButton == button { config.chatGPTMouseButton = nil }
-        if config.claudeMouseButton == button { config.claudeMouseButton = nil }
-        if let previousButton, selected?.legacyQuickLaunchTarget == .chatGPT {
-            if config.chatGPTMouseButton == previousButton { config.chatGPTMouseButton = nil }
-        }
-        if let previousButton, selected?.legacyQuickLaunchTarget == .claude {
-            if config.claudeMouseButton == previousButton { config.claudeMouseButton = nil }
-        }
-        if let selected {
-            if let target = selected.legacyQuickLaunchTarget {
-                switch target {
-                case .chatGPT: config.chatGPTMouseButton = button
-                case .claude: config.claudeMouseButton = button
-                }
-            } else if let index = config.instances.firstIndex(where: { $0.id == selected.id }) {
-                config.instances[index].mouseButton = button
-            }
+        if let target {
+            config = assigningMouseButton(button, to: target, in: config)
+        } else if let currentOwner {
+            config = clearingMouseButton(from: currentOwner, in: config)
         }
         config = normalizedQuickLaunchConfig(config)
         configurationDidChange()

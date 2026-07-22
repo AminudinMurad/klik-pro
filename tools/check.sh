@@ -654,7 +654,8 @@ grep -q 'recorder.setCombo(self.defaultCombo)' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'recordableCard     = NSRect(x: leftCardX' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'thumbWheelCard     = NSRect(x: leftCardX' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'actionPicker.addItems(withTitles: \["Shortcut", "Open App"\])' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'func setDualAppMapping(instanceID:' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'func setDualAppMapping(' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'target: LaunchAssignmentTarget?' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'static let dormantLinkGap: CGFloat = 6' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'recorderX - dormantLinkGap - dormantLinkIconSize' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'static let linkedFieldWidth: CGFloat = 360' "$ROOT/Sources/KlikProApp.swift"
@@ -710,7 +711,10 @@ grep -q 'specialFeatureToggleRow.isEnabled = available' "$ROOT/Sources/KlikProAp
 grep -q 'guard hasInstalledQuickLaunchTarget() else' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'chatGPTButtonPicker.setReadiness(chatGPTReadiness)' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'chatGPTHotkeyRow.setReadiness(chatGPTReadiness)' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'row.setOpenAppOptions(availableInstances, assignedID: assigned?.id)' \
+grep -q 'let originalTargets: \[(target: LaunchAssignmentTarget, label: String)\]' \
+  "$ROOT/Sources/KlikProApp.swift"
+grep -q 'row.setOpenAppOptions(' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'assignedTarget: launchAssignmentOwner(of: button, in: config)' \
   "$ROOT/Sources/KlikProApp.swift"
 grep -q 'quickLaunchMousePickerIsEnabled(' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'quickLaunchMouseSelectionIsAllowed(' "$ROOT/Sources/KlikProApp.swift"

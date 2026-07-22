@@ -131,10 +131,10 @@ Once unlocked, point new App Profiles at a durable data folder so their logins s
 
 ## Install (pre-built release)
 
-The current release is **Klik PRO v1.3.0 (build 14)**, provided as one universal
+The current release is **Klik PRO v1.3.1 (build 15)**, provided as one universal
 macOS app for Apple Silicon and Intel Macs. The DMG is the recommended download;
 the ZIP contains the same app as an alternative.
-**[Download Klik PRO v1.3.0](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.3.0).**
+**[Download Klik PRO v1.3.1](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.3.1).**
 
 > [!IMPORTANT]
 > **Update if you use a durable Data Folder.** Version 1.2.9 remembers previously
@@ -526,7 +526,7 @@ setups Klik PRO has been tested against:
 | | |
 |---|---|
 | macOS | 26.5.2 (build 25F84) |
-| Klik PRO | v1.3.0 (build 14), universal Apple Silicon + Intel build |
+| Klik PRO | v1.3.1 (build 15), universal Apple Silicon + Intel build |
 | Primary mouse | Logitech MX Master 3 (Mac edition), firmware `MPM19.01_0015`, connected over Bluetooth (BLE) |
 | Additional tested mouse | Logi M650, firmware `RBM16.10_0014` |
 | Vendor software / driver | None — no mouse driver or manufacturer software installed |
