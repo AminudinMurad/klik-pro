@@ -131,15 +131,15 @@ Once unlocked, point new App Profiles at a durable data folder so their logins s
 
 ## Install (pre-built release)
 
-The current release is **Klik PRO v1.2.7 (build 11)**, provided as one universal
+The current release is **Klik PRO v1.2.8 (build 12)**, provided as one universal
 macOS app for Apple Silicon and Intel Macs. The DMG is the recommended download;
 the ZIP contains the same app as an alternative.
-**[Download Klik PRO v1.2.7](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.2.7).**
+**[Download Klik PRO v1.2.8](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.2.8).**
 
 > [!IMPORTANT]
 > **Update if you use App Profiles.** Version 1.2.7 improves custom PNG app-profile
-> icon scaling in Dock and Launchpad, and keeps the v1.2.6 fix for generated ChatGPT
-> launchers that worked from the menu bar but not from Dock or Launchpad.
+> icon scaling in Dock and Launchpad. Version 1.2.8 also makes Deep Scan report
+> markerless leftover data folders instead of saying everything is clean.
 
 Klik PRO is **not notarized or signed with an Apple Developer ID** — it's an
 ad-hoc-signed, self-built utility — so a downloaded copy is quarantined and
@@ -513,7 +513,7 @@ setups Klik PRO has been tested against:
 | | |
 |---|---|
 | macOS | 26.5.2 (build 25F84) |
-| Klik PRO | v1.2.7 (build 11), universal Apple Silicon + Intel build |
+| Klik PRO | v1.2.8 (build 12), universal Apple Silicon + Intel build |
 | Primary mouse | Logitech MX Master 3 (Mac edition), firmware `MPM19.01_0015`, connected over Bluetooth (BLE) |
 | Additional tested mouse | Logi M650, firmware `RBM16.10_0014` |
 | Vendor software / driver | None — no mouse driver or manufacturer software installed |

@@ -3734,10 +3734,7 @@ final class ToggleView: NSView {
         // stays reachable; users can also toggle with Command-Shift-period.
         panel.showsHiddenFiles = true
         panel.prompt = "Scan"
-        panel.message = "Choose the Klik PRO data folder to recover — the folder that "
-            + "contains \"vault.json\" (the one you set as your Data Folder). "
-            + "This is not the \".claude\"/\".codex\" links in your Home folder. "
-            + "Hidden items are shown; toggle them with Command-Shift-period."
+        panel.message = "Choose the Klik PRO data folder that contains \"vault.json\"."
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let path = url.standardizedFileURL.path
         if let reason = vaultPathRejectionReason(path) {
@@ -4167,10 +4164,7 @@ final class ToggleView: NSView {
         appProfileQueue.async { [weak self] in
             guard let self else { return }
             let leftovers = self.appProfileManager.scanLauncherLeftovers(config: currentConfig)
-            // Only marker-owned orphaned data is auto-cleanable; markerless
-            // (needs-manual-review) data still fails closed and is not offered.
             let orphans = self.appProfileManager.scanOrphans(config: currentConfig)
-                .filter { $0.state == .orphanedData }
             let staleDockPaths = Self.staleKlikProDockTilePaths()
             DispatchQueue.main.async {
                 self.finishAppProfileLifecycle()
@@ -4188,7 +4182,10 @@ final class ToggleView: NSView {
         staleDockPaths: [String],
         config: KlikProConfig
     ) {
-        let total = leftovers.count + orphans.count + staleDockPaths.count
+        let cleanableOrphans = orphans.filter { $0.state == .orphanedData }
+        let reviewOrphans = orphans.filter { $0.state == .needsManualReview }
+        let cleanableTotal = leftovers.count + cleanableOrphans.count + staleDockPaths.count
+        let total = cleanableTotal + reviewOrphans.count
         guard total > 0 else {
             advancedView.setStatus("No leftovers found — everything is clean.", color: KlikProBrand.green)
             return
@@ -4203,8 +4200,11 @@ final class ToggleView: NSView {
             }
             lines.append("• \(kind): \(lo.url.lastPathComponent)")
         }
-        for o in orphans {
+        for o in cleanableOrphans {
             lines.append("• data folder: \(o.dataPaths.first?.lastPathComponent ?? o.instanceID.uuidString)")
+        }
+        for o in reviewOrphans {
+            lines.append("• manual review data folder: \(o.dataPaths.first?.lastPathComponent ?? o.instanceID.uuidString)")
         }
         for p in staleDockPaths {
             lines.append("• Dock tile: \((p as NSString).lastPathComponent)")
@@ -4216,7 +4216,22 @@ final class ToggleView: NSView {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "\(total) leftover item(s) found (\(sizeStr))"
+        if cleanableTotal == 0 {
+            alert.informativeText = lines.joined(separator: "\n")
+                + "\n\nThese folders no longer have Klik PRO ownership markers, so they need manual review before deletion."
+            alert.addButton(withTitle: "OK")
+            _ = alert.runModal()
+            advancedView.setStatus(
+                "\(reviewOrphans.count) data folder(s) need manual review before deletion.",
+                color: .systemOrange
+            )
+            return
+        }
+        let manualSuffix = reviewOrphans.isEmpty
+            ? ""
+            : "\n\n\(reviewOrphans.count) markerless data folder(s) need manual review and will not be auto-deleted."
         alert.informativeText = lines.joined(separator: "\n")
+            + manualSuffix
             + "\n\nMove to Trash is recoverable. Delete Permanently cannot be undone."
         alert.addButton(withTitle: "Move All to Trash")
         alert.addButton(withTitle: "Delete Permanently")
@@ -4239,7 +4254,7 @@ final class ToggleView: NSView {
             return
         }
         cleanScannedLeftovers(
-            leftovers: leftovers, orphans: orphans,
+            leftovers: leftovers, orphans: cleanableOrphans,
             staleDockPaths: staleDockPaths, mode: mode, config: config
         )
     }

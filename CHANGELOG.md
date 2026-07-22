@@ -2,6 +2,16 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.2.8
+
+A focused Advanced cleanup hotfix.
+
+- **Deep Scan reports markerless data folders** — UUID-named profile folders that
+  no longer have Klik PRO ownership markers are shown as manual-review leftovers
+  instead of letting Deep Scan report everything clean.
+- **Scan & Adopt picker width fixed** — the vault-folder picker now uses compact
+  wording so macOS no longer stretches the file picker across the screen.
+
 ## 1.2.7
 
 A focused polish update for App Profile custom icons and cleanup feedback.
