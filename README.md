@@ -220,6 +220,15 @@ section (each is also shown as a hover tooltip):
 | **Recheck** | Re-checks whether Klik PRO Helper currently has Accessibility permission. |
 | **Reset Access…** | Clears Klik PRO Helper's Accessibility permission and restarts the guided setup. |
 
+**After an update.** Klik PRO is ad-hoc signed, so each update changes the helper's
+code signature and macOS quietly drops its Accessibility grant — even though the old
+**Klik PRO Helper** entry may still look enabled. When that happens Klik PRO shows a
+short guidance dialog with a **Register Helper** button. Because the helper lives
+*inside* the app bundle (`Klik PRO.app/Contents/Helpers/`), it can't be added by hand
+with the **+** button in System Settings; **Register Helper** re-registers the current
+helper so macOS lists — and prompts for — the correct toggle right away. Then remove
+any stale **Klik PRO Helper** entry with **−** and turn the newly listed one on.
+
 Prefer to compile it yourself? See [Building](#building).
 
 ## Default shortcuts
