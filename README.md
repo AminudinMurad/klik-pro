@@ -133,6 +133,15 @@ macOS app for Apple Silicon and Intel Macs. The DMG is the recommended download;
 the ZIP contains the same app as an alternative.
 **[Download Klik PRO v1.2.2](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.2.2).**
 
+> [!IMPORTANT]
+> **Update from v1.2.1 if you use a selected App Profile Data Folder.** Version
+> 1.2.1 generated launchers that incorrectly required the default Application Support
+> path, so newly created profiles stored in a selected durable Data Folder could fail
+> to launch. Version 1.2.2 signs the exact validated storage location into new
+> launchers and refreshes older managed launchers when they are used, without moving
+> or changing their login data. Profiles kept in the default Application Support
+> location were not affected by this defect.
+
 Klik PRO is **not notarized or signed with an Apple Developer ID** — it's an
 ad-hoc-signed, self-built utility — so a downloaded copy is quarantined and
 Gatekeeper blocks it on first launch. That's expected for any non-notarized app.
@@ -302,11 +311,12 @@ same current profile icon immediately after a change. The remaining management
 actions and the **Menu Bar Icon** toggle stay on the App Profiles tab.
 
 For generated profiles, the gear menu groups **Rename**, **Change Icon**, and
-**Remove**. **Change Icon** accepts PNG or ICO artwork, offers six colour tints of the
-original app icon, and can add a coloured corner badge using the profile's initial;
-the live preview shows the result before it is applied. **Reset to App Icon** restores
-the source app artwork. Custom icon data is kept with the profile and survives
-durable-folder recovery; the original ChatGPT or Claude app remains untouched.
+**Remove from Klik PRO**. **Change Icon** accepts PNG or ICO artwork, offers six
+colour tints of the original app icon, and can add a coloured corner badge using the
+profile's initial; the live preview shows the result before it is applied. **Reset to
+App Icon** restores the source app artwork. Custom icon data is kept with the profile
+and survives durable-folder recovery; the original ChatGPT or Claude app remains
+untouched.
 
 The naming dialog includes an unchecked **Add launcher icon to Dock** option for
 users who want the generated launcher pinned immediately. Each row in **Your App
@@ -349,8 +359,8 @@ Profiles** with **Open** and **Assign Button**. Generated entries also offer
 **Rename** and **Remove from Klik PRO** — Remove deletes the generated launcher and
 managed entry, but keeps its login/profile data on disk for recovery. **Delete Data**
 in Advanced removes the launcher, managed entry, and validated profile data after
-offering Move to Trash or Delete Permanently. Assigning a button on either tab updates the other
-immediately. The four working mouse controls can each be set to a **Keyboard
+offering Move to Trash or Delete Permanently. Assigning a button on either tab updates
+the other immediately. The four working mouse controls can each be set to a **Keyboard
 Shortcut** or **Open App**, while thumb-wheel browser switching is unchanged. Only
 installed apps on Klik PRO's small, human-tested list are shown; there is no general
 app search, unsupported-app list, Browse flow, or Convert action.
