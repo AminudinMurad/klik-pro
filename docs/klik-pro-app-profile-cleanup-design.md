@@ -1,7 +1,7 @@
 # App Profiles — Data & Maintenance — design spec (v1.2.1)
 
 **Status:** design-only, for review. **No implementation, commit, push, tag, or
-release** until Aminudin approves and Codex-A signs off.
+release** until Aminudin approves and the independent review is complete.
 **Target:** v1.2.1. (Exact version metadata / build number is **not** promised
 here — it will be set when the implementation branch stamps `Info.plist`.)
 **Implementation base:** `origin/main` **`954540d`** (exact released v1.2.0), in
@@ -11,7 +11,7 @@ worktree `worktrees/codex-a-v1.2.1-data-maintenance` on branch
 **Supersedes:** the earlier narrower "orphan cleanup" draft (this file); that
 scope is folded in as Phase B.
 
-### Revision — Codex-A round 1 (all 8 points addressed)
+### Revision — independent review round 1 (all 8 points addressed)
 1. **Archived enforcement across every runtime consumer** — new §6.6 enumerates
    each consumer with `954540d` refs; assignments preserved for losslessness,
    runtime-ineligible while archived; Restore revalidates conflicts (§6.2).
@@ -33,7 +33,7 @@ scope is folded in as Phase B.
 
 ### Revision — owner override + Phase B implementation (2026-07-22)
 Authorized by Aminudin (plan approval this session). Records where the built
-Phase B intentionally departs from the text above; **pending Codex-A review**.
+Phase B intentionally departs from the text above; **pending independent review**.
 1. **Permanent delete is now a user-chosen mode** alongside Move to Trash. The
    delete confirmation offers **Move to Trash** (default, recoverable) **and**
    **Delete Permanently**. This deliberately overrides **I1** ("data is sacred —
@@ -55,7 +55,7 @@ Phase B intentionally departs from the text above; **pending Codex-A review**.
    lock). Record-bearing deletes still run the full two-pass scan. Listing a
    running orphan is harmless — `reclaimData` refuses it at the lock.
 
-### Revision — Codex-A round 2 (conditional approval; 4 final corrections)
+### Revision — independent review round 2 (conditional approval; 4 final corrections)
 1. **Archive crash consistency** — §6.1 reordered: **persist archived config first
    (commit point), no filesystem artifact touched before it**; then manifest; then
    stage + icon-preserving launcher removal; then references. Crash-after-persist →
@@ -195,7 +195,7 @@ version bump + defaulting, no row re-keyed, no data moved. `hotkey` and
 menu-bar display toggle and is cleared on archive (§6.1) — it is not a core
 assignment, so clearing it also satisfies I8.
 
-**Manifest v2 — a *complete* recovery recipe (Codex-A #2).**
+**Manifest v2 — a *complete* recovery recipe (review item #2).**
 Current `VaultManifestInstanceRecord`
 ([`VaultDataRoot.swift:107`](../Sources/Duplication/VaultDataRoot.swift)) omits
 lifecycle and icon state, and the custom icon lives outside the vault
@@ -236,7 +236,7 @@ VaultManifestInstanceRecord (v2):
 
 ---
 
-## 5. Health states & evidence-aware classification (Codex-A #2)
+## 5. Health states & evidence-aware classification (review item #2)
 
 Reconciliation is **computed** (never stored) by comparing each record to its
 artifacts, plus a bounded scan of the Klik PRO roots
@@ -289,12 +289,12 @@ launcher│    │                                   ▼
    Needs Manual Review (no marker) ── surfaced only
 ```
 
-### 6.1 Archive (Active → Recoverable Archived) — precise transaction (Codex-A #3, #4)
+### 6.1 Archive (Active → Recoverable Archived) — precise transaction (review items #3, #4)
 
 Archive is **data-read-only**, so it takes **no exclusive lock and no process
 scan** (removing the launcher bundle does not affect a running target app, which is
 a separate process — see I9). **Config persist is the commit point, and NO
-filesystem artifact is touched before it** (Codex-A round 2 #1): if persist fails,
+filesystem artifact is touched before it** (review round 2, item #1): if persist fails,
 the disk is untouched; if the process crashes *after* persist, startup
 reconciliation sees `archived` + an existing launcher and finishes the job. Ordered
 transaction:
@@ -339,10 +339,10 @@ transaction:
   marker/name-verified, symlink-rejecting) and removes them — decoupled from any
   single Archive so an old interrupted removal never lingers.
 
-### 6.2 Restore (Recoverable Archived → Healthy) — conflict revalidation (Codex-A #1)
+### 6.2 Restore (Recoverable Archived → Healthy) — conflict revalidation (review item #1)
 
 1. **Revalidate conflicts first** (cheap, no filesystem) via a **shared, pure
-   conflict evaluator** — NOT the view-controller helpers (Codex-A round 2 #3).
+   conflict evaluator** — NOT the view-controller helpers (review round 2, item #3).
    Phase A extracts the current conflict rules (duplicate hotkey, duplicate mouse
    button, reserved Command-Tab — today entangled in view-controller code around
    `recomputeConflictBadges` [`:2899`](../Sources/KlikProApp.swift) and
@@ -389,7 +389,7 @@ that becomes Orphaned Data). Confirmation required. Idempotent (absent → no-op
 Commit point is the config persist; the manifest update follows (surfaced no-op on
 failure — record already gone from config).
 
-### 6.5 Move Data to Trash (Orphaned Data / reclaim) — destructive (Codex-A #6)
+### 6.5 Move Data to Trash (Orphaned Data / reclaim) — destructive (review item #6)
 
 The only data-removal path. Uses an **injectable trash operation** (production:
 `FileManager.trashItem`; tests: a fake/temp destination — never the real Trash).
@@ -401,7 +401,7 @@ symlink escaping the roots; **exclusive** `ManagedInstanceLock`; **two-pass**
 [`:512`](../Sources/Duplication/AppProfileManager.swift)). Shows the planned paths
 + total size; explicit confirm.
 
-- **Artifact plan — non-overlapping owned roots (Codex-A round 2 #2):** build the
+- **Artifact plan — non-overlapping owned roots (review round 2, item #2):** build the
   move set, then **deduplicate and reject any ancestor/descendant overlap** before
   a single move:
   - **Vault instance:** trash the **owned `<Vault>/Instances/<UUID>` container
@@ -422,7 +422,7 @@ symlink escaping the roots; **exclusive** `ManagedInstanceLock`; **two-pass**
   what remains.
 - **Never** part of any "Clean All"; there is no bulk destructive action.
 
-### 6.6 Archived-state enforcement across runtime consumers (Codex-A #1)
+### 6.6 Archived-state enforcement across runtime consumers (review item #1)
 
 Archived rows keep their assignments in the record (I3) but are **ineligible at
 runtime** everywhere. Each consumer must exclude `state == .archived` (defense in
@@ -480,7 +480,7 @@ vault controls (already behind the padlock, unlocked via
 - Gear-menu everyday action changes from destructive "Remove…" to **"Archive…"**
   (reversible; alert explains record + data are preserved and it can be restored).
   True deletion lives only in Data & Maintenance.
-- **Auto-refresh (Codex-A #5):** the `didBecomeActiveNotification` hook
+- **Auto-refresh (review item #5):** the `didBecomeActiveNotification` hook
   ([`KlikProApp.swift:2901`](../Sources/KlikProApp.swift)) and the "Refresh App
   List" handler must **recompute the full reconciliation inventory** (the new
   states, not just the runtime-health dict) and push it to **both** views — the
@@ -515,10 +515,10 @@ vault controls (already behind the padlock, unlocked via
    `customIcon`) + vault-owned custom-icon asset + migration/fallback.
 2. `updateVaultManifest` #6 fix (include archived, data-bearing records).
 3. Reconciliation engine + evidence-aware classification (6 states); full-inventory
-   auto-refresh into both views (Codex-A #5).
+   auto-refresh into both views (review item #5).
 4. **Archived enforcement across all runtime consumers** (§6.6) + card badges +
    Open→Repair routing.
-5. Icon-preserving archive launcher removal (Codex-A #4).
+5. Icon-preserving archive launcher removal (review item #4).
 6. Advanced ▸ Data & Maintenance: **Scan**, **Repair**, **Archive**, **Restore**
    (with conflict revalidation via the extracted shared pure evaluator, §6.2).
    Gear "Remove…" → "Archive…". Reconciliation also sweeps legacy stale staging
@@ -551,7 +551,7 @@ or presses Scan:
 
 **B. Archive / Restore round-trip.**
 - Archive keeps the row (`state=archived`), data, recipe, custom icon (asset
-  preserved — Codex-A #4), `menuColor`, `hotkey`, `mouseButton`, and the vault
+  preserved — review item #4), `menuColor`, `hotkey`, `mouseButton`, and the vault
   manifest record; removes the launcher and **only** the exact Dock entry (a
   sibling entry with a similar name is untouched); menu-bar pin cleared.
 - **Archived row is runtime-ineligible everywhere** (§6.6): no hotkey/mouse routing,
@@ -607,9 +607,9 @@ or presses Scan:
 - **Legacy staging sweep**: an orphaned `.<UUID>-…-removing-…` bundle under the
   Launchers root → reconciliation removes it (UUID/marker/name-verified,
   symlink-rejecting); a non-matching hidden dir is left untouched.
-- **Icon-preserving removal** (Codex-A #4): archive removal keeps
+- **Icon-preserving removal** (review item #4): archive removal keeps
   `CustomIcons/<UUID>.icns` / vault-owned asset; the permanent removal drops it.
-- **Shared conflict evaluator** (Codex-A r2 #3): `appProfileAssignmentConflicts`
+- **Shared conflict evaluator** (review round 2, item #3): `appProfileAssignmentConflicts`
   is pure (no AppKit), unit-tested directly (duplicate hotkey, duplicate mouse
   button, reserved Command-Tab, archived excluded), and is the **same** entry point
   the UI badges and Restore call.
@@ -626,7 +626,7 @@ or presses Scan:
   (never real Trash); marker-gated; lock-contention / process-referencing /
   incomplete-scan → fail closed, nothing moved; **partial-result reporting** when
   some artifacts move and some fail; `trashItem` failure → surfaced no-op.
-- **Non-overlapping artifact plan** (Codex-A r2 #2): vault instance → the plan is
+- **Non-overlapping artifact plan** (review round 2, item #2): vault instance → the plan is
   exactly one path (`<Vault>/Instances/<UUID>`), never the container + its
   children; Application Support → only independent roots
   (`Profiles/<UUID>`, `CodexHomes/<UUID>`, `CustomIcons/<UUID>.icns`); a fixture
@@ -652,7 +652,7 @@ or presses Scan:
   `build/check-20260722-014354`. Preserve v1.2.0 behaviour (Archive is a refinement
   of the existing `remove(deleteProfileData:false)` path — keep row + manifest
   record + custom-icon asset, plus surgical reference cleanup — not a rewrite).
-- Sequence: Aminudin review → **Codex-A independent review** → Aminudin authorizes
+- Sequence: Aminudin review → **independent technical review** → Aminudin authorizes
   implementation → build Phase A → review → on-machine test → Phase B likewise.
   **Aminudin merges**; nothing pushed/tagged/released without explicit approval.
 

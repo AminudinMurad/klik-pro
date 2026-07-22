@@ -782,6 +782,41 @@ struct AppProfileManager {
         }
     }
 
+    /// The UUIDs of all profiles Klik PRO still tracks — config records plus any
+    /// vault-manifest entries — so a leftover scan never flags a live profile.
+    private func activeInstanceIDs(config: KlikProConfig) -> Set<UUID> {
+        var ids = Set(config.instances.map { $0.id })
+        if let vaultRoot = generator.vaultRootURL,
+           let manifest = VaultManifest.read(vaultRoot: vaultRoot) {
+            ids.formUnion(manifest.instances.map { $0.id })
+        }
+        return ids
+    }
+
+    /// Deep scan for orphaned launcher/metadata leftovers (custom-icon copies,
+    /// lock files, generated launcher bundles) whose UUID no longer maps to a
+    /// tracked profile. Read-only. Orphaned data folders are surfaced separately
+    /// by `scanOrphans`.
+    func scanLauncherLeftovers(config: KlikProConfig) -> [LauncherGenerator.LauncherLeftover] {
+        generator.scanLauncherLeftovers(activeIDs: activeInstanceIDs(config: config))
+    }
+
+    /// Removes one scanned launcher/metadata leftover (ownership re-validated by
+    /// the generator immediately before the op).
+    @discardableResult
+    func removeLauncherLeftover(
+        _ leftover: LauncherGenerator.LauncherLeftover,
+        mode: DataRemovalMode
+    ) throws -> URL? {
+        try generator.removeLauncherLeftover(leftover, mode: mode)
+    }
+
+    /// Best-effort Launch Services cleanup for a removed managed launcher path,
+    /// so Launchpad and Spotlight drop the stale entry after Delete Data / Remove.
+    func unregisterLauncherFromLaunchServices(at url: URL) {
+        generator.unregisterLauncherFromLaunchServices(at: url)
+    }
+
     /// Builds a `DataRemovalTarget` for an existing config record (direct delete
     /// on a visible maintenance row). Only artifacts that actually exist on disk
     /// are included.
@@ -825,6 +860,12 @@ struct AppProfileManager {
                 plan.append(DataRemovalArtifact(
                     url: container.standardizedFileURL, kind: .vaultContainer
                 ))
+            }
+            // The custom-icon copy lives at the storage-independent App Support
+            // path, outside the vault container, so it must be listed explicitly.
+            let vaultIcon = generator.customIconURL(for: instanceID).standardizedFileURL
+            if fileManager.fileExists(atPath: vaultIcon.path) {
+                plan.append(DataRemovalArtifact(url: vaultIcon, kind: .customIcon))
             }
         case .applicationSupport:
             let profile = generator.profileURL(for: instanceID).standardizedFileURL
@@ -940,6 +981,7 @@ struct AppProfileManager {
             if persist(updated) {
                 generator.removeHomeSymlinks(for: target.instanceID, storage: target.storage)
                 if wasVault { updateVaultManifest(config: updated) }
+                generator.removeManagedInstanceLock(for: target.instanceID)
             } else {
                 updated = config
             }
@@ -1061,6 +1103,7 @@ struct AppProfileManager {
         // The row is gone, so its visible home symlink goes too. The sibling
         // home itself keeps M1's retain-for-recovery behavior.
         generator.removeHomeSymlinks(for: instanceID, storage: instance.storage)
+        generator.removeManagedInstanceLock(for: instanceID)
         if instance.storage == .vault {
             updateVaultManifest(config: updated)
         }

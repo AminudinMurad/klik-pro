@@ -189,6 +189,7 @@ private struct AppProfilesFoundationTests {
         testOrphanScanClassifiesRecordlessData()
         testReclaimDataTrashPermanentAndFailClosed()
         testReclaimDataMultiArtifactPartialAndMarkerless()
+        testLauncherLeftoverScanAndTrashAreOwnershipGated()
         testDataRootWiringFactorySelectsGenerator()
         testSettledProcessScanResolvesTransientAmbiguity()
         print("App Profiles foundation tests passed")
@@ -3476,6 +3477,49 @@ private struct AppProfilesFoundationTests {
                "a markerless target must never be fully removed")
         expect(FileManager.default.fileExists(atPath: markerlessDir.path),
                "a markerless folder must survive a reclaim attempt (fail closed)")
+    }
+
+    /// Deep-scan metadata candidates must be exact UUID-keyed Klik PRO paths,
+    /// exclude every active UUID, and use the injected reversible Trash op.
+    private static func testLauncherLeftoverScanAndTrashAreOwnershipGated() {
+        let root = temporaryDirectory("leftover-scan")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let support = root.appendingPathComponent("Support", isDirectory: true)
+        let trashSpy = TrashSpy(destination: root.appendingPathComponent("Trash"))
+        let generator = LauncherGenerator(
+            applicationSupportURL: support,
+            trashItem: { try trashSpy.trash($0) }
+        )
+        let orphanID = UUID()
+        let activeID = UUID()
+        let orphanIcon = generator.customIconURL(for: orphanID)
+        let activeIcon = generator.customIconURL(for: activeID)
+        let orphanLock = generator.managedInstanceLockURL(for: orphanID)
+        let malformedIcon = orphanIcon.deletingLastPathComponent()
+            .appendingPathComponent("not-a-uuid.icns")
+        for url in [orphanIcon, activeIcon, orphanLock, malformedIcon] {
+            try! FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
+            try! Data("fixture".utf8).write(to: url)
+        }
+
+        let found = generator.scanLauncherLeftovers(activeIDs: [activeID])
+        expect(found.count == 2,
+               "deep scan must find only the orphan UUID's exact icon and lock paths")
+        expect(Set(found.map(\.instanceID)) == [orphanID],
+               "active and malformed metadata must never be reported as leftovers")
+        expect(!found.contains { $0.url == activeIcon || $0.url == malformedIcon },
+               "ownership gating must exclude active and non-UUID filenames")
+
+        for leftover in found {
+            _ = try! generator.removeLauncherLeftover(leftover, mode: .trash)
+        }
+        expect(trashSpy.moved.count == 2,
+               "Trash cleanup must route every scanned metadata item through the injected op")
+        expect(FileManager.default.fileExists(atPath: activeIcon.path)
+               && FileManager.default.fileExists(atPath: malformedIcon.path),
+               "cleanup must leave excluded active and malformed files untouched")
     }
 
     /// Phase 2 wiring decision: `makeLauncherGenerator(forDataRoot:)` is the one

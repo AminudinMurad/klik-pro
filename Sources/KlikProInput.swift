@@ -13,7 +13,12 @@ private let eventLogPath = NSString(
     string: "~/Library/Logs/klik-pro-events.log"
 ).expandingTildeInPath
 private let config = KlikProConfigStore.load()
-private let appProfileRuntime = AppProfileRuntime()
+// The runtime must be wired to the durable data-folder root, or vault-storage
+// managed profiles fail every readiness check with `vaultUnavailable` and never
+// receive a menu-bar icon. Mirror the app's `makeLauncherGenerator(forDataRoot:)`.
+private let appProfileRuntime = AppProfileRuntime(
+    generator: makeLauncherGenerator(forDataRoot: config.dataRoot)
+)
 // This process owns mouse mappings, the persistent status item, and optional
 // Quick Launch. Its Special Feature state is read from config at startup; the settings
 // app restarts the same helper after a saved toggle change.

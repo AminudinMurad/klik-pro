@@ -387,10 +387,11 @@ app search, unsupported-app list, Browse flow, or Convert action.
 
 The **Advanced** tab is lock-gated: because its options change where App Profile data
 lives on disk, clicking the padlock shows a risk confirmation before anything unlocks.
-Once unlocked it provides two things — a **durable data folder** for App Profile
-storage, and **App Profile Maintenance**, where every managed profile is classified
-and offered a single safe action. Accessibility and other macOS permissions live on
-the **Settings** tab, not here.
+Once unlocked it provides a **durable data folder** for App Profile storage,
+**App Profile Maintenance**, where every managed profile is classified and offered a
+single safe action, and **Deep Scan for Leftovers** for safely finding owned artifacts
+whose profiles are no longer tracked. Accessibility and other macOS permissions live
+on the **Settings** tab, not here.
 
 ### Repair, archive, and restore
 
@@ -429,6 +430,13 @@ confirmation; ambiguous, markerless, or in-use data fails closed. The configurat
 remains the source of truth, while the vault
 manifest and generated launchers are derived state that Klik PRO safely reconciles
 after an interrupted operation or relaunch.
+
+**Deep Scan for Leftovers** checks only Klik PRO-owned locations and UUID-keyed
+artifacts. It can find orphaned profile folders, persisted custom-icon copies, lock
+files, safely generated launchers, and stale Dock tiles pointing directly into Klik
+PRO's managed launcher folder. Results can be moved to Trash, or permanently deleted
+after a second destructive confirmation. Active profiles, arbitrary apps, markerless
+data, and paths outside Klik PRO's controlled roots are excluded.
 
 ### How the durable data folder works
 

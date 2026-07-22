@@ -2862,7 +2862,9 @@ final class ToggleView: NSView {
         // `self.appProfileRuntime` is unreachable during phase-1 initialization, so probe
         // managed launchability through a locally constructed runtime (it is stateless).
         // Preview rendering must stay off the filesystem, so it never consults health.
-        let initialRuntime = AppProfileRuntime()
+        let initialRuntime = AppProfileRuntime(
+            generator: makeLauncherGenerator(forDataRoot: loadedConfig.dataRoot)
+        )
         let initialLaunchableInstanceIDs = launchableAppProfileInstanceIDs(
             in: loadedConfig,
             instanceIsLaunchable: { instance in
@@ -3263,6 +3265,9 @@ final class ToggleView: NSView {
         }
         advancedView.onScanAndAdopt = { [weak self] in
             self?.scanAndAdoptVaultFolder()
+        }
+        advancedView.onDeepScan = { [weak self] in
+            self?.performDeepScanForLeftovers()
         }
         advancedView.onRepair = { [weak self] instance in
             self?.repairAppProfile(instance)
@@ -3963,12 +3968,81 @@ final class ToggleView: NSView {
             )
             return
         }
-        let target = appProfileManager.dataRemovalTarget(for: instance)
-        presentDataRemovalChoice(
-            title: "Delete \(instance.label)'s profile data?",
-            target: target,
-            statusLabel: instance.label
-        )
+        // Two clear options. Both remove the launcher and clear all three icon
+        // places (Dock, Launchpad, menu bar); they differ only in whether the
+        // login/profile data is kept for recovery or erased.
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Remove \(instance.label)?"
+        alert.informativeText =
+            "Remove Icons removes the generated launcher and clears its Dock, "
+            + "Launchpad, and menu-bar icons — but keeps the login/profile data on "
+            + "disk so you can recover the profile later.\n\n"
+            + "Delete All Data does the same and also erases the login/profile data "
+            + "(you can choose Move to Trash or Delete Permanently)."
+        alert.addButton(withTitle: "Remove Icons (Keep Data)")
+        alert.addButton(withTitle: "Delete All Data…")
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            performManagedRemovalKeepingData(instance)
+        case .alertSecondButtonReturn:
+            let target = appProfileManager.dataRemovalTarget(for: instance)
+            presentDataRemovalChoice(
+                title: "Delete \(instance.label)'s profile data?",
+                target: target,
+                statusLabel: instance.label,
+                launcherPath: instance.launcherPath
+            )
+        default:
+            return
+        }
+    }
+
+    /// Option 1 of the removal choice: remove the launcher + all three icon
+    /// places, but keep the login/profile data on disk for recovery.
+    private func performManagedRemovalKeepingData(_ instance: AppProfileInstance) {
+        guard beginAppProfileLifecycle() else {
+            showAppProfileAlert(
+                title: "Please wait",
+                message: "Finish the current Save or App Profile change before removing this profile."
+            )
+            return
+        }
+        let currentConfig = persistedConfig
+        advancedView.setStatus("Removing \(instance.label)…")
+        appProfileQueue.async { [weak self] in
+            guard let self else { return }
+            do {
+                let result = try self.appProfileManager.remove(
+                    instanceID: instance.id,
+                    config: currentConfig,
+                    deleteProfileData: false
+                )
+                self.cleanupRemovedLauncherRegistration(launcherPath: instance.launcherPath)
+                _ = applySavedConfig()
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.config = result.config
+                    self.persistedConfig = result.config
+                    self.appProfilesView.setInstances(result.config.instances)
+                    self.advancedView.setStatus(
+                        "\(instance.label) removed. Login data kept on disk for recovery.",
+                        color: KlikProBrand.green
+                    )
+                    self.refreshAppProfileHealth()
+                    self.needsDisplay = true
+                }
+            } catch let error as AppProfileManagerError {
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.advancedView.setStatus(self.appProfileErrorMessage(error), color: .systemRed)
+                    self.refreshAppProfileHealth()
+                }
+            } catch {
+                DispatchQueue.main.async { self.finishAppProfileLifecycle() }
+            }
+        }
     }
 
     private func confirmDeleteOrphanData(_ orphan: OrphanFinding) {
@@ -3994,7 +4068,8 @@ final class ToggleView: NSView {
     private func presentDataRemovalChoice(
         title: String,
         target: DataRemovalTarget,
-        statusLabel: String
+        statusLabel: String,
+        launcherPath: String? = nil
     ) {
         guard !target.artifacts.isEmpty else {
             advancedView.setStatus("Nothing to delete — no data found.", color: .appTextSecondary)
@@ -4043,6 +4118,9 @@ final class ToggleView: NSView {
                 let result = try self.appProfileManager.reclaimData(
                     target: target, config: currentConfig, mode: mode
                 )
+                if result.allRemoved, let launcherPath {
+                    self.cleanupRemovedLauncherRegistration(launcherPath: launcherPath)
+                }
                 let applied = applySavedConfig()
                 DispatchQueue.main.async {
                     self.finishAppProfileLifecycle()
@@ -4063,6 +4141,168 @@ final class ToggleView: NSView {
                 }
             } catch {
                 DispatchQueue.main.async { self.finishAppProfileLifecycle() }
+            }
+        }
+    }
+
+    // MARK: Deep scan for leftovers
+
+    private func performDeepScanForLeftovers() {
+        guard !hasUnsavedConfigurationChanges else {
+            showAppProfileAlert(
+                title: "Save current changes first",
+                message: "Save or restore your current changes before scanning for leftovers."
+            )
+            return
+        }
+        guard beginAppProfileLifecycle() else {
+            showAppProfileAlert(
+                title: "Please wait",
+                message: "Finish the current Save or App Profile change before scanning."
+            )
+            return
+        }
+        let currentConfig = persistedConfig
+        advancedView.setStatus("Scanning for leftovers…")
+        appProfileQueue.async { [weak self] in
+            guard let self else { return }
+            let leftovers = self.appProfileManager.scanLauncherLeftovers(config: currentConfig)
+            // Only marker-owned orphaned data is auto-cleanable; markerless
+            // (needs-manual-review) data still fails closed and is not offered.
+            let orphans = self.appProfileManager.scanOrphans(config: currentConfig)
+                .filter { $0.state == .orphanedData }
+            let staleDockPaths = Self.staleKlikProDockTilePaths()
+            DispatchQueue.main.async {
+                self.finishAppProfileLifecycle()
+                self.presentDeepScanResults(
+                    leftovers: leftovers, orphans: orphans,
+                    staleDockPaths: staleDockPaths, config: currentConfig
+                )
+            }
+        }
+    }
+
+    private func presentDeepScanResults(
+        leftovers: [LauncherGenerator.LauncherLeftover],
+        orphans: [OrphanFinding],
+        staleDockPaths: [String],
+        config: KlikProConfig
+    ) {
+        let total = leftovers.count + orphans.count + staleDockPaths.count
+        guard total > 0 else {
+            advancedView.setStatus("No leftovers found — everything is clean.", color: KlikProBrand.green)
+            return
+        }
+        var lines: [String] = []
+        for lo in leftovers {
+            let kind: String
+            switch lo.kind {
+            case .customIcon: kind = "custom icon"
+            case .lock: kind = "lock file"
+            case .launcher: kind = "launcher"
+            }
+            lines.append("• \(kind): \(lo.url.lastPathComponent)")
+        }
+        for o in orphans {
+            lines.append("• data folder: \(o.dataPaths.first?.lastPathComponent ?? o.instanceID.uuidString)")
+        }
+        for p in staleDockPaths {
+            lines.append("• Dock tile: \((p as NSString).lastPathComponent)")
+        }
+        let size = leftovers.reduce(Int64(0)) { $0 + $1.sizeBytes }
+            + orphans.reduce(Int64(0)) { $0 + $1.sizeBytes }
+        let sizeStr = ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "\(total) leftover item(s) found (\(sizeStr))"
+        alert.informativeText = lines.joined(separator: "\n")
+            + "\n\nMove to Trash is recoverable. Delete Permanently cannot be undone."
+        alert.addButton(withTitle: "Move All to Trash")
+        alert.addButton(withTitle: "Delete Permanently")
+        alert.addButton(withTitle: "Cancel")
+        let mode: DataRemovalMode
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            mode = .trash
+        case .alertSecondButtonReturn:
+            let confirm = NSAlert()
+            confirm.alertStyle = .critical
+            confirm.messageText = "Permanently delete \(total) leftover item(s)?"
+            confirm.informativeText = "This cannot be undone. Items will not be moved to the Trash."
+            confirm.addButton(withTitle: "Cancel")
+            let destroy = confirm.addButton(withTitle: "Delete Permanently")
+            destroy.hasDestructiveAction = true
+            guard confirm.runModal() == .alertSecondButtonReturn else { return }
+            mode = .permanent
+        default:
+            return
+        }
+        cleanScannedLeftovers(
+            leftovers: leftovers, orphans: orphans,
+            staleDockPaths: staleDockPaths, mode: mode, config: config
+        )
+    }
+
+    private func cleanScannedLeftovers(
+        leftovers: [LauncherGenerator.LauncherLeftover],
+        orphans: [OrphanFinding],
+        staleDockPaths: [String],
+        mode: DataRemovalMode,
+        config: KlikProConfig
+    ) {
+        guard beginAppProfileLifecycle() else { return }
+        advancedView.setStatus(mode == .trash ? "Moving leftovers to Trash…" : "Deleting leftovers…")
+        appProfileQueue.async { [weak self] in
+            guard let self else { return }
+            var removed = 0
+            var failed = 0
+            var working = config
+            for lo in leftovers {
+                do {
+                    _ = try self.appProfileManager.removeLauncherLeftover(lo, mode: mode)
+                    if lo.kind == .launcher { Self.removeDockLauncherIfPresent(lo.url) }
+                    removed += 1
+                } catch {
+                    failed += 1
+                }
+            }
+            for orphan in orphans {
+                do {
+                    let target = self.appProfileManager.dataRemovalTarget(for: orphan)
+                    let result = try self.appProfileManager.reclaimData(
+                        target: target, config: working, mode: mode
+                    )
+                    working = result.config
+                    if result.allRemoved { removed += 1 } else { failed += 1 }
+                } catch {
+                    failed += 1
+                }
+            }
+            for path in staleDockPaths {
+                if Self.removeDockLauncherIfPresent(
+                    URL(fileURLWithPath: path, isDirectory: true)
+                ) {
+                    removed += 1
+                } else {
+                    failed += 1
+                }
+            }
+            _ = applySavedConfig()
+            DispatchQueue.main.async {
+                self.finishAppProfileLifecycle()
+                self.config = working
+                self.persistedConfig = working
+                self.appProfilesView.setInstances(working.instances)
+                let verb = mode == .trash ? "moved to Trash" : "deleted"
+                self.advancedView.setStatus(
+                    failed == 0
+                        ? "\(removed) leftover item(s) \(verb)."
+                        : "\(removed) \(verb); \(failed) could not be removed and remain on disk.",
+                    color: failed == 0 ? KlikProBrand.green : .systemOrange
+                )
+                self.refreshAppProfileHealth()
+                self.needsDisplay = true
             }
         }
     }
@@ -4365,6 +4605,43 @@ final class ToggleView: NSView {
         return output.contains(encoded)
     }
 
+    /// Returns missing Dock tiles that point into Klik PRO's exact managed
+    /// launcher directory. The bundle must already be absent: live launchers,
+    /// arbitrary apps elsewhere, and malformed/non-file Dock entries are never
+    /// offered for cleanup.
+    private static func staleKlikProDockTilePaths() -> [String] {
+        let managedRoot = URL(
+            fileURLWithPath: NSHomeDirectory(), isDirectory: true
+        )
+        .appendingPathComponent("Applications/Klik PRO", isDirectory: true)
+        .standardizedFileURL
+        let appID = "com.apple.dock" as CFString
+        guard let rawEntries = CFPreferencesCopyAppValue(
+            "persistent-apps" as CFString,
+            appID
+        ) as? [[String: Any]] else {
+            return []
+        }
+
+        var paths = Set<String>()
+        for entry in rawEntries {
+            guard let tileData = entry["tile-data"] as? [String: Any],
+                  let fileData = tileData["file-data"] as? [String: Any],
+                  let storedPath = fileData["_CFURLString"] as? String,
+                  let path = dockEntryFilePath(storedPath) else {
+                continue
+            }
+            let url = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+            guard url.pathExtension.lowercased() == "app",
+                  url.deletingLastPathComponent() == managedRoot,
+                  !FileManager.default.fileExists(atPath: url.path) else {
+                continue
+            }
+            paths.insert(url.path)
+        }
+        return paths.sorted()
+    }
+
     private static func renameDockLauncherIfPresent(
         from previousURL: URL,
         to updatedURL: URL
@@ -4406,6 +4683,48 @@ final class ToggleView: NSView {
         guard CFPreferencesAppSynchronize(appID) else { return .failed }
         _ = runProcess("/usr/bin/killall", ["Dock"])
         return dockPersistentAppsContain(path: updatedPath) ? .updated : .failed
+    }
+
+    /// Removes a removed managed launcher's pinned Dock tile, if the user pinned
+    /// one, so a deleted profile does not leave a stale/broken Dock icon. Matches
+    /// the same percent-encoded path logic as the rename rewrite. No-op when no
+    /// tile references the path.
+    @discardableResult
+    private static func removeDockLauncherIfPresent(_ launcherURL: URL) -> Bool {
+        let targetPath = launcherURL.standardizedFileURL.path
+        let appID = "com.apple.dock" as CFString
+        guard let rawEntries = CFPreferencesCopyAppValue(
+            "persistent-apps" as CFString,
+            appID
+        ) as? [[String: Any]] else {
+            return false
+        }
+        var removed = false
+        let filtered = rawEntries.filter { entry in
+            guard let tileData = entry["tile-data"] as? [String: Any],
+                  let fileData = tileData["file-data"] as? [String: Any],
+                  let storedPath = fileData["_CFURLString"] as? String,
+                  dockEntryFilePath(storedPath) == targetPath else {
+                return true
+            }
+            removed = true
+            return false
+        }
+        guard removed else { return true }
+        CFPreferencesSetAppValue("persistent-apps" as CFString, filtered as CFArray, appID)
+        guard CFPreferencesAppSynchronize(appID) else { return false }
+        _ = runProcess("/usr/bin/killall", ["Dock"])
+        return !dockPersistentAppsContain(path: targetPath)
+    }
+
+    /// Clears the macOS launcher registration left behind after a managed profile
+    /// is removed (Delete Data or Remove from Klik PRO): the pinned Dock tile and
+    /// the Launch Services / Launchpad entry. Best-effort and idempotent.
+    private func cleanupRemovedLauncherRegistration(launcherPath: String) {
+        guard !launcherPath.isEmpty else { return }
+        let url = URL(fileURLWithPath: launcherPath, isDirectory: true)
+        Self.removeDockLauncherIfPresent(url)
+        appProfileManager.unregisterLauncherFromLaunchServices(at: url)
     }
 
     private static func runProcess(_ executable: String, _ arguments: [String]) -> Int32 {
@@ -4962,6 +5281,7 @@ final class ToggleView: NSView {
                     config: currentConfig,
                     deleteProfileData: false
                 )
+                self.cleanupRemovedLauncherRegistration(launcherPath: instance.launcherPath)
                 _ = applySavedConfig()
                 DispatchQueue.main.async {
                     self.finishAppProfileLifecycle()

@@ -996,6 +996,132 @@ struct LauncherGenerator {
         fileManager.fileExists(atPath: customIconURL(for: id).path)
     }
 
+    /// The per-instance advisory lock file (see `ManagedInstanceLock`). It is
+    /// coordination metadata rather than owned data, so it is cleaned up
+    /// best-effort only after an instance has been fully removed.
+    func managedInstanceLockURL(for id: UUID) -> URL {
+        applicationSupportURL
+            .appendingPathComponent("Locks", isDirectory: true)
+            .appendingPathComponent(id.uuidString.uppercased() + ".lock")
+    }
+
+    func removeManagedInstanceLock(for id: UUID) {
+        try? fileManager.removeItem(at: managedInstanceLockURL(for: id))
+    }
+
+    /// Best-effort Launch Services unregistration for a removed managed launcher
+    /// path, so Launchpad and Spotlight drop the stale entry. Guarded to the
+    /// visible launchers root, exactly like the removal path's own cleanup.
+    func unregisterLauncherFromLaunchServices(at url: URL) {
+        refreshLaunchServicesUnregistration(for: url)
+    }
+
+    /// Reads a generated launcher's baked instance UUID from its bundle
+    /// identifier (`local.klik-pro.launcher.i<uuid-no-dashes>`). Returns nil for
+    /// anything that is not a Klik PRO-owned generated launcher.
+    private func launcherInstanceID(at url: URL) -> UUID? {
+        let infoURL = url.appendingPathComponent("Contents/Info.plist")
+        guard let data = fileManager.contents(atPath: infoURL.path),
+              let info = try? PropertyListSerialization.propertyList(
+                from: data, options: [], format: nil
+              ) as? [String: Any],
+              let bundleID = info["CFBundleIdentifier"] as? String else { return nil }
+        let prefix = "local.klik-pro.launcher.i"
+        guard bundleID.hasPrefix(prefix) else { return nil }
+        let hex = String(bundleID.dropFirst(prefix.count))
+        guard hex.count == 32 else { return nil }
+        let d = Array(hex)
+        let dashed = "\(String(d[0..<8]))-\(String(d[8..<12]))-\(String(d[12..<16]))-\(String(d[16..<20]))-\(String(d[20..<32]))"
+        return UUID(uuidString: dashed)
+    }
+
+    /// One Klik PRO-owned launcher/metadata leftover whose UUID has no active
+    /// profile record. Data folders are surfaced separately by `scanOrphans`.
+    struct LauncherLeftover: Equatable {
+        enum Kind: Equatable { case customIcon, lock, launcher }
+        let kind: Kind
+        let instanceID: UUID
+        let url: URL
+        let sizeBytes: Int64
+    }
+
+    /// Read-only scan for orphaned launcher/metadata leftovers (custom-icon
+    /// copies, lock files, and generated launcher bundles) keyed to UUIDs that
+    /// are not in `activeIDs`. Each candidate is ownership-validated by an exact
+    /// path match (icons/locks) or `isSafeGeneratedLauncher` (launchers), so a
+    /// non-Klik-PRO file at these paths is never reported.
+    func scanLauncherLeftovers(activeIDs: Set<UUID>) -> [LauncherLeftover] {
+        var found: [LauncherLeftover] = []
+
+        func entries(in dir: URL, ext: String) -> [URL] {
+            ((try? fileManager.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: nil
+            )) ?? []).filter { $0.pathExtension.lowercased() == ext }
+        }
+
+        let iconsDir = applicationSupportURL.appendingPathComponent("CustomIcons", isDirectory: true)
+        for url in entries(in: iconsDir, ext: "icns") {
+            guard let id = UUID(uuidString: url.deletingPathExtension().lastPathComponent),
+                  !activeIDs.contains(id),
+                  url.standardizedFileURL == customIconURL(for: id).standardizedFileURL else { continue }
+            found.append(.init(kind: .customIcon, instanceID: id, url: url.standardizedFileURL, sizeBytes: dataSize(at: url)))
+        }
+
+        let locksDir = applicationSupportURL.appendingPathComponent("Locks", isDirectory: true)
+        for url in entries(in: locksDir, ext: "lock") {
+            guard let id = UUID(uuidString: url.deletingPathExtension().lastPathComponent),
+                  !activeIDs.contains(id),
+                  url.standardizedFileURL == managedInstanceLockURL(for: id).standardizedFileURL else { continue }
+            found.append(.init(kind: .lock, instanceID: id, url: url.standardizedFileURL, sizeBytes: dataSize(at: url)))
+        }
+
+        for url in entries(in: visibleLaunchersRootURL, ext: "app") {
+            guard let id = launcherInstanceID(at: url), !activeIDs.contains(id) else { continue }
+            let expectedBundleID = "local.klik-pro.launcher.i"
+                + id.uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+            guard (try? isSafeGeneratedLauncher(url, expectedBundleID: expectedBundleID)) == true else { continue }
+            found.append(.init(kind: .launcher, instanceID: id, url: url.standardizedFileURL, sizeBytes: dataSize(at: url)))
+        }
+
+        return found.sorted { $0.url.path < $1.url.path }
+    }
+
+    /// Removes one scanned leftover, re-validating ownership immediately before
+    /// the op. Launchers additionally unregister from Launch Services. Returns
+    /// the Trash URL for a `.trash` op, or nil.
+    @discardableResult
+    func removeLauncherLeftover(_ leftover: LauncherLeftover, mode: DataRemovalMode) throws -> URL? {
+        switch leftover.kind {
+        case .customIcon:
+            return try removeOwnedArtifact(
+                at: leftover.url, kind: .customIcon,
+                instanceID: leftover.instanceID, storage: .applicationSupport, mode: mode
+            )
+        case .lock:
+            guard leftover.url.standardizedFileURL
+                == managedInstanceLockURL(for: leftover.instanceID).standardizedFileURL else {
+                throw LauncherGeneratorError.unsafeRemoval
+            }
+            switch mode {
+            case .trash: return try trashItem(leftover.url)
+            case .permanent: try fileManager.removeItem(at: leftover.url); return nil
+            }
+        case .launcher:
+            let expectedBundleID = "local.klik-pro.launcher.i"
+                + leftover.instanceID.uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+            guard (try? isSafeGeneratedLauncher(leftover.url, expectedBundleID: expectedBundleID)) == true else {
+                throw LauncherGeneratorError.unsafeRemoval
+            }
+            let result: URL?
+            switch mode {
+            case .trash: result = try trashItem(leftover.url)
+            case .permanent: try fileManager.removeItem(at: leftover.url); result = nil
+            }
+            refreshLaunchServicesUnregistration(for: leftover.url)
+            return result
+        }
+    }
+
     /// One UUID-keyed data root found on disk, before any record cross-check.
     /// `dataURL` is `Profiles/<UUID>` for Application Support storage or
     /// `<Vault>/Instances/<UUID>` for vault storage; `markerPresent` is true
@@ -1709,9 +1835,10 @@ struct LauncherGenerator {
             }
             try validateContainerNode(standardized)
         case .customIcon:
-            guard storage == .applicationSupport else {
-                throw LauncherGeneratorError.unsafeRemoval
-            }
+            // The custom-icon copy always lives at a storage-independent App
+            // Support path (`CustomIcons/<UUID>.icns`), so it is reclaimable for
+            // both vault and Application Support profiles. The exact-path match
+            // below is the ownership proof.
             let expected = customIconURL(for: instanceID).standardizedFileURL
             guard standardized == expected else {
                 throw LauncherGeneratorError.unsafeRemoval

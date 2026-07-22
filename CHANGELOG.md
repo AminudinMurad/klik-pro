@@ -2,6 +2,30 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.2.5
+
+Completes App Profile removal cleanup and adds a safe, ownership-gated scan for
+artifacts left behind by profiles that are no longer tracked.
+
+- **Reliable menu-bar profile icons** — the helper now uses the configured durable
+  data-folder root when checking managed profiles, so vault-backed profiles remain
+  launchable and receive their menu-bar icons.
+- **Clearer Advanced removal choice** — **Delete Data** now offers **Remove Icons
+  (Keep Data)** or **Delete All Data**. Both clear the generated launcher and its Dock,
+  Launchpad, and menu-bar presence; only Delete All Data removes validated login and
+  profile data.
+- **Complete owned-artifact cleanup** — removal also clears the profile's persisted
+  custom-icon copy and advisory lock file, including profiles stored in a durable data
+  folder. Launch Services is unregistered after a launcher is removed.
+- **Deep Scan for Leftovers** — Advanced can find marker-owned orphaned profile data,
+  UUID-keyed custom icons and lock files, safely generated launchers, and missing Dock
+  tiles that point directly into Klik PRO's managed launcher folder.
+- **Recoverable by default** — deep-clean results can be moved to Trash. Permanent
+  deletion remains behind a separate destructive confirmation; ambiguous or
+  markerless data is excluded.
+- **Accurate cleanup reporting** — stale Dock tiles count as removed only after the
+  Dock preference update succeeds and the old path is no longer present.
+
 ## 1.2.4
 
 Smooths the after-update Accessibility re-grant so the helper's toggle can be summoned

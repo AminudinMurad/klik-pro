@@ -975,6 +975,7 @@ final class AdvancedSettingsContentView: NSView {
         + "\".codex\" links in your Home folder. Existing profiles are left untouched."
     )
     private let scanButton = AppProfileButton(title: "Scan & Adopt…", frame: .zero)
+    private let deepScanButton = AppProfileButton(title: "Deep Scan for Leftovers…", frame: .zero)
 
     // Unlocked-state views — lifecycle and repair. Rows are rebuilt from the
     // persisted configuration so this surface never acts on unsaved mappings.
@@ -993,6 +994,8 @@ final class AdvancedSettingsContentView: NSView {
     var onChooseFolder: (() -> Void)?
     var onClearFolder: (() -> Void)?
     var onScanAndAdopt: (() -> Void)?
+    /// Deep scan for orphaned launcher/metadata leftovers, with one-click clean.
+    var onDeepScan: (() -> Void)?
     var onRepair: ((AppProfileInstance) -> Void)?
     var onArchive: ((AppProfileInstance) -> Void)?
     var onRestore: ((AppProfileInstance) -> Void)?
@@ -1010,8 +1013,8 @@ final class AdvancedSettingsContentView: NSView {
     private var lockedViews: [NSView] { [lockButton, lockTitle, lockBody, lockHint] }
     private var unlockedViews: [NSView] {
         [dataRootLabel, dataRootBody, dataRootValueField, chooseButton, clearButton,
-         recoverLabel, recoverBody, scanButton, maintenanceLabel, maintenanceBody,
-         maintenanceScroll, statusField]
+         recoverLabel, recoverBody, scanButton, deepScanButton, maintenanceLabel,
+         maintenanceBody, maintenanceScroll, statusField]
     }
 
     override var isFlipped: Bool { true }
@@ -1061,6 +1064,11 @@ final class AdvancedSettingsContentView: NSView {
         styleBody(recoverBody, frame: NSRect(x: 28, y: 234, width: width - 56, height: 56))
         scanButton.frame = NSRect(x: 28, y: 300, width: 170, height: 28)
         scanButton.onPress = { [weak self] in self?.onScanAndAdopt?() }
+        deepScanButton.frame = NSRect(x: 206, y: 300, width: 226, height: 28)
+        deepScanButton.toolTip =
+            "Find and remove leftover Dock, Launchpad, and menu-bar icons, custom-icon "
+            + "copies, lock files, and data folders from profiles you've removed."
+        deepScanButton.onPress = { [weak self] in self?.onDeepScan?() }
 
         styleSectionLabel(maintenanceLabel, frame: NSRect(x: 28, y: 354, width: width - 56, height: 16))
         styleBody(maintenanceBody, frame: NSRect(x: 28, y: 378, width: width - 56, height: 36))
