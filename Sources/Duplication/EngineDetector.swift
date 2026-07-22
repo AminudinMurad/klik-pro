@@ -212,8 +212,14 @@ struct EngineDetector {
             url.pathExtension == "framework"
                 && url.lastPathComponent.hasSuffix(" Framework.framework")
         }
+        // ChatGPT/Codex currently renames Electron Framework.framework to
+        // Codex Framework.framework. Keep this an engine hint only; registry
+        // identity and signing checks still gate compatibility below.
+        let hasCodexFramework = entries.contains { url in
+            url.lastPathComponent == "Codex Framework.framework"
+        }
         let infoURL = app.bundleURL.appendingPathComponent("Contents/Info.plist")
-        guard hasFrameworkCandidate,
+        guard hasFrameworkCandidate || hasCodexFramework,
               let data = try? Data(contentsOf: infoURL),
               let info = try? PropertyListSerialization.propertyList(
                 from: data,
