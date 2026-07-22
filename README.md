@@ -49,20 +49,20 @@ an opt-in Accessibility step), with Back navigation and no dead-ends:
 **Supported controls** — configure compatible mouse controls and see live conflict
 checks:
 
-<img src="assets/screenshot-mappings.png?v=1.3.0-b14" width="940" alt="Klik PRO Mappings tab with supported mouse controls, shortcut settings, and original apps plus App Profiles as launch targets">
+<img src="assets/screenshot-mappings.png?v=1.3.1-b15" width="940" alt="Klik PRO Mappings tab with supported mouse controls, shortcut settings, and original apps plus App Profiles as launch targets">
 
 **App Profiles** — generate isolated extra instances of ChatGPT or Claude, each with
 its own login; open or assign each profile, and give it a custom PNG/ICO, colour tint,
 or initial badge so every account is recognisable at a glance:
 
-<img src="assets/screenshot-app-profiles.png?v=1.3.0-b14" width="940" alt="Klik PRO App Profiles tab showing original-app New Profile and Assign Button actions plus individually styled generated profiles">
+<img src="assets/screenshot-app-profiles.png?v=1.3.1-b15" width="940" alt="Klik PRO App Profiles tab showing original-app New Profile and Assign Button actions plus individually styled generated profiles">
 
 **Icon customisation** — distinguish profiles with colour tints or initial badges,
 manage them from the per-profile gear menu, and see the same identity immediately in
 Mappings:
 
 <p align="center">
-  <img src="assets/app-profiles-icon-showcase.gif?v=1.3.0-b14" width="600" alt="Klik PRO animation showing full-size tinted and initial-badged App Profile icons, profile management controls, and matching icons in the Mappings tab">
+  <img src="assets/app-profiles-icon-showcase.gif?v=1.3.1-b15" width="600" alt="Klik PRO animation showing full-size tinted and initial-badged App Profile icons, profile management controls, and matching icons in the Mappings tab">
 </p>
 
 **Settings** — launch-at-login, menu-icon visibility, update-check, and guided Accessibility setup/reset controls:
