@@ -4298,7 +4298,7 @@ final class ToggleView: NSView {
                 self.advancedView.setStatus(
                     failed == 0
                         ? "\(removed) leftover item(s) \(verb)."
-                        : "\(removed) \(verb); \(failed) could not be removed and remain on disk.",
+                        : "\(removed) \(verb); \(failed) could not be removed and remain on disk. Quit the related app or restart macOS, then scan again.",
                     color: failed == 0 ? KlikProBrand.green : .systemOrange
                 )
                 self.refreshAppProfileHealth()
@@ -4320,7 +4320,7 @@ final class ToggleView: NSView {
             if case .failed = $0.outcome { return true }
             return false
         }
-        return "Partly \(verb): \(failed.count) item(s) could not be removed and remain on disk."
+        return "Partly \(verb): \(failed.count) item(s) could not be removed and remain on disk. Quit the related app or restart macOS, then try again."
     }
 
     private func createManagedAppProfile(from candidate: AppProfileCandidate) {

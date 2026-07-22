@@ -1342,16 +1342,15 @@ struct LauncherGenerator {
     }
 
     /// Shapes an arbitrary image into a macOS-style app icon: the artwork is
-    /// aspect-filled into a rounded-corner (squircle-like) tile, inset with the
-    /// same proportional padding macOS uses (~10%), so a plain square logo reads
-    /// as a real app icon instead of a flat square. Used for user-chosen images
-    /// only — tint/badge derive from the source app icon, which is already shaped.
+    /// aspect-filled into the full rounded-corner (squircle-like) canvas so
+    /// custom PNGs do not appear as a small icon inside another app icon. Used
+    /// for user-chosen images only — tint/badge derive from the source app icon,
+    /// which is already shaped.
     static func macOSIconShaped(_ source: CGImage) -> CGImage? {
         let size = renderCanvasSize
         guard let context = squareContext(size) else { return nil }
         let s = CGFloat(size)
-        let inset = (s * 0.098).rounded()
-        let tile = CGRect(x: inset, y: inset, width: s - 2 * inset, height: s - 2 * inset)
+        let tile = CGRect(x: 0, y: 0, width: s, height: s)
         let radius = tile.width * 0.2237   // macOS icon-grid corner ratio
         context.addPath(CGPath(
             roundedRect: tile, cornerWidth: radius, cornerHeight: radius, transform: nil

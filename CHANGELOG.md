@@ -2,6 +2,18 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.2.7
+
+A focused polish update for App Profile custom icons and cleanup feedback.
+
+- **Custom PNG icons fill the Dock tile** — user-chosen PNG/ICO artwork is now
+  shaped into the full macOS app-icon canvas instead of being inset inside a
+  second rounded square, so generated Dock and Launchpad icons look larger and
+  cleaner.
+- **Clearer leftover cleanup guidance** — partial cleanup results now explain that
+  a related app may still be holding profile data open, and suggest quitting that
+  app or restarting macOS before scanning again.
+
 ## 1.2.6
 
 A focused correction for owner-enabled ChatGPT App Profiles created in v1.2.5.

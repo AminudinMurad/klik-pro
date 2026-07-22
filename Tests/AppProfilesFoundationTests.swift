@@ -102,6 +102,19 @@ private func makeTestBitmap(width: Int, height: Int) -> CGImage {
     return context.makeImage()!
 }
 
+private func alphaByte(_ image: CGImage, x: Int, y: Int) -> UInt8 {
+    var pixel: [UInt8] = [0, 0, 0, 0]
+    let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+    let context = CGContext(
+        data: &pixel, width: 1, height: 1,
+        bitsPerComponent: 8, bytesPerRow: 4, space: colorSpace,
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    )!
+    context.translateBy(x: CGFloat(-x), y: CGFloat(y - image.height + 1))
+    context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+    return pixel[3]
+}
+
 /// A managed generator wired at `support` with signing stubbed to true. Matches
 /// the production wiring except for the signer, which the icon paths under test
 /// do not exercise (isSafeGeneratedLauncher does not verify a real signature).
@@ -173,6 +186,7 @@ private struct AppProfilesFoundationTests {
         testManagedInstanceReleasesPhantomDuplicateBadge()
         testMakeICNSDataSizeValidation()
         testCustomIconSurvivesRematerialization()
+        testCustomIconShapeUsesFullCanvas()
         testCustomIconTintAndBadgeGeometry()
         testResetRemovesPersistedCustomIcon()
         testUpdateManagedIconRejectsExternalRow()
@@ -2034,6 +2048,24 @@ private struct AppProfilesFoundationTests {
                "re-materialization must restore the custom icon into the rebuilt bundle")
         expect(try! Data(contentsOf: rebuiltIcon) == persisted,
                "the re-materialized icon must be the persisted custom copy, not the source icon")
+    }
+
+    private static func testCustomIconShapeUsesFullCanvas() {
+        let source = makeTestBitmap(width: 512, height: 512)
+        let shaped = LauncherGenerator.macOSIconShaped(source)!
+        let size = shaped.width
+        expect(size == LauncherGenerator.renderCanvasSize && shaped.height == size,
+               "custom icon shaping must render to the canonical square canvas")
+        expect(alphaByte(shaped, x: 1, y: size / 2) > 0,
+               "custom icon artwork must reach the left middle edge, not sit inside an inset tile")
+        expect(alphaByte(shaped, x: size - 2, y: size / 2) > 0,
+               "custom icon artwork must reach the right middle edge, not sit inside an inset tile")
+        expect(alphaByte(shaped, x: size / 2, y: 1) > 0,
+               "custom icon artwork must reach the bottom middle edge, not sit inside an inset tile")
+        expect(alphaByte(shaped, x: size / 2, y: size - 2) > 0,
+               "custom icon artwork must reach the top middle edge, not sit inside an inset tile")
+        expect(alphaByte(shaped, x: 1, y: 1) == 0,
+               "custom icon shaping must still keep rounded transparent corners")
     }
 
     /// Tint and badge compositions always emit onto the square render canvas,
