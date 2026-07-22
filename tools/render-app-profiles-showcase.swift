@@ -43,7 +43,7 @@ let scenes = [
     Scene(
         image: profiles,
         title: "Manage identity from one place",
-        subtitle: "Open the gear menu to rename, change the icon, reset it, or remove the profile.",
+        subtitle: "Open the gear menu to rename, change the icon, or remove it from Klik PRO.",
         crop: NSRect(x: 700, y: 430, width: 1080, height: 980)
     ),
     Scene(
@@ -70,7 +70,7 @@ func render(_ scene: Scene) -> CGImage {
     NSColor.white.setFill()
     NSRect(origin: .zero, size: canvasSize).fill()
 
-    let eyebrow = "KLIK PRO 1.2.1 · APP PROFILES"
+    let eyebrow = "KLIK PRO 1.2.2 · APP PROFILES"
     eyebrow.draw(
         at: NSPoint(x: 72, y: 1090),
         withAttributes: [

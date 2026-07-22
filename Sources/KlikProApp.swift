@@ -2783,6 +2783,13 @@ final class ToggleView: NSView {
         label: "local.klik-pro.settings.app-profiles",
         qos: .userInitiated
     )
+    // Health reconciliation may block while macOS/File Provider opens a vault
+    // marker. Keep it off the lifecycle/discovery queue so a slow read cannot
+    // freeze Generate, Remove, Archive, Repair, or app discovery.
+    private let appProfileHealthQueue = DispatchQueue(
+        label: "local.klik-pro.settings.app-profile-health",
+        qos: .utility
+    )
     private var supportedAppCandidateCache: [AppProfileCandidate]?
     private var supportedAppDiscoveryInProgress = false
     private let saveButton = PrimaryHoverButton(
@@ -3029,6 +3036,7 @@ final class ToggleView: NSView {
             ("Claude Work", .active, .healthy),
             ("ChatGPT Test", .active, .missingLauncher),
             ("Claude Archive", .archived, .recoverableArchived),
+            ("Old ChatGPT", .active, .missingData),
         ]
         let instances = fixtures.enumerated().map { index, fixture -> AppProfileInstance in
             var instance = base
@@ -3042,11 +3050,30 @@ final class ToggleView: NSView {
             instance.archivedAt = fixture.1 == .archived ? Date(timeIntervalSince1970: 1) : nil
             return instance
         }
+        let orphans: [OrphanFinding] = [
+            OrphanFinding(
+                instanceID: UUID(uuidString: "20000000-0000-0000-0000-000000000001")!,
+                storage: .applicationSupport,
+                state: .orphanedData,
+                dataPaths: [URL(fileURLWithPath: "/Users/you/Library/Application Support/Klik PRO/Profiles/20000000-0000-0000-0000-000000000001")],
+                sizeBytes: 48_312_320,
+                markerPresent: true
+            ),
+            OrphanFinding(
+                instanceID: UUID(uuidString: "20000000-0000-0000-0000-000000000002")!,
+                storage: .applicationSupport,
+                state: .needsManualReview,
+                dataPaths: [URL(fileURLWithPath: "/Users/you/Library/Application Support/Klik PRO/Profiles/20000000-0000-0000-0000-000000000002")],
+                sizeBytes: 1_048_576,
+                markerPresent: false
+            ),
+        ]
         advancedView.setMaintenanceInstances(
             instances,
             health: Dictionary(uniqueKeysWithValues: zip(instances, fixtures).map {
                 ($0.0.id, $0.1.2)
-            })
+            }),
+            orphans: orphans
         )
     }
 
@@ -3239,6 +3266,15 @@ final class ToggleView: NSView {
         }
         advancedView.onRestore = { [weak self] instance in
             self?.restoreAppProfile(instance)
+        }
+        advancedView.onForget = { [weak self] instance in
+            self?.confirmForgetAppProfile(instance)
+        }
+        advancedView.onDeleteData = { [weak self] instance in
+            self?.confirmDeleteAppProfileData(instance)
+        }
+        advancedView.onDeleteOrphan = { [weak self] orphan in
+            self?.confirmDeleteOrphanData(orphan)
         }
         contentView.mappingProfilesView.onOpen = { [weak self] instance in
             self?.launchAppProfile(instance)
@@ -3864,6 +3900,181 @@ final class ToggleView: NSView {
                 DispatchQueue.main.async { self.finishAppProfileLifecycle() }
             }
         }
+    }
+
+    private func confirmForgetAppProfile(_ instance: AppProfileInstance) {
+        guard !hasUnsavedConfigurationChanges else {
+            showAppProfileAlert(
+                title: "Save current changes first",
+                message: "Save or restore your current changes before forgetting an App Profile."
+            )
+            return
+        }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Forget \(instance.label)?"
+        alert.informativeText = "This removes the stale record from Klik PRO. Its login data is already missing, so no data is deleted. Any data that later reappears will show as leftover data you can reclaim."
+        alert.addButton(withTitle: "Forget Entry")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard beginAppProfileLifecycle() else { return }
+        let currentConfig = persistedConfig
+        advancedView.setStatus("Forgetting \(instance.label)…")
+        appProfileQueue.async { [weak self] in
+            guard let self else { return }
+            do {
+                let result = try self.appProfileManager.forget(
+                    instanceID: instance.id, config: currentConfig
+                )
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.config = result.config
+                    self.persistedConfig = result.config
+                    self.appProfilesView.setInstances(result.config.instances)
+                    self.advancedView.setStatus(
+                        "Forgot \(instance.label). No data was deleted.",
+                        color: KlikProBrand.green
+                    )
+                    self.refreshAppProfileHealth()
+                }
+            } catch let error as AppProfileManagerError {
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.advancedView.setStatus(self.appProfileErrorMessage(error), color: .systemRed)
+                    self.refreshAppProfileHealth()
+                }
+            } catch {
+                DispatchQueue.main.async { self.finishAppProfileLifecycle() }
+            }
+        }
+    }
+
+    private func confirmDeleteAppProfileData(_ instance: AppProfileInstance) {
+        guard !hasUnsavedConfigurationChanges else {
+            showAppProfileAlert(
+                title: "Save current changes first",
+                message: "Save or restore your current changes before deleting an App Profile's data."
+            )
+            return
+        }
+        let target = appProfileManager.dataRemovalTarget(for: instance)
+        presentDataRemovalChoice(
+            title: "Delete \(instance.label)'s profile data?",
+            target: target,
+            statusLabel: instance.label
+        )
+    }
+
+    private func confirmDeleteOrphanData(_ orphan: OrphanFinding) {
+        guard orphan.state == .orphanedData else { return }
+        guard !hasUnsavedConfigurationChanges else {
+            showAppProfileAlert(
+                title: "Save current changes first",
+                message: "Save or restore your current changes before deleting leftover data."
+            )
+            return
+        }
+        let target = appProfileManager.dataRemovalTarget(for: orphan)
+        presentDataRemovalChoice(
+            title: "Delete this leftover data?",
+            target: target,
+            statusLabel: "leftover data"
+        )
+    }
+
+    /// Shared confirmation for both direct-row and orphan deletion. Lists the
+    /// exact paths + total size and offers the two owner-approved modes:
+    /// Move to Trash (recoverable, default) and Delete Permanently.
+    private func presentDataRemovalChoice(
+        title: String,
+        target: DataRemovalTarget,
+        statusLabel: String
+    ) {
+        guard !target.artifacts.isEmpty else {
+            advancedView.setStatus("Nothing to delete — no data found.", color: .appTextSecondary)
+            return
+        }
+        let size = ByteCountFormatter.string(fromByteCount: target.sizeBytes, countStyle: .file)
+        let paths = target.paths.map { "• \($0.path)" }.joined(separator: "\n")
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText =
+            "Klik PRO will remove this data (\(size)):\n\n\(paths)\n\n"
+            + "Move to Trash is recoverable from the macOS Trash. Delete Permanently cannot be undone."
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Delete Permanently")
+        alert.addButton(withTitle: "Cancel")
+        let response = alert.runModal()
+        let mode: DataRemovalMode
+        switch response {
+        case .alertFirstButtonReturn: mode = .trash
+        case .alertSecondButtonReturn: mode = .permanent
+        default: return
+        }
+        // Permanent delete is irreversible and erases login/credential data, so
+        // it takes a second, destructive-styled confirmation. Trash needs none.
+        if mode == .permanent {
+            let confirm = NSAlert()
+            confirm.alertStyle = .critical
+            confirm.messageText = "Permanently delete \(statusLabel) data?"
+            confirm.informativeText =
+                "This cannot be undone. The login and credential data will be erased, "
+                + "not moved to the Trash."
+            confirm.addButton(withTitle: "Cancel")
+            let destroy = confirm.addButton(withTitle: "Delete Permanently")
+            destroy.hasDestructiveAction = true
+            guard confirm.runModal() == .alertSecondButtonReturn else { return }
+        }
+        guard beginAppProfileLifecycle() else { return }
+        let currentConfig = persistedConfig
+        advancedView.setStatus(
+            mode == .trash ? "Moving \(statusLabel) data to Trash…" : "Deleting \(statusLabel) data…"
+        )
+        appProfileQueue.async { [weak self] in
+            guard let self else { return }
+            do {
+                let result = try self.appProfileManager.reclaimData(
+                    target: target, config: currentConfig, mode: mode
+                )
+                let applied = applySavedConfig()
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.config = result.config
+                    self.persistedConfig = result.config
+                    self.appProfilesView.setInstances(result.config.instances)
+                    self.advancedView.setStatus(
+                        self.dataRemovalStatusMessage(result, label: statusLabel, applied: applied),
+                        color: result.allRemoved ? KlikProBrand.green : .systemOrange
+                    )
+                    self.refreshAppProfileHealth()
+                }
+            } catch let error as AppProfileManagerError {
+                DispatchQueue.main.async {
+                    self.finishAppProfileLifecycle()
+                    self.advancedView.setStatus(self.appProfileErrorMessage(error), color: .systemRed)
+                    self.refreshAppProfileHealth()
+                }
+            } catch {
+                DispatchQueue.main.async { self.finishAppProfileLifecycle() }
+            }
+        }
+    }
+
+    private func dataRemovalStatusMessage(
+        _ result: DataRemovalResult,
+        label: String,
+        applied: Bool
+    ) -> String {
+        let verb = result.mode == .trash ? "moved to Trash" : "deleted"
+        if result.allRemoved {
+            return "Data for \(label) \(verb)."
+        }
+        let failed = result.perArtifact.filter {
+            if case .failed = $0.outcome { return true }
+            return false
+        }
+        return "Partly \(verb): \(failed.count) item(s) could not be removed and remain on disk."
     }
 
     private func createManagedAppProfile(from candidate: AppProfileCandidate) {
@@ -4718,9 +4929,12 @@ final class ToggleView: NSView {
         guard instance.launcherKind == .managed else { return }
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Remove \(instance.label)?"
-        alert.informativeText = "The generated icon will be removed. Its login and profile data will be kept for recovery."
-        alert.addButton(withTitle: "Remove Icon")
+        alert.messageText = "Remove \(instance.label) from Klik PRO?"
+        alert.informativeText =
+            "This removes the generated launcher and Klik PRO's managed entry. "
+            + "The login and profile data stays on disk and is not deleted.\n\n"
+            + "To remove that data too, cancel and use Delete Data in Advanced."
+        alert.addButton(withTitle: "Remove from Klik PRO")
         alert.addButton(withTitle: "Cancel")
         let response = alert.runModal()
         guard response == .alertFirstButtonReturn else { return }
@@ -4823,7 +5037,8 @@ final class ToggleView: NSView {
             )
             return
         }
-        appProfileQueue.async { [weak self] in
+        let currentConfig = persistedConfig
+        appProfileHealthQueue.async { [weak self] in
             guard let self else { return }
             let runtimeHealth = Dictionary(uniqueKeysWithValues: instances.map {
                 ($0.id, self.appProfileRuntime.health(for: $0))
@@ -4831,9 +5046,12 @@ final class ToggleView: NSView {
             let maintenanceHealth = Dictionary(uniqueKeysWithValues: instances.map {
                 ($0.id, self.appProfileManager.maintenanceHealth(for: $0))
             })
+            let orphans = self.appProfileManager.scanOrphans(config: currentConfig)
             DispatchQueue.main.async {
                 self.appProfilesView.setRuntimeHealth(runtimeHealth)
-                self.advancedView.setMaintenanceInstances(instances, health: maintenanceHealth)
+                self.advancedView.setMaintenanceInstances(
+                    instances, health: maintenanceHealth, orphans: orphans
+                )
             }
         }
     }
@@ -4906,6 +5124,10 @@ final class ToggleView: NSView {
             return "That App Profile is not in the required active or archived state for this action."
         case .repairUnavailable:
             return "Klik PRO could not find verified profile data to rebuild this launcher safely."
+        case .forgetUnavailable:
+            return "Forget Entry only applies to a record whose profile data is already missing."
+        case .dataRemovalUnavailable:
+            return "Klik PRO could not verify this data as safely owned, so nothing was removed."
         }
     }
 

@@ -458,7 +458,7 @@ final class AppProfileInstanceRowView: NSView {
             self.onToggleMenuBar?(self.instance)
         }
         gearButton.setAccessibilityLabel("Manage \(instance.label)")
-        gearButton.toolTip = "Rename, change icon, or remove"
+        gearButton.toolTip = "Rename, change icon, or remove from Klik PRO"
         gearButton.onPress = { [weak self] in self?.presentManageMenu() }
         [
             iconView, titleField, openButton, assignButton,
@@ -486,7 +486,7 @@ final class AppProfileInstanceRowView: NSView {
         menu.addItem(changeIcon)
         menu.addItem(.separator())
         let remove = NSMenuItem(
-            title: "Remove…", action: #selector(menuRemove), keyEquivalent: ""
+            title: "Remove from Klik PRO…", action: #selector(menuRemove), keyEquivalent: ""
         )
         remove.target = self
         remove.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
@@ -981,7 +981,8 @@ final class AdvancedSettingsContentView: NSView {
     private let maintenanceLabel = NSTextField(labelWithString: "APP PROFILE MAINTENANCE")
     private let maintenanceBody = NSTextField(wrappingLabelWithString:
         "Repair a missing launcher, or archive a profile without deleting its login data. "
-        + "Archived profiles can be restored later with the same identity and custom icon."
+        + "Archived profiles can be restored later. Delete Data removes the launcher, "
+        + "Klik PRO entry, and login/profile data after confirmation."
     )
     private let maintenanceScroll = NSScrollView()
     private let maintenanceDocument = FlippedMaintenanceView()
@@ -995,6 +996,13 @@ final class AdvancedSettingsContentView: NSView {
     var onRepair: ((AppProfileInstance) -> Void)?
     var onArchive: ((AppProfileInstance) -> Void)?
     var onRestore: ((AppProfileInstance) -> Void)?
+    /// Forget Entry — drop a stale record whose data is already gone.
+    var onForget: ((AppProfileInstance) -> Void)?
+    /// Delete an existing profile's login data (Trash or Permanent, chosen at
+    /// action time).
+    var onDeleteData: ((AppProfileInstance) -> Void)?
+    /// Reclaim record-less orphaned data on disk.
+    var onDeleteOrphan: ((OrphanFinding) -> Void)?
 
     private var isLocked = true
     /// Whether the tab is currently locked — read by the tab bar to show a lock glyph.
@@ -1124,18 +1132,23 @@ final class AdvancedSettingsContentView: NSView {
 
     func setMaintenanceInstances(
         _ instances: [AppProfileInstance],
-        health: [UUID: AppProfileMaintenanceHealth]
+        health: [UUID: AppProfileMaintenanceHealth],
+        orphans: [OrphanFinding] = []
     ) {
         maintenanceDocument.subviews.forEach { $0.removeFromSuperview() }
         let ordered = instances
             .filter { $0.launcherKind == .managed }
             .sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
+        let width = maintenanceScroll.contentSize.width
         let rowHeight: CGFloat = 54
-        let documentHeight = max(maintenanceScroll.contentSize.height, CGFloat(ordered.count) * rowHeight)
-        maintenanceDocument.frame = NSRect(
-            x: 0, y: 0, width: maintenanceScroll.contentSize.width, height: documentHeight
-        )
-        if ordered.isEmpty {
+        let headerHeight: CGFloat = 24
+        // config rows + (orphan header + orphan rows) when any orphans exist.
+        let orphanBlock = orphans.isEmpty ? 0 : Int(headerHeight) + orphans.count * Int(rowHeight)
+        let contentHeight = CGFloat(ordered.count) * rowHeight + CGFloat(orphanBlock)
+        let documentHeight = max(maintenanceScroll.contentSize.height, contentHeight)
+        maintenanceDocument.frame = NSRect(x: 0, y: 0, width: width, height: documentHeight)
+
+        if ordered.isEmpty && orphans.isEmpty {
             let empty = NSTextField(labelWithString: "No managed App Profiles yet.")
             empty.frame = NSRect(x: 12, y: 16, width: 300, height: 18)
             empty.font = .systemFont(ofSize: 12)
@@ -1144,52 +1157,128 @@ final class AdvancedSettingsContentView: NSView {
             return
         }
 
+        var y: CGFloat = 0
         for (index, instance) in ordered.enumerated() {
-            let y = CGFloat(index) * rowHeight
-            let name = NSTextField(labelWithString: instance.label)
-            name.frame = NSRect(x: 12, y: y + 8, width: 250, height: 18)
-            name.font = .systemFont(ofSize: 13, weight: .semibold)
-            name.textColor = .appTextPrimary
-            maintenanceDocument.addSubview(name)
-
             let state = health[instance.id] ?? .missingData
-            let detail = NSTextField(labelWithString: state.displayName)
-            detail.frame = NSRect(x: 12, y: y + 28, width: 280, height: 16)
-            detail.font = .systemFont(ofSize: 11)
-            detail.textColor = state.displayColor
-            maintenanceDocument.addSubview(detail)
-
-            let actionTitle: String
-            let action: () -> Void
-            switch state {
-            case .missingLauncher:
-                actionTitle = "Repair"
-                action = { [weak self] in self?.onRepair?(instance) }
-            case .recoverableArchived:
-                actionTitle = "Restore"
-                action = { [weak self] in self?.onRestore?(instance) }
-            case .healthy:
-                actionTitle = "Archive"
-                action = { [weak self] in self?.onArchive?(instance) }
-            case .missingData:
-                actionTitle = "Unavailable"
-                action = {}
+            addMaintenanceRow(
+                at: y, width: width, title: instance.label,
+                detail: state.displayName, detailColor: state.displayColor,
+                primary: primaryAction(for: state, instance: instance),
+                delete: deleteAction(for: state, instance: instance)
+            )
+            if index + 1 < ordered.count || !orphans.isEmpty {
+                addMaintenanceDivider(at: y + rowHeight - 1, width: width)
             }
-            let button = AppProfileButton(title: actionTitle, frame: NSRect(
-                x: maintenanceScroll.contentSize.width - 118, y: y + 13, width: 104, height: 28
-            ))
-            button.isEnabled = state != .missingData
-            button.onPress = action
-            maintenanceDocument.addSubview(button)
-
-            if index + 1 < ordered.count {
-                let divider = NSBox(frame: NSRect(x: 8, y: y + rowHeight - 1,
-                                                  width: maintenanceScroll.contentSize.width - 16,
-                                                  height: 1))
-                divider.boxType = .separator
-                maintenanceDocument.addSubview(divider)
-            }
+            y += rowHeight
         }
+
+        guard !orphans.isEmpty else { return }
+        let header = NSTextField(labelWithString: "LEFTOVER DATA — NO PROFILE")
+        header.frame = NSRect(x: 12, y: y + 6, width: width - 24, height: 14)
+        header.font = .boldSystemFont(ofSize: 10)
+        header.textColor = .appTextSecondary
+        maintenanceDocument.addSubview(header)
+        y += headerHeight
+        for (index, orphan) in orphans.enumerated() {
+            let path = orphan.dataPaths.first?.path ?? orphan.instanceID.uuidString
+            let size = ByteCountFormatter.string(fromByteCount: orphan.sizeBytes, countStyle: .file)
+            let detail = "\(orphan.state.displayName) · \(size) · \(path)"
+            let delete: (title: String, action: () -> Void)? = orphan.state == .orphanedData
+                ? ("Delete Data…", { [weak self] in self?.onDeleteOrphan?(orphan) })
+                : nil
+            addMaintenanceRow(
+                at: y, width: width, title: "Unknown profile",
+                detail: detail, detailColor: orphan.state.displayColor,
+                primary: nil, delete: delete
+            )
+            if index + 1 < orphans.count {
+                addMaintenanceDivider(at: y + rowHeight - 1, width: width)
+            }
+            y += rowHeight
+        }
+    }
+
+    private func primaryAction(
+        for state: AppProfileMaintenanceHealth,
+        instance: AppProfileInstance
+    ) -> (title: String, action: () -> Void)? {
+        switch state {
+        case .missingLauncher:
+            return ("Repair", { [weak self] in self?.onRepair?(instance) })
+        case .recoverableArchived:
+            return ("Restore", { [weak self] in self?.onRestore?(instance) })
+        case .healthy:
+            return ("Archive", { [weak self] in self?.onArchive?(instance) })
+        case .missingData:
+            return ("Forget…", { [weak self] in self?.onForget?(instance) })
+        case .orphanedData, .needsManualReview:
+            return nil
+        }
+    }
+
+    private func deleteAction(
+        for state: AppProfileMaintenanceHealth,
+        instance: AppProfileInstance
+    ) -> (title: String, action: () -> Void)? {
+        // Missing-data rows have no data to delete (Forget is the only action).
+        switch state {
+        case .healthy, .recoverableArchived, .missingLauncher:
+            return ("Delete Data…", { [weak self] in self?.onDeleteData?(instance) })
+        case .missingData, .orphanedData, .needsManualReview:
+            return nil
+        }
+    }
+
+    private func addMaintenanceRow(
+        at y: CGFloat,
+        width: CGFloat,
+        title: String,
+        detail: String,
+        detailColor: NSColor,
+        primary: (title: String, action: () -> Void)?,
+        delete: (title: String, action: () -> Void)?
+    ) {
+        let name = NSTextField(labelWithString: title)
+        name.frame = NSRect(x: 12, y: y + 8, width: 250, height: 18)
+        name.font = .systemFont(ofSize: 13, weight: .semibold)
+        name.textColor = .appTextPrimary
+        maintenanceDocument.addSubview(name)
+
+        // Leave room on the right for whichever buttons this row shows so the
+        // (truncated) detail text never runs under them.
+        let buttonCount = (primary == nil ? 0 : 1) + (delete == nil ? 0 : 1)
+        let reserved: CGFloat = buttonCount == 2 ? 218 : (buttonCount == 1 ? 118 : 12)
+        let detailField = NSTextField(labelWithString: detail)
+        detailField.frame = NSRect(x: 12, y: y + 28, width: max(80, width - 12 - reserved), height: 16)
+        detailField.font = .systemFont(ofSize: 11)
+        detailField.textColor = detailColor
+        detailField.lineBreakMode = .byTruncatingMiddle
+        maintenanceDocument.addSubview(detailField)
+
+        var buttonX = width - 118
+        if let primary {
+            let button = AppProfileButton(
+                title: primary.title,
+                frame: NSRect(x: buttonX, y: y + 13, width: 104, height: 28)
+            )
+            button.onPress = primary.action
+            maintenanceDocument.addSubview(button)
+            buttonX -= 100
+        }
+        if let delete {
+            let button = AppProfileButton(
+                title: delete.title,
+                frame: NSRect(x: buttonX, y: y + 13, width: 92, height: 28)
+            )
+            button.onPress = delete.action
+            maintenanceDocument.addSubview(button)
+        }
+    }
+
+    private func addMaintenanceDivider(at y: CGFloat, width: CGFloat) {
+        let divider = NSBox(frame: NSRect(x: 8, y: y, width: width - 16, height: 1))
+        divider.boxType = .separator
+        maintenanceDocument.addSubview(divider)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -1215,6 +1304,8 @@ private extension AppProfileMaintenanceHealth {
         case .recoverableArchived: return "Archived — data preserved"
         case .missingLauncher: return "Missing launcher — repair available"
         case .missingData: return "Profile data is missing"
+        case .orphanedData: return "Orphaned data"
+        case .needsManualReview: return "Needs manual review"
         }
     }
 
@@ -1224,6 +1315,8 @@ private extension AppProfileMaintenanceHealth {
         case .recoverableArchived: return .appTextSecondary
         case .missingLauncher: return .systemOrange
         case .missingData: return .systemRed
+        case .orphanedData: return .systemOrange
+        case .needsManualReview: return .appTextSecondary
         }
     }
 }

@@ -48,6 +48,26 @@ private func temporaryDirectory(_ label: String) -> URL {
     return url
 }
 
+/// Test double for the injectable Move-to-Trash op: moves items into a temp
+/// directory (never the real Trash) and records every request, so a test can
+/// prove Trash mode used this op and never a permanent `removeItem`.
+private final class TrashSpy {
+    let destination: URL
+    private(set) var moved: [URL] = []
+    init(destination: URL) { self.destination = destination }
+    func trash(_ url: URL) throws -> URL? {
+        try FileManager.default.createDirectory(
+            at: destination, withIntermediateDirectories: true
+        )
+        let target = destination.appendingPathComponent(
+            url.lastPathComponent + "-" + UUID().uuidString, isDirectory: true
+        )
+        try FileManager.default.moveItem(at: url, to: target)
+        moved.append(url.standardizedFileURL)
+        return target
+    }
+}
+
 private func makeInstalledApp(
     root: URL,
     bundleIdentifier: String = "com.example.electron",
@@ -138,6 +158,7 @@ private struct AppProfilesFoundationTests {
         testExternalDualAppDiscoveryIsNarrowAndReadOnly()
         testSchema9MigrationAndBackup()
         testAppScannerIdentityAndManagedLauncherExclusion()
+        testManagedLauncherPayloadValidatesStorageLayouts()
         testEngineDetectionAndRegistryGate()
         testLauncherSpecificationIsUUIDKeyedAndStructured()
         testManagedLifecycleIsRegistryGatedAndRetainsProfiles()
@@ -164,6 +185,10 @@ private struct AppProfilesFoundationTests {
         testVaultAdoptionRegeneratesFromManifest()
         testVaultInstanceRemovalAndManifestWriteFailSafe()
         testArchiveRestoreAndRepairPreserveVaultData()
+        testForgetEntryDropsStaleRecordWithoutDeletingData()
+        testOrphanScanClassifiesRecordlessData()
+        testReclaimDataTrashPermanentAndFailClosed()
+        testReclaimDataMultiArtifactPartialAndMarkerless()
         testDataRootWiringFactorySelectsGenerator()
         testSettledProcessScanResolvesTransientAmbiguity()
         print("App Profiles foundation tests passed")
@@ -385,6 +410,75 @@ private struct AppProfilesFoundationTests {
         let scanned = scanner.scan(searchRoots: [root])
         expect(Set(scanned.map(\.bundleURL)) == Set([firstURL, secondURL]),
                "root scan must return source apps once and exclude managed launchers")
+    }
+
+    private static func testManagedLauncherPayloadValidatesStorageLayouts() {
+        let root = temporaryDirectory("managed-launcher-storage")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let support = root.appendingPathComponent("Support", isDirectory: true)
+        let id = UUID()
+        let marker = ".klik-pro-owned-profile"
+
+        func makeProfile(_ url: URL) {
+            try! FileManager.default.createDirectory(
+                at: url, withIntermediateDirectories: true
+            )
+            try! Data(id.uuidString.uppercased().utf8)
+                .write(to: url.appendingPathComponent(marker))
+        }
+
+        let supportProfile = support
+            .appendingPathComponent("Profiles", isDirectory: true)
+            .appendingPathComponent(id.uuidString.uppercased(), isDirectory: true)
+        makeProfile(supportProfile)
+        let supportPayload = ManagedLauncherPayload(
+            sourceBundlePath: "/Applications/Fixture.app",
+            arguments: ["--user-data-dir=" + supportProfile.path],
+            environment: [:],
+            compatibilityRuleID: "fixture",
+            profileDirectory: supportProfile.path,
+            profileStorage: .applicationSupport
+        )
+        expect(supportPayload.validatedProfileURL(
+            instanceID: id, applicationSupportURL: support
+        ) == supportProfile.standardizedFileURL,
+        "the signed runner payload must accept the exact owned Application Support profile")
+
+        let vaultProfile = root
+            .appendingPathComponent("Vault/Instances", isDirectory: true)
+            .appendingPathComponent(id.uuidString.uppercased(), isDirectory: true)
+            .appendingPathComponent("user-data", isDirectory: true)
+        makeProfile(vaultProfile)
+        let vaultPayload = ManagedLauncherPayload(
+            sourceBundlePath: "/Applications/Fixture.app",
+            arguments: ["--user-data-dir=" + vaultProfile.path],
+            environment: [:],
+            compatibilityRuleID: "fixture",
+            profileDirectory: vaultProfile.path,
+            profileStorage: .vault
+        )
+        expect(vaultPayload.validatedProfileURL(
+            instanceID: id, applicationSupportURL: support
+        ) == vaultProfile.standardizedFileURL,
+        "the signed runner payload must accept the exact owned vault profile")
+
+        let wrongArgument = ManagedLauncherPayload(
+            sourceBundlePath: vaultPayload.sourceBundlePath,
+            arguments: ["--user-data-dir=/tmp/wrong"],
+            environment: [:],
+            compatibilityRuleID: vaultPayload.compatibilityRuleID,
+            profileDirectory: vaultProfile.path,
+            profileStorage: .vault
+        )
+        expect(wrongArgument.validatedProfileURL(
+            instanceID: id, applicationSupportURL: support
+        ) == nil, "a payload whose argument disagrees with its signed profile must fail closed")
+
+        let markerURL = vaultProfile.appendingPathComponent(marker)
+        try! FileManager.default.removeItem(at: markerURL)
+        expect(vaultPayload.validatedProfileURL(
+            instanceID: id, applicationSupportURL: support
+        ) == nil, "a vault profile without its exact ownership marker must fail closed")
     }
 
     private static func testEngineDetectionAndRegistryGate() {
@@ -1713,6 +1807,28 @@ private struct AppProfilesFoundationTests {
         expect(again == healed, "an already-healed config must be returned unchanged")
         expect(persistCount == 1, "an already-healed config must not persist again")
 
+        // A launcher created before the signed storage fields existed must be
+        // upgraded even when its persisted environment and profile path did not
+        // otherwise change.
+        let legacyPayload: [String: Any] = [
+            "sourceBundlePath": source.bundleURL.path,
+            "arguments": ["--user-data-dir=" + generator.profileURL(for: id).path],
+            "environment": ["CLAUDE_CONFIG_DIR": home.path],
+            "compatibilityRuleID": newRule.id,
+        ]
+        try! PropertyListSerialization.data(
+            fromPropertyList: legacyPayload, format: .xml, options: 0
+        ).write(to: payloadURL, options: .atomic)
+        let contractHealed = newManager.healManagedInstances(config: healed)
+        let upgradedPayload = try! PropertyListDecoder().decode(
+            ManagedLauncherPayload.self, from: Data(contentsOf: payloadURL)
+        )
+        expect(contractHealed == healed && persistCount == 1,
+               "a launcher-only contract upgrade must not rewrite config")
+        expect(upgradedPayload.profileDirectory == generator.profileURL(for: id).path
+               && upgradedPayload.profileStorage == .applicationSupport,
+               "healing must add the signed profile path and storage contract")
+
         // A failed re-sign must restore the previous executable bytes, metadata,
         // and mode instead of leaving an unlaunchable half-updated bundle.
         try! Data("fixture-runner-v3".utf8).write(to: runner, options: .atomic)
@@ -2101,14 +2217,16 @@ private struct AppProfilesFoundationTests {
         vaultRoot: URL?,
         support: URL? = nil,
         persist: @escaping (KlikProConfig) -> Bool = { _ in true },
-        processInspector: ManagedProcessInspector = ManagedProcessInspector()
+        processInspector: ManagedProcessInspector = ManagedProcessInspector(),
+        trashItem: @escaping (URL) throws -> URL? = LauncherGenerator.defaultTrash
     ) -> (manager: AppProfileManager, generator: LauncherGenerator) {
         let generator = LauncherGenerator(
             applicationSupportURL: support ?? fixture.support,
             homeSymlinkRootURL: fixture.linksRoot,
             vaultRootURL: vaultRoot,
             launcherExecutableURL: fixture.runner,
-            signLauncher: { _ in true }
+            signLauncher: { _ in true },
+            trashItem: trashItem
         )
         let manager = AppProfileManager(
             registry: AppCompatibilityRegistry(rules: [fixture.rule]),
@@ -2992,6 +3110,372 @@ private struct AppProfilesFoundationTests {
         expect(VaultManifest.read(vaultRoot: fixture.vault)?
                 .instances.first { $0.id == id }?.archived == true,
                "reconciliation must rebuild vault.json from config truth")
+    }
+
+    private static func testForgetEntryDropsStaleRecordWithoutDeletingData() {
+        let fixture = makeVaultFixture("forget-entry")
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        var persisted: KlikProConfig?
+        let env = makeVaultManager(
+            fixture, vaultRoot: nil, persist: { persisted = $0; return true }
+        )
+        var config = KlikProConfig.default
+        let id = UUID()
+        let created = try! env.manager.create(
+            from: env.manager.candidate(for: fixture.source),
+            label: "Forget Fixture", config: config, instanceID: id
+        )
+        config = created.config
+
+        // A healthy record (data present) refuses Forget.
+        do {
+            _ = try env.manager.forget(instanceID: id, config: config)
+            expect(false, "Forget must refuse a healthy record")
+        } catch let error as AppProfileManagerError {
+            expect(error == .forgetUnavailable, "Forget of live data must be forgetUnavailable")
+        } catch {
+            expect(false, "unexpected forget error: \(error)")
+        }
+
+        // Simulate the reported case: the profile data is gone.
+        let profile = URL(fileURLWithPath: created.instance.profileDirectory!)
+        try! FileManager.default.removeItem(at: profile)
+        expect(env.manager.maintenanceHealth(for: created.instance) == .missingData,
+               "a record whose data is gone must classify as Missing Data")
+
+        let result = try! env.manager.forget(instanceID: id, config: config)
+        expect(!result.config.instances.contains { $0.id == id },
+               "Forget must drop the stale row")
+        expect(persisted?.instances.contains { $0.id == id } == false,
+               "Forget must persist the row removal (commit point)")
+        expect(!FileManager.default.fileExists(atPath: created.instance.launcherPath),
+               "Forget must remove any residual launcher (a launcher is not user data)")
+
+        // Absent row → idempotent no-op.
+        let noop = try! env.manager.forget(instanceID: id, config: result.config)
+        expect(noop.config.instances.count == result.config.instances.count,
+               "Forget on an absent row must be a no-op")
+    }
+
+    private static func testOrphanScanClassifiesRecordlessData() {
+        let fixture = makeVaultFixture("orphan-scan")
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let env = makeVaultManager(fixture, vaultRoot: nil)
+        var config = KlikProConfig.default
+        let liveID = UUID()
+        config = try! env.manager.create(
+            from: env.manager.candidate(for: fixture.source),
+            label: "Live Fixture", config: config, instanceID: liveID
+        ).config
+
+        let profilesRoot = fixture.support.appendingPathComponent("Profiles", isDirectory: true)
+        let markerName = LauncherGenerator.profileOwnershipMarkerName
+
+        // Marker-owned record-less folder → Orphaned Data.
+        let orphanID = UUID()
+        let orphanDir = profilesRoot
+            .appendingPathComponent(orphanID.uuidString.uppercased(), isDirectory: true)
+        try! FileManager.default.createDirectory(at: orphanDir, withIntermediateDirectories: true)
+        try! Data(orphanID.uuidString.uppercased().utf8)
+            .write(to: orphanDir.appendingPathComponent(markerName))
+
+        // Markerless folder → Needs Manual Review.
+        let reviewID = UUID()
+        let reviewDir = profilesRoot
+            .appendingPathComponent(reviewID.uuidString.uppercased(), isDirectory: true)
+        try! FileManager.default.createDirectory(at: reviewDir, withIntermediateDirectories: true)
+
+        // Non-UUID directory → never enumerated.
+        try! FileManager.default.createDirectory(
+            at: profilesRoot.appendingPathComponent("not-a-uuid", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+
+        let findings = env.manager.scanOrphans(config: config)
+        expect(findings.contains {
+            $0.instanceID == orphanID && $0.state == .orphanedData && $0.markerPresent
+        }, "a marker-owned record-less folder must be Orphaned Data")
+        expect(findings.contains {
+            $0.instanceID == reviewID && $0.state == .needsManualReview && !$0.markerPresent
+        }, "a markerless folder must be Needs Manual Review")
+        expect(!findings.contains { $0.instanceID == liveID },
+               "an in-config UUID must never be an orphan")
+        expect(!findings.contains { finding in
+            finding.dataPaths.contains { $0.lastPathComponent == "not-a-uuid" }
+        }, "non-UUID names must never be enumerated")
+    }
+
+    private static func testReclaimDataTrashPermanentAndFailClosed() {
+        // (a) Vault artifact plan is exactly one non-overlapping container.
+        let vaultFixture = makeVaultFixture("reclaim-vault-plan")
+        defer { try? FileManager.default.removeItem(at: vaultFixture.root) }
+        let vaultEnv = makeVaultManager(vaultFixture, vaultRoot: vaultFixture.vault)
+        var vaultConfig = KlikProConfig.default
+        vaultConfig.dataRoot = vaultFixture.vault.path
+        let vaultID = UUID()
+        let vaultCreated = try! vaultEnv.manager.create(
+            from: vaultEnv.manager.candidate(for: vaultFixture.source),
+            label: "Vault Reclaim", config: vaultConfig, instanceID: vaultID
+        )
+        let vaultTarget = vaultEnv.manager.dataRemovalTarget(
+            for: vaultCreated.config.instances.first { $0.id == vaultID }!
+        )
+        expect(vaultTarget.artifacts.count == 1
+               && vaultTarget.artifacts.first?.kind == .vaultContainer,
+               "a vault target must be exactly the one Instances/<UUID> container")
+
+        let clear = ManagedProcessInspector(
+            listProcesses: { [] }, executablePath: { _ in nil }, processArguments: { _ in nil }
+        )
+
+        // (b) Trash mode: reversible move via the injected op; no permanent delete.
+        let trashDestination = temporaryDirectory("reclaim-trash-dest")
+        defer { try? FileManager.default.removeItem(at: trashDestination) }
+        let spy = TrashSpy(destination: trashDestination)
+        var trashPersisted: KlikProConfig?
+        let trashFixture = makeVaultFixture("reclaim-trash")
+        defer { try? FileManager.default.removeItem(at: trashFixture.root) }
+        let trashEnv = makeVaultManager(
+            trashFixture, vaultRoot: nil,
+            persist: { trashPersisted = $0; return true },
+            processInspector: clear, trashItem: { try spy.trash($0) }
+        )
+        let trashID = UUID()
+        let trashCreated = try! trashEnv.manager.create(
+            from: trashEnv.manager.candidate(for: trashFixture.source),
+            label: "Trash Reclaim", config: KlikProConfig.default, instanceID: trashID
+        )
+        let trashProfile = URL(fileURLWithPath: trashCreated.instance.profileDirectory!)
+        try! Data("login-data".utf8).write(to: trashProfile.appendingPathComponent("Login"))
+        let trashTarget = trashEnv.manager.dataRemovalTarget(
+            for: trashCreated.config.instances.first { $0.id == trashID }!
+        )
+        let trashResult = try! trashEnv.manager.reclaimData(
+            target: trashTarget, config: trashCreated.config, mode: .trash
+        )
+        expect(trashResult.allRemoved, "Trash mode must remove all planned artifacts")
+        expect(spy.moved.contains(trashProfile.standardizedFileURL),
+               "Trash mode must route the profile through the injected Trash op")
+        expect(!FileManager.default.fileExists(atPath: trashProfile.path),
+               "the original profile path must be empty after Trash")
+        expect(trashPersisted?.instances.contains { $0.id == trashID } == false,
+               "a record-bearing Trash must drop the config row")
+
+        // (c) Permanent mode: unrecoverable removeItem; the Trash op is untouched.
+        let permSpy = TrashSpy(destination: temporaryDirectory("reclaim-perm-dest"))
+        let permFixture = makeVaultFixture("reclaim-permanent")
+        defer { try? FileManager.default.removeItem(at: permFixture.root) }
+        let permEnv = makeVaultManager(
+            permFixture, vaultRoot: nil,
+            processInspector: clear, trashItem: { try permSpy.trash($0) }
+        )
+        let permID = UUID()
+        let permCreated = try! permEnv.manager.create(
+            from: permEnv.manager.candidate(for: permFixture.source),
+            label: "Permanent Reclaim", config: KlikProConfig.default, instanceID: permID
+        )
+        let permProfile = URL(fileURLWithPath: permCreated.instance.profileDirectory!)
+        let permTarget = permEnv.manager.dataRemovalTarget(
+            for: permCreated.config.instances.first { $0.id == permID }!
+        )
+        let permResult = try! permEnv.manager.reclaimData(
+            target: permTarget, config: permCreated.config, mode: .permanent
+        )
+        expect(permResult.allRemoved, "Permanent mode must remove all planned artifacts")
+        expect(permSpy.moved.isEmpty, "Permanent mode must never use the Trash op")
+        expect(!FileManager.default.fileExists(atPath: permProfile.path),
+               "Permanent mode must delete the profile data")
+
+        // (d) Fail closed: a referencing/unreadable process blocks removal.
+        let inUseFixture = makeVaultFixture("reclaim-inuse")
+        defer { try? FileManager.default.removeItem(at: inUseFixture.root) }
+        let sourceExec = inUseFixture.source.bundleURL
+            .appendingPathComponent("Contents/MacOS/Fixture").path
+        let inUseEnv = makeVaultManager(
+            inUseFixture, vaultRoot: nil,
+            processInspector: ManagedProcessInspector(
+                listProcesses: { [7] },
+                executablePath: { _ in sourceExec },
+                processArguments: { _ in nil }
+            )
+        )
+        let inUseID = UUID()
+        let inUseCreated = try! inUseEnv.manager.create(
+            from: inUseEnv.manager.candidate(for: inUseFixture.source),
+            label: "In-Use Reclaim", config: KlikProConfig.default, instanceID: inUseID
+        )
+        let inUseProfile = URL(fileURLWithPath: inUseCreated.instance.profileDirectory!)
+        let inUseTarget = inUseEnv.manager.dataRemovalTarget(
+            for: inUseCreated.config.instances.first { $0.id == inUseID }!
+        )
+        do {
+            _ = try inUseEnv.manager.reclaimData(
+                target: inUseTarget, config: inUseCreated.config, mode: .trash
+            )
+            expect(false, "an incomplete/refusing process scan must block removal")
+        } catch let error as AppProfileManagerError {
+            expect(error == .processScanIncomplete,
+                   "unreadable process arguments must fail closed as processScanIncomplete")
+        } catch {
+            expect(false, "unexpected reclaim error: \(error)")
+        }
+        expect(FileManager.default.fileExists(atPath: inUseProfile.path),
+               "a blocked reclaim must leave all profile data on disk")
+    }
+
+    private static func testReclaimDataMultiArtifactPartialAndMarkerless() {
+        let clear = ManagedProcessInspector(
+            listProcesses: { [] }, executablePath: { _ in nil }, processArguments: { _ in nil }
+        )
+
+        // (M3a) Application Support target with all three artifacts, Trash mode.
+        let multiFixture = makeVaultFixture("reclaim-multi")
+        defer { try? FileManager.default.removeItem(at: multiFixture.root) }
+        let multiSpy = TrashSpy(destination: temporaryDirectory("reclaim-multi-dest"))
+        let multiEnv = makeVaultManager(
+            multiFixture, vaultRoot: nil,
+            processInspector: clear, trashItem: { try multiSpy.trash($0) }
+        )
+        let multiID = UUID()
+        let multiCreated = try! multiEnv.manager.create(
+            from: multiEnv.manager.candidate(for: multiFixture.source),
+            label: "Multi Reclaim", config: KlikProConfig.default, instanceID: multiID
+        )
+        let iconPNG = multiFixture.root.appendingPathComponent("icon.png")
+        writeTestPNG(width: 512, height: 512, to: iconPNG)
+        let withIcon = try! multiEnv.manager.updateManagedIcon(
+            instanceID: multiID, edit: .image(iconPNG), config: multiCreated.config
+        )
+        let profile = URL(fileURLWithPath: multiCreated.instance.profileDirectory!)
+        let codexHome = multiEnv.generator.codexHomeURL(for: multiID)
+        let icon = multiEnv.generator.customIconURL(for: multiID)
+        expect(FileManager.default.fileExists(atPath: profile.path)
+               && FileManager.default.fileExists(atPath: codexHome.path)
+               && FileManager.default.fileExists(atPath: icon.path),
+               "the fixture must have profile, codex-home, and custom-icon artifacts")
+        let multiTarget = multiEnv.manager.dataRemovalTarget(
+            for: withIcon.instances.first { $0.id == multiID }!
+        )
+        expect(multiTarget.artifacts.count == 3,
+               "an App Support target must list its three independent roots")
+        let multiResult = try! multiEnv.manager.reclaimData(
+            target: multiTarget, config: withIcon, mode: .trash
+        )
+        expect(multiResult.allRemoved && multiSpy.moved.count == 3,
+               "Trash mode must move all three artifacts via the injected op")
+        expect(!FileManager.default.fileExists(atPath: profile.path)
+               && !FileManager.default.fileExists(atPath: codexHome.path)
+               && !FileManager.default.fileExists(atPath: icon.path),
+               "every listed artifact must be gone from its original location")
+
+        // (M3b) Vault-container Trash, executed end-to-end (not just planned).
+        let vaultFixture = makeVaultFixture("reclaim-vault-trash")
+        defer { try? FileManager.default.removeItem(at: vaultFixture.root) }
+        let vaultSpy = TrashSpy(destination: temporaryDirectory("reclaim-vault-dest"))
+        let vaultEnv = makeVaultManager(
+            vaultFixture, vaultRoot: vaultFixture.vault,
+            processInspector: clear, trashItem: { try vaultSpy.trash($0) }
+        )
+        var vaultConfig = KlikProConfig.default
+        vaultConfig.dataRoot = vaultFixture.vault.path
+        let vaultID = UUID()
+        let vaultCreated = try! vaultEnv.manager.create(
+            from: vaultEnv.manager.candidate(for: vaultFixture.source),
+            label: "Vault Trash", config: vaultConfig, instanceID: vaultID
+        )
+        let container = try! vaultEnv.generator.vaultInstanceDirectoryURL(for: vaultID)
+        try! Data("login".utf8).write(
+            to: container.appendingPathComponent("user-data/Login")
+        )
+        let vaultTarget = vaultEnv.manager.dataRemovalTarget(
+            for: vaultCreated.config.instances.first { $0.id == vaultID }!
+        )
+        let vaultResult = try! vaultEnv.manager.reclaimData(
+            target: vaultTarget, config: vaultCreated.config, mode: .trash
+        )
+        expect(vaultResult.allRemoved
+               && vaultSpy.moved.contains(container.standardizedFileURL)
+               && !FileManager.default.fileExists(atPath: container.path),
+               "vault Trash must move exactly the owned container and leave nothing behind")
+
+        // (M2) Partial failure: one artifact's op throws → row retained, reported.
+        let partialFixture = makeVaultFixture("reclaim-partial")
+        defer { try? FileManager.default.removeItem(at: partialFixture.root) }
+        let partialSpy = TrashSpy(destination: temporaryDirectory("reclaim-partial-dest"))
+        var partialPersisted: KlikProConfig?
+        let partialEnv = makeVaultManager(
+            partialFixture, vaultRoot: nil,
+            persist: { partialPersisted = $0; return true },
+            processInspector: clear,
+            trashItem: { url in
+                if url.lastPathComponent.hasSuffix(".icns") {
+                    throw LauncherGeneratorError.unsafeRemoval
+                }
+                return try partialSpy.trash(url)
+            }
+        )
+        let partialID = UUID()
+        let partialCreated = try! partialEnv.manager.create(
+            from: partialEnv.manager.candidate(for: partialFixture.source),
+            label: "Partial Reclaim", config: KlikProConfig.default, instanceID: partialID
+        )
+        let partialIconPNG = partialFixture.root.appendingPathComponent("icon.png")
+        writeTestPNG(width: 512, height: 512, to: partialIconPNG)
+        let partialWithIcon = try! partialEnv.manager.updateManagedIcon(
+            instanceID: partialID, edit: .image(partialIconPNG), config: partialCreated.config
+        )
+        let partialIcon = partialEnv.generator.customIconURL(for: partialID)
+        let partialTarget = partialEnv.manager.dataRemovalTarget(
+            for: partialWithIcon.instances.first { $0.id == partialID }!
+        )
+        // Ignore persists from create/updateManagedIcon; watch only the reclaim.
+        partialPersisted = nil
+        let partialResult = try! partialEnv.manager.reclaimData(
+            target: partialTarget, config: partialWithIcon, mode: .trash
+        )
+        expect(!partialResult.allRemoved,
+               "a single-artifact failure must make the result not-all-removed")
+        expect(partialResult.perArtifact.contains {
+            if case .failed = $0.outcome { return true }
+            return false
+        }, "the failed artifact must be reported")
+        expect(FileManager.default.fileExists(atPath: partialIcon.path),
+               "the artifact whose op threw must remain on disk")
+        expect(partialResult.config.instances.contains { $0.id == partialID },
+               "a partial removal must retain the config row")
+        expect(partialPersisted == nil,
+               "a partial removal must not persist a row drop")
+
+        // (M4) A markerless target fails closed — nothing is removed.
+        let markerlessFixture = makeVaultFixture("reclaim-markerless")
+        defer { try? FileManager.default.removeItem(at: markerlessFixture.root) }
+        let markerlessEnv = makeVaultManager(
+            markerlessFixture, vaultRoot: nil, processInspector: clear
+        )
+        let markerlessID = UUID()
+        let markerlessDir = markerlessFixture.support
+            .appendingPathComponent("Profiles", isDirectory: true)
+            .appendingPathComponent(markerlessID.uuidString.uppercased(), isDirectory: true)
+        try! FileManager.default.createDirectory(
+            at: markerlessDir, withIntermediateDirectories: true
+        )
+        try! Data("data".utf8).write(to: markerlessDir.appendingPathComponent("data"))
+        let markerlessTarget = DataRemovalTarget(
+            instanceID: markerlessID,
+            storage: .applicationSupport,
+            artifacts: [DataRemovalArtifact(
+                url: markerlessDir.standardizedFileURL, kind: .profileRoot
+            )],
+            sizeBytes: 0,
+            hasConfigRecord: false
+        )
+        let markerlessResult = try! markerlessEnv.manager.reclaimData(
+            target: markerlessTarget, config: KlikProConfig.default, mode: .permanent
+        )
+        expect(!markerlessResult.allRemoved,
+               "a markerless target must never be fully removed")
+        expect(FileManager.default.fileExists(atPath: markerlessDir.path),
+               "a markerless folder must survive a reclaim attempt (fail closed)")
     }
 
     /// Phase 2 wiring decision: `makeLauncherGenerator(forDataRoot:)` is the one

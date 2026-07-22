@@ -2,6 +2,35 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.2.2
+
+This release completes App Profile cleanup and recovery with explicit, fail-closed
+controls for stale records and owned data left behind on disk. It is an important
+corrective update for v1.2.1 users who store profiles in a selected durable Data Folder.
+
+- **Important v1.2.1 Data Folder launch fix** — v1.2.1 generated launchers incorrectly
+  required the default Application Support profile path, so newly created profiles in
+  a selected durable Data Folder could fail to launch. v1.2.2 signs the exact validated
+  storage type and profile path into new launchers and refreshes older managed launchers
+  when they are used. Profiles kept in the default Application Support location were
+  not affected by this defect.
+
+- **Forget stale entries** — remove a Missing Data record and its derived launcher
+  without guessing at, recreating, or deleting user data.
+- **Find orphaned data** — scan Klik PRO's managed Application Support and durable
+  data-folder roots for UUID-keyed data that no longer has a trustworthy record.
+- **Safe reclaim controls** — marker-owned orphaned data can be moved to Trash or,
+  after a separate destructive confirmation, permanently deleted. Markerless,
+  ambiguous, symlinked, or in-use paths fail closed.
+- **Partial-failure reporting** — multi-artifact cleanup reports each result and
+  retains the profile record unless every validated artifact was removed.
+- **Fixed vault-backed launchers** — generated Dock, Spotlight, Launchpad,
+  and Finder launchers now validate and open profiles stored in the selected durable
+  data folder instead of incorrectly requiring the Application Support profile path.
+- **Clearer removal choices** — **Remove from Klik PRO** keeps login/profile data on
+  disk, while **Delete Data** explicitly removes the launcher, managed entry, and
+  validated profile data using Move to Trash or a separately confirmed permanent delete.
+
 ## 1.2.1
 
 This release gives App Profiles a focused, non-destructive maintenance workflow.
@@ -24,7 +53,7 @@ It makes stale entries understandable and repairable without risking saved login
   mouse mappings, global hotkeys, menu-bar icons, Open actions, and the normal App
   Profiles lists until restored.
 
-Permanent deletion is deliberately not part of v1.2.1; missing data is reported and
+Permanent deletion was deliberately not part of v1.2.1; missing data was reported and
 never guessed at or recreated automatically.
 
 ## 1.2.0

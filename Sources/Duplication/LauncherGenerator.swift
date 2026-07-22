@@ -30,6 +30,7 @@ struct ManagedLauncherSpecification: Equatable {
     let sourceBundleURL: URL
     let arguments: [String]
     let environment: [String: String]
+    let storage: AppProfileStorage
 }
 
 struct ManagedLauncherMaterialization: Equatable {
@@ -49,6 +50,27 @@ struct ManagedProfileRemoval: Equatable {
     fileprivate let originalURL: URL
     fileprivate let stagedURL: URL
     fileprivate let storage: AppProfileStorage
+}
+
+/// One reclaimable data root owned by an instance. Each kind carries its own
+/// validation rule: `profileRoot` (and the vault `container`, whose `user-data`
+/// holds the marker) is ownership-marker gated; `codexHome` and `customIcon`
+/// are validated only by their standardized position directly under the exact
+/// Klik PRO root with the UUID-derived name. Removal is per-artifact so a
+/// partial failure never cascades.
+enum OwnedArtifactKind: Equatable {
+    case profileRoot
+    case codexHome
+    case customIcon
+    case vaultContainer
+}
+
+/// How an owned artifact is reclaimed. `.trash` is reversible (macOS Trash via
+/// the injected op); `.permanent` is an unrecoverable `removeItem`. The mode is
+/// always the user's explicit per-action choice.
+enum DataRemovalMode: Equatable {
+    case trash
+    case permanent
 }
 
 /// Materializes the UUID-keyed launcher bundle described by the RFC. The executable
@@ -82,6 +104,11 @@ struct LauncherGenerator {
     private let fileManager: FileManager
     private let launcherExecutableURL: URL?
     private let signLauncher: (URL) -> Bool
+    /// Injectable Move-to-Trash op. Production uses `FileManager.trashItem`;
+    /// tests inject a temp-directory fake so a test run never touches the real
+    /// Trash and can prove no permanent `removeItem` happened. Returns the
+    /// resulting in-Trash URL (nil if the platform reports none).
+    private let trashItem: (URL) throws -> URL?
 
     init(
         applicationSupportURL: URL = URL(
@@ -96,7 +123,8 @@ struct LauncherGenerator {
             forResource: LauncherGenerator.executableName,
             withExtension: nil
         ),
-        signLauncher: @escaping (URL) -> Bool = LauncherGenerator.adHocSign
+        signLauncher: @escaping (URL) -> Bool = LauncherGenerator.adHocSign,
+        trashItem: @escaping (URL) throws -> URL? = LauncherGenerator.defaultTrash
     ) {
         let support = applicationSupportURL.standardizedFileURL
         self.applicationSupportURL = support
@@ -126,6 +154,14 @@ struct LauncherGenerator {
         self.fileManager = fileManager
         self.launcherExecutableURL = launcherExecutableURL?.standardizedFileURL
         self.signLauncher = signLauncher
+        self.trashItem = trashItem
+    }
+
+    /// Production Move-to-Trash: reversible, never a permanent delete.
+    static func defaultTrash(_ url: URL) throws -> URL? {
+        var resultingURL: NSURL?
+        try FileManager.default.trashItem(at: url, resultingItemURL: &resultingURL)
+        return resultingURL as URL?
     }
 
     func launcherURL(for id: UUID) -> URL {
@@ -347,7 +383,9 @@ struct LauncherGenerator {
             sourceBundlePath: spec.sourceBundleURL.path,
             arguments: spec.arguments,
             environment: spec.environment,
-            compatibilityRuleID: compatibilityRuleID
+            compatibilityRuleID: compatibilityRuleID,
+            profileDirectory: spec.profileURL.path,
+            profileStorage: spec.storage == .vault ? .vault : .applicationSupport
         )
         let payloadData = try PropertyListEncoder().encode(payload)
         do {
@@ -362,14 +400,15 @@ struct LauncherGenerator {
         }
     }
 
-    /// Refreshes an older generated launcher with the current embedded runner and
-    /// required Apple-events purpose string, then re-signs it. Profile data,
-    /// custom icon, label, and baked LaunchSpec payload are never touched.
+    /// Refreshes an older generated launcher with the current embedded runner,
+    /// signed LaunchSpec storage contract, and Apple-events purpose string, then
+    /// re-signs it. Profile data, custom icon, and label are never touched.
     /// Returns true when a refresh was applied, false when already current.
     /// Fail-safe: executable bytes, metadata, and permissions are restored if
     /// re-signing fails.
     @discardableResult
     func refreshLauncherRuntimeIfStale(for instance: AppProfileInstance) throws -> Bool {
+        let spec = try specification(for: instance)
         guard let runner = launcherExecutableURL,
               fileManager.isExecutableFile(atPath: runner.path) else {
             throw LauncherGeneratorError.launcherExecutableUnavailable
@@ -391,10 +430,27 @@ struct LauncherGenerator {
         ) as? [String: Any] else {
             throw LauncherGeneratorError.materializationFailed
         }
+        guard let compatibilityRuleID = instance.compatibilityRuleID,
+              !compatibilityRuleID.isEmpty else {
+            throw LauncherGeneratorError.materializationFailed
+        }
+        let payloadURL = launcherURL
+            .appendingPathComponent("Contents/Resources", isDirectory: true)
+            .appendingPathComponent(Self.payloadResourceName)
+        let originalPayload = try Data(contentsOf: payloadURL)
+        let expectedPayload = try PropertyListEncoder().encode(ManagedLauncherPayload(
+            sourceBundlePath: spec.sourceBundleURL.path,
+            arguments: spec.arguments,
+            environment: spec.environment,
+            compatibilityRuleID: compatibilityRuleID,
+            profileDirectory: spec.profileURL.path,
+            profileStorage: spec.storage == .vault ? .vault : .applicationSupport
+        ))
         let runnerIsCurrent = existing == current
+        let payloadIsCurrent = originalPayload == expectedPayload
         let purposeStringIsCurrent = info["NSAppleEventsUsageDescription"] as? String
             == Self.appleEventsUsageDescription
-        if runnerIsCurrent && purposeStringIsCurrent { return false }
+        if runnerIsCurrent && payloadIsCurrent && purposeStringIsCurrent { return false }
         do {
             if !runnerIsCurrent {
                 try current.write(to: embedded, options: .atomic)
@@ -409,6 +465,9 @@ struct LauncherGenerator {
                 )
                 try updatedInfo.write(to: infoURL, options: .atomic)
             }
+            if !payloadIsCurrent {
+                try expectedPayload.write(to: payloadURL, options: .atomic)
+            }
             guard signLauncher(launcherURL) else {
                 throw LauncherGeneratorError.materializationFailed
             }
@@ -420,6 +479,7 @@ struct LauncherGenerator {
                 [.posixPermissions: originalPermissions], ofItemAtPath: embedded.path
             )
             try? originalInfo.write(to: infoURL, options: .atomic)
+            try? originalPayload.write(to: payloadURL, options: .atomic)
             _ = signLauncher(launcherURL)
             throw LauncherGeneratorError.materializationFailed
         }
@@ -572,7 +632,8 @@ struct LauncherGenerator {
             profileURL: expectedProfile,
             sourceBundleURL: sourceURL,
             arguments: ["--user-data-dir=" + expectedProfile.path],
-            environment: instance.environmentOverrides
+            environment: instance.environmentOverrides,
+            storage: instance.storage
         )
     }
 
@@ -729,7 +790,9 @@ struct LauncherGenerator {
                 sourceBundlePath: spec.sourceBundleURL.path,
                 arguments: spec.arguments,
                 environment: spec.environment,
-                compatibilityRuleID: compatibilityRuleID
+                compatibilityRuleID: compatibilityRuleID,
+                profileDirectory: spec.profileURL.path,
+                profileStorage: spec.storage == .vault ? .vault : .applicationSupport
             )
             let payloadData = try PropertyListEncoder().encode(payload)
             try payloadData.write(
@@ -900,6 +963,105 @@ struct LauncherGenerator {
 
     func hasCustomIcon(for id: UUID) -> Bool {
         fileManager.fileExists(atPath: customIconURL(for: id).path)
+    }
+
+    /// One UUID-keyed data root found on disk, before any record cross-check.
+    /// `dataURL` is `Profiles/<UUID>` for Application Support storage or
+    /// `<Vault>/Instances/<UUID>` for vault storage; `markerPresent` is true
+    /// only when the owned-profile marker validates for that UUID.
+    struct ProfileDataCandidate: Equatable {
+        let instanceID: UUID
+        let storage: AppProfileStorage
+        let dataURL: URL
+        let markerPresent: Bool
+    }
+
+    /// Read-only enumeration of every UUID-named data root under the Klik PRO
+    /// Profiles root and, when a vault is configured, the vault `Instances`
+    /// root. Never creates, moves, or modifies anything (invariant I5). A
+    /// swapped-in symlink at a candidate node is skipped, not followed.
+    func scanProfileDataCandidates() -> [ProfileDataCandidate] {
+        var found: [ProfileDataCandidate] = []
+        let profilesRoot = applicationSupportURL
+            .appendingPathComponent("Profiles", isDirectory: true)
+        found.append(contentsOf: candidates(in: profilesRoot, storage: .applicationSupport) { id in
+            profileURL(for: id)
+        })
+        if let vaultRootURL {
+            let instancesRoot = vaultRootURL.appendingPathComponent("Instances", isDirectory: true)
+            found.append(contentsOf: candidates(in: instancesRoot, storage: .vault) { id in
+                (try? vaultInstanceDirectoryURL(for: id)) ?? instancesRoot
+                    .appendingPathComponent(id.uuidString.uppercased(), isDirectory: true)
+            })
+        }
+        return found
+    }
+
+    private func candidates(
+        in root: URL,
+        storage: AppProfileStorage,
+        dataURL: (UUID) -> URL
+    ) -> [ProfileDataCandidate] {
+        guard let names = try? fileManager.contentsOfDirectory(atPath: root.path) else {
+            return []
+        }
+        var result: [ProfileDataCandidate] = []
+        for name in names {
+            guard let id = UUID(uuidString: name), name == id.uuidString.uppercased() else {
+                continue
+            }
+            let node = dataURL(id).standardizedFileURL
+            guard let values = try? node.resourceValues(forKeys: [
+                .isDirectoryKey,
+                .isSymbolicLinkKey,
+            ]),
+                values.isDirectory == true,
+                values.isSymbolicLink != true else {
+                continue
+            }
+            let markerURL: URL
+            switch storage {
+            case .applicationSupport:
+                markerURL = node.appendingPathComponent(Self.profileOwnershipMarkerName)
+            case .vault:
+                markerURL = node
+                    .appendingPathComponent("user-data", isDirectory: true)
+                    .appendingPathComponent(Self.profileOwnershipMarkerName)
+            }
+            let markerData = fileManager.contents(atPath: markerURL.path)
+            let markerPresent = markerData
+                .map { String(decoding: $0, as: UTF8.self) == id.uuidString.uppercased() }
+                ?? false
+            result.append(ProfileDataCandidate(
+                instanceID: id,
+                storage: storage,
+                dataURL: node,
+                markerPresent: markerPresent
+            ))
+        }
+        return result
+    }
+
+    /// Best-effort recursive byte size of a data root, for the delete
+    /// confirmation summary. Unreadable entries are skipped (size is advisory).
+    func dataSize(at url: URL) -> Int64 {
+        guard let enumerator = fileManager.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .fileAllocatedSizeKey],
+            options: [],
+            errorHandler: { _, _ in true }
+        ) else {
+            return 0
+        }
+        var total: Int64 = 0
+        for case let child as URL in enumerator {
+            let values = try? child.resourceValues(forKeys: [
+                .totalFileAllocatedSizeKey,
+                .fileAllocatedSizeKey,
+            ])
+            total += Int64(values?.totalFileAllocatedSize ?? values?.fileAllocatedSize ?? 0)
+        }
+        return total
     }
 
     func vaultCustomIconURL(for id: UUID) throws -> URL {
@@ -1458,6 +1620,110 @@ struct LauncherGenerator {
         do {
             try fileManager.moveItem(at: removal.stagedURL, to: removal.originalURL)
         } catch {
+            throw LauncherGeneratorError.unsafeRemoval
+        }
+    }
+
+    /// Reclaims a single owned data artifact — either to the Trash (reversible)
+    /// or permanently. Every kind is re-validated against its exact Klik PRO
+    /// root immediately before the op, so a swapped path, a symlink, or a
+    /// non-UUID name fails closed and nothing is touched. Marker-bearing kinds
+    /// (`profileRoot`, `vaultContainer` via its `user-data`) re-prove ownership;
+    /// `codexHome`/`customIcon` are gated purely by their standardized position.
+    /// Returns the resulting Trash URL for `.trash`, nil for `.permanent`.
+    @discardableResult
+    func removeOwnedArtifact(
+        at candidateURL: URL,
+        kind: OwnedArtifactKind,
+        instanceID: UUID,
+        storage: AppProfileStorage,
+        mode: DataRemovalMode
+    ) throws -> URL? {
+        let standardized = candidateURL.standardizedFileURL
+        switch kind {
+        case .profileRoot:
+            // Application Support profile root: marker-gated, symlink-rejecting.
+            guard storage == .applicationSupport else {
+                throw LauncherGeneratorError.unsafeRemoval
+            }
+            try validateOwnedProfile(
+                instanceID: instanceID,
+                at: standardized,
+                storage: .applicationSupport,
+                rejectDescendantSymlinks: true
+            )
+        case .vaultContainer:
+            // `<Vault>/Instances/<UUID>`: position-gated, and its `user-data`
+            // must carry the ownership marker (that is the ownership proof).
+            guard storage == .vault,
+                  let expected = try? vaultInstanceDirectoryURL(for: instanceID),
+                  standardized == expected.standardizedFileURL else {
+                throw LauncherGeneratorError.unsafeRemoval
+            }
+            try validateContainerNode(standardized)
+            let userData = standardized.appendingPathComponent("user-data", isDirectory: true)
+            try validateOwnedProfile(
+                instanceID: instanceID,
+                at: userData,
+                storage: .vault,
+                rejectDescendantSymlinks: true
+            )
+        case .codexHome:
+            guard storage == .applicationSupport else {
+                throw LauncherGeneratorError.unsafeRemoval
+            }
+            let expected = codexHomeURL(for: instanceID).standardizedFileURL
+            guard standardized == expected else {
+                throw LauncherGeneratorError.unsafeRemoval
+            }
+            try validateContainerNode(standardized)
+        case .customIcon:
+            guard storage == .applicationSupport else {
+                throw LauncherGeneratorError.unsafeRemoval
+            }
+            let expected = customIconURL(for: instanceID).standardizedFileURL
+            guard standardized == expected else {
+                throw LauncherGeneratorError.unsafeRemoval
+            }
+            let values = try? standardized.resourceValues(forKeys: [
+                .isRegularFileKey,
+                .isSymbolicLinkKey,
+            ])
+            guard values?.isRegularFile == true, values?.isSymbolicLink != true else {
+                throw LauncherGeneratorError.unsafeRemoval
+            }
+        }
+
+        switch mode {
+        case .trash:
+            do {
+                return try trashItem(standardized)
+            } catch {
+                throw LauncherGeneratorError.unsafeRemoval
+            }
+        case .permanent:
+            do {
+                try fileManager.removeItem(at: standardized)
+                return nil
+            } catch {
+                throw LauncherGeneratorError.unsafeRemoval
+            }
+        }
+    }
+
+    /// A directory node that must sit exactly at its resolved path (no symlink
+    /// redirection) and be a real directory, used for `codexHome` and the vault
+    /// container before a reclaim.
+    private func validateContainerNode(_ standardized: URL) throws {
+        guard standardized.resolvingSymlinksInPath() == standardized,
+              standardized.deletingLastPathComponent().resolvingSymlinksInPath()
+                == standardized.deletingLastPathComponent(),
+              let values = try? standardized.resourceValues(forKeys: [
+                .isDirectoryKey,
+                .isSymbolicLinkKey,
+              ]),
+              values.isDirectory == true,
+              values.isSymbolicLink != true else {
             throw LauncherGeneratorError.unsafeRemoval
         }
     }

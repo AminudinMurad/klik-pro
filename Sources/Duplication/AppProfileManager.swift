@@ -24,6 +24,12 @@ enum AppProfileManagerError: Error, Equatable {
     case vaultManifestInvalid
     case invalidLifecycleState
     case repairUnavailable
+    /// Forget Entry was requested for a record whose data is still present, or
+    /// for a non-managed row. Forget is gated to Missing Data / stale records.
+    case forgetUnavailable
+    /// A data-removal target failed its ownership/path gate, so nothing was
+    /// touched (e.g. a markerless orphan, or a swapped path).
+    case dataRemovalUnavailable
 }
 
 struct AppProfileCandidate: Identifiable, Equatable {
@@ -58,6 +64,68 @@ enum AppProfileMaintenanceHealth: Equatable {
     case recoverableArchived
     case missingLauncher
     case missingData
+    /// Marker-owned data on disk with no trustworthy config record — reclaimable
+    /// via Move Data to Trash / Delete. Surfaced from `scanOrphans`, never
+    /// returned by `maintenanceHealth(for:)` (which is per config record).
+    case orphanedData
+    /// A UUID-named data folder under a Klik PRO root that carries no ownership
+    /// marker — surfaced for the user's information only; Klik PRO offers no
+    /// delete action for it.
+    case needsManualReview
+}
+
+/// One record-less data root found on disk (`scanOrphans`). `.orphanedData`
+/// carries a marker (Klik PRO owns it); `.needsManualReview` does not.
+struct OrphanFinding: Equatable {
+    let instanceID: UUID
+    let storage: AppProfileStorage
+    let state: AppProfileMaintenanceHealth
+    let dataPaths: [URL]
+    let sizeBytes: Int64
+    let markerPresent: Bool
+}
+
+/// A validated set of owned artifacts to reclaim, with the config row (if any)
+/// the removal should also drop once its data is gone.
+struct DataRemovalTarget: Equatable {
+    let instanceID: UUID
+    let storage: AppProfileStorage
+    let artifacts: [DataRemovalArtifact]
+    /// Best-effort total size of the artifacts, for the confirmation summary.
+    let sizeBytes: Int64
+    /// True when the target came from a config record (direct delete on a
+    /// visible row); false for a record-less orphan.
+    let hasConfigRecord: Bool
+
+    var paths: [URL] { artifacts.map { $0.url } }
+}
+
+struct DataRemovalArtifact: Equatable {
+    let url: URL
+    let kind: OwnedArtifactKind
+}
+
+enum DataRemovalArtifactOutcome: Equatable {
+    case removed(trashURL: URL?)
+    case failed
+}
+
+struct DataRemovalArtifactResult: Equatable {
+    let url: URL
+    let outcome: DataRemovalArtifactOutcome
+}
+
+struct DataRemovalResult: Equatable {
+    let config: KlikProConfig
+    let perArtifact: [DataRemovalArtifactResult]
+    let mode: DataRemovalMode
+
+    var allRemoved: Bool {
+        !perArtifact.isEmpty && perArtifact.allSatisfy {
+            if case .removed = $0.outcome { return true }
+            return false
+        }
+    }
 }
 
 struct AppProfileArchiveResult: Equatable {
@@ -614,6 +682,259 @@ struct AppProfileManager {
             updateVaultManifest(config: updated)
         }
         return updated
+    }
+
+    /// Forget Entry (spec §6.4): drops a stale config row (and its vault
+    /// manifest record) whose profile data is already gone. Touches **no** user
+    /// data — a launcher is not user data, so any residual launcher bundle is
+    /// still cleaned up. Data-read-only, so no lock/scan (I9). Config persist is
+    /// the commit point; a persist failure leaves the disk untouched.
+    func forget(
+        instanceID: UUID,
+        config: KlikProConfig,
+        allowStale: Bool = false
+    ) throws -> AppProfileRemovalResult {
+        guard let instance = config.instances.first(where: { $0.id == instanceID }) else {
+            return AppProfileRemovalResult(
+                config: config,
+                launcherCleanupCompleted: true,
+                profileCleanupCompleted: true,
+                profileDeleted: false
+            )
+        }
+        guard instance.launcherKind == .managed,
+              instance.profileOwnership == .managed else {
+            throw AppProfileManagerError.externalInstance
+        }
+        guard allowStale || maintenanceHealth(for: instance) == .missingData else {
+            throw AppProfileManagerError.forgetUnavailable
+        }
+        var updated = config
+        updated.instances.removeAll { $0.id == instanceID }
+        guard persist(updated) else {
+            throw AppProfileManagerError.persistenceFailed
+        }
+        if instance.storage == .vault {
+            updateVaultManifest(config: updated)
+        }
+        var launcherCleanupCompleted = true
+        do {
+            if let staged = try generator.stageLauncherRemoval(for: instance) {
+                try generator.commitLauncherRemoval(staged, preserveCustomIcon: false)
+            }
+        } catch {
+            launcherCleanupCompleted = false
+        }
+        generator.removeHomeSymlinks(for: instanceID, storage: instance.storage)
+        return AppProfileRemovalResult(
+            config: updated,
+            launcherCleanupCompleted: launcherCleanupCompleted,
+            profileCleanupCompleted: true,
+            profileDeleted: false
+        )
+    }
+
+    /// Read-only reconciliation of the Klik PRO data roots against the config
+    /// and the vault manifest (spec §5). Returns record-less UUID data roots:
+    /// marker-owned ones are `.orphanedData` (reclaimable), markerless ones are
+    /// `.needsManualReview` (surfaced only). Never touches data (I5). The
+    /// fail-closed *in-use* protection is enforced at removal time by the
+    /// exclusive per-instance lock, not here — listing a running profile is
+    /// harmless because `reclaimData` refuses it.
+    func scanOrphans(config: KlikProConfig) -> [OrphanFinding] {
+        let recordIDs = Set(config.instances.map { $0.id })
+        let manifestIDs: Set<UUID> = {
+            guard let vaultRoot = generator.vaultRootURL,
+                  let manifest = VaultManifest.read(vaultRoot: vaultRoot) else { return [] }
+            return Set(manifest.instances.map { $0.id })
+        }()
+        var findings: [OrphanFinding] = []
+        for candidate in generator.scanProfileDataCandidates() {
+            guard !recordIDs.contains(candidate.instanceID),
+                  !manifestIDs.contains(candidate.instanceID) else { continue }
+            let artifacts = artifactPlan(
+                instanceID: candidate.instanceID,
+                storage: candidate.storage
+            )
+            let paths = artifacts.map { $0.url }
+            let size = paths.reduce(Int64(0)) { $0 + generator.dataSize(at: $1) }
+            findings.append(OrphanFinding(
+                instanceID: candidate.instanceID,
+                storage: candidate.storage,
+                state: candidate.markerPresent ? .orphanedData : .needsManualReview,
+                dataPaths: paths,
+                sizeBytes: size,
+                markerPresent: candidate.markerPresent
+            ))
+        }
+        return findings.sorted {
+            $0.instanceID.uuidString < $1.instanceID.uuidString
+        }
+    }
+
+    /// Builds a `DataRemovalTarget` for an existing config record (direct delete
+    /// on a visible maintenance row). Only artifacts that actually exist on disk
+    /// are included.
+    func dataRemovalTarget(for instance: AppProfileInstance) -> DataRemovalTarget {
+        let artifacts = artifactPlan(instanceID: instance.id, storage: instance.storage)
+        return DataRemovalTarget(
+            instanceID: instance.id,
+            storage: instance.storage,
+            artifacts: artifacts,
+            sizeBytes: artifacts.reduce(Int64(0)) { $0 + generator.dataSize(at: $1.url) },
+            hasConfigRecord: true
+        )
+    }
+
+    /// Builds a `DataRemovalTarget` for a record-less orphan finding.
+    func dataRemovalTarget(for orphan: OrphanFinding) -> DataRemovalTarget {
+        let artifacts = artifactPlan(instanceID: orphan.instanceID, storage: orphan.storage)
+        return DataRemovalTarget(
+            instanceID: orphan.instanceID,
+            storage: orphan.storage,
+            artifacts: artifacts,
+            sizeBytes: orphan.sizeBytes,
+            hasConfigRecord: false
+        )
+    }
+
+    /// The non-overlapping owned-artifact plan (spec §6.5). Vault storage is one
+    /// container (`Instances/<UUID>`); Application Support is the independent
+    /// `Profiles/<UUID>`, `CodexHomes/<UUID>`, `CustomIcons/<UUID>.icns` roots.
+    /// Only existing paths are listed.
+    private func artifactPlan(
+        instanceID: UUID,
+        storage: AppProfileStorage
+    ) -> [DataRemovalArtifact] {
+        let fileManager = FileManager.default
+        var plan: [DataRemovalArtifact] = []
+        switch storage {
+        case .vault:
+            if let container = try? generator.vaultInstanceDirectoryURL(for: instanceID),
+               fileManager.fileExists(atPath: container.path) {
+                plan.append(DataRemovalArtifact(
+                    url: container.standardizedFileURL, kind: .vaultContainer
+                ))
+            }
+        case .applicationSupport:
+            let profile = generator.profileURL(for: instanceID).standardizedFileURL
+            if fileManager.fileExists(atPath: profile.path) {
+                plan.append(DataRemovalArtifact(url: profile, kind: .profileRoot))
+            }
+            let codexHome = generator.codexHomeURL(for: instanceID).standardizedFileURL
+            if fileManager.fileExists(atPath: codexHome.path) {
+                plan.append(DataRemovalArtifact(url: codexHome, kind: .codexHome))
+            }
+            let icon = generator.customIconURL(for: instanceID).standardizedFileURL
+            if fileManager.fileExists(atPath: icon.path) {
+                plan.append(DataRemovalArtifact(url: icon, kind: .customIcon))
+            }
+        }
+        return plan
+    }
+
+    /// Asserts no artifact path is a duplicate or a prefix of another — an
+    /// overlap is a programming error that must abort before any removal.
+    private func nonOverlapping(_ artifacts: [DataRemovalArtifact]) -> Bool {
+        let paths = artifacts.map { $0.url.standardizedFileURL.path }
+        guard Set(paths).count == paths.count else { return false }
+        for outer in paths {
+            for inner in paths where inner != outer {
+                if inner.hasPrefix(outer + "/") { return false }
+            }
+        }
+        return true
+    }
+
+    /// Move Data to Trash **or** Permanent delete (spec §6.5 + the owner
+    /// permanent-delete override). The only data-removal path. Shared gates
+    /// (I6/I9): exclusive per-instance lock (the in-use gate for both record and
+    /// orphan targets); a record-bearing target additionally runs the two-pass
+    /// fail-closed process scan; each artifact is ownership/path re-validated by
+    /// the generator immediately before its op. Artifacts are removed
+    /// independently with per-artifact results; a `.trash` op never falls back
+    /// to a permanent delete.
+    func reclaimData(
+        target: DataRemovalTarget,
+        config: KlikProConfig,
+        mode: DataRemovalMode
+    ) throws -> DataRemovalResult {
+        guard !target.artifacts.isEmpty else {
+            return DataRemovalResult(config: config, perArtifact: [], mode: mode)
+        }
+        guard nonOverlapping(target.artifacts) else {
+            throw AppProfileManagerError.dataRemovalUnavailable
+        }
+        guard let operationLock = ManagedInstanceLock(
+            applicationSupportURL: generator.applicationSupportURL,
+            instanceID: target.instanceID,
+            mode: .exclusive
+        ) else {
+            throw AppProfileManagerError.processScanIncomplete
+        }
+        defer { withExtendedLifetime(operationLock) {} }
+
+        if target.hasConfigRecord {
+            guard let instance = config.instances.first(where: { $0.id == target.instanceID }),
+                  instance.launcherKind == .managed,
+                  instance.profileOwnership == .managed,
+                  let profileDirectory = instance.profileDirectory else {
+                throw AppProfileManagerError.dataRemovalUnavailable
+            }
+            let sourceURL = URL(fileURLWithPath: instance.source.bundleURL, isDirectory: true)
+                .standardizedFileURL
+            let profileURL = URL(fileURLWithPath: profileDirectory, isDirectory: true)
+                .standardizedFileURL
+            for scanIndex in 0..<2 {
+                switch processInspector.profileReferences(
+                    sourceBundleURL: sourceURL,
+                    profileURL: profileURL
+                ) {
+                case .incomplete:
+                    throw AppProfileManagerError.processScanIncomplete
+                case .complete(let pids) where !pids.isEmpty:
+                    throw AppProfileManagerError.profileInUse
+                case .complete:
+                    if scanIndex == 0 { waitBetweenProfileScans() }
+                }
+            }
+        }
+
+        var results: [DataRemovalArtifactResult] = []
+        for artifact in target.artifacts {
+            do {
+                let trashURL = try generator.removeOwnedArtifact(
+                    at: artifact.url,
+                    kind: artifact.kind,
+                    instanceID: target.instanceID,
+                    storage: target.storage,
+                    mode: mode
+                )
+                results.append(DataRemovalArtifactResult(
+                    url: artifact.url, outcome: .removed(trashURL: trashURL)
+                ))
+            } catch {
+                results.append(DataRemovalArtifactResult(url: artifact.url, outcome: .failed))
+            }
+        }
+
+        var updated = config
+        let removedAll = results.allSatisfy {
+            if case .removed = $0.outcome { return true }
+            return false
+        }
+        if target.hasConfigRecord && removedAll {
+            let wasVault = config.instances
+                .first(where: { $0.id == target.instanceID })?.storage == .vault
+            updated.instances.removeAll { $0.id == target.instanceID }
+            if persist(updated) {
+                generator.removeHomeSymlinks(for: target.instanceID, storage: target.storage)
+                if wasVault { updateVaultManifest(config: updated) }
+            } else {
+                updated = config
+            }
+        }
+        return DataRemovalResult(config: updated, perArtifact: results, mode: mode)
     }
 
     /// Repairs derived lifecycle state from the persisted config. This is safe

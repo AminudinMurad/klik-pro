@@ -31,6 +31,30 @@ scope is folded in as Phase B.
 7. **Base/worktree corrected** — header above (`954540d`, not `curated-app-profiles`).
 8. **Line refs rechecked against `954540d`; "build 5" promise removed.**
 
+### Revision — owner override + Phase B implementation (2026-07-22)
+Authorized by Aminudin (plan approval this session). Records where the built
+Phase B intentionally departs from the text above; **pending Codex-A review**.
+1. **Permanent delete is now a user-chosen mode** alongside Move to Trash. The
+   delete confirmation offers **Move to Trash** (default, recoverable) **and**
+   **Delete Permanently**. This deliberately overrides **I1** ("data is sacred —
+   Trash only") and the §13 non-goal "No permanent deletion anywhere." Both
+   modes share the identical ownership/path gates, exclusive lock, two-pass
+   process scan (for record-bearing targets), and the non-overlapping artifact
+   plan; only the final op differs (`trashItem` vs `removeItem`), via
+   `LauncherGenerator.removeOwnedArtifact(…, mode:)`.
+2. **Direct delete on visible rows.** Healthy / Archived / Missing-Launcher rows
+   expose a **Delete…** action (not only orphans), because the reported need was
+   "delete a profile I can see." Missing-Data rows keep **Forget…** only.
+3. **Classification shipped as 4 states in Phase A**; Phase B adds
+   `orphanedData` / `needsManualReview` as **scan findings** (`OrphanFinding`
+   from `scanOrphans`), surfaced in their own maintenance group — not as
+   `maintenanceHealth(for:)` cases (that call is per config record).
+4. **Orphan in-use gate.** A record-less orphan has no source app, so the
+   two-pass argv scan cannot run for it; its fail-closed in-use protection is the
+   **exclusive per-instance lock** (a running managed launcher holds the shared
+   lock). Record-bearing deletes still run the full two-pass scan. Listing a
+   running orphan is harmless — `reclaimData` refuses it at the lock.
+
 ### Revision — Codex-A round 2 (conditional approval; 4 final corrections)
 1. **Archive crash consistency** — §6.1 reordered: **persist archived config first
    (commit point), no filesystem artifact touched before it**; then manifest; then
@@ -117,9 +141,11 @@ Orphaned Data (never auto-adopt without a recipe, §5). config vs manifest disag
 
 ## 3. Invariants
 
-- **I1 — Data is sacred.** Profile data is never permanently deleted or
-  overwritten. The only removal is **Move to Trash** (reversible), marker-gated,
-  exclusive-lock + fail-closed process-scan protected.
+- **I1 — Data is sacred.** ⚠️ **Superseded in part by the 2026-07-22 owner
+  override:** Move to Trash remains the default and recommended path, but a
+  user-chosen **Delete Permanently** mode now also exists. Both modes are
+  marker-gated, exclusive-lock + fail-closed process-scan protected; the
+  reversibility guarantee holds only for the Trash mode.
 - **I2 — UUID identity is stable.** Never reused or regenerated; Repair/Restore/
   Archive act on the same UUID.
 - **I3 — Archive is lossless & reversible.** Full record, recipe, metadata, and
@@ -640,4 +666,6 @@ or presses Scan:
 - No touching `/Applications`, source apps, the vault root itself, `~`, or any path
   outside the Klik PRO roots.
 - No reconstructing a profile from a recipe-less (marker-only) data folder.
-- No permanent deletion anywhere — Trash only.
+- ~~No permanent deletion anywhere — Trash only.~~ ⚠️ **Reversed by the
+  2026-07-22 owner override:** Delete Permanently is an explicit, per-action
+  user choice (see the revision note at the top). Trash remains the default.

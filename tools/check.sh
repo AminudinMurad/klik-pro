@@ -253,6 +253,21 @@ grep -q 'bundleIdentifierPrefix = "local.klik-pro.launcher.i"' \
   "$ROOT/Sources/KlikProManagedLauncher.swift"
 grep -q 'isInternalLauncher || isVisibleLauncher' \
   "$ROOT/Sources/KlikProManagedLauncher.swift"
+grep -q 'payload.validatedProfileURL(' \
+  "$ROOT/Sources/KlikProManagedLauncher.swift"
+grep -q 'case applicationSupport' \
+  "$ROOT/Sources/Duplication/ManagedLauncherPayload.swift"
+grep -q 'case vault' \
+  "$ROOT/Sources/Duplication/ManagedLauncherPayload.swift"
+grep -q 'profileStorage: spec.storage == .vault ? .vault : .applicationSupport' \
+  "$ROOT/Sources/Duplication/LauncherGenerator.swift"
+grep -q 'payloadIsCurrent' \
+  "$ROOT/Sources/Duplication/LauncherGenerator.swift"
+grep -q 'local.klik-pro.settings.app-profile-health' \
+  "$ROOT/Sources/KlikProApp.swift"
+health_block="$(sed -n '/private func refreshAppProfileHealth()/,/private func appProfileRuntimeErrorMessage/p' \
+  "$ROOT/Sources/KlikProApp.swift")"
+grep -q 'appProfileHealthQueue.async' <<<"$health_block"
 grep -q 'private static func renameDockLauncherIfPresent' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'CFPreferencesSetAppValue' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'tileData\["file-label"\] = updatedURL.deletingPathExtension().lastPathComponent' \

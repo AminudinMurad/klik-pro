@@ -30,21 +30,16 @@ enum KlikProManagedLauncher {
 
         let sourceURL = URL(fileURLWithPath: payload.sourceBundlePath, isDirectory: true)
             .standardizedFileURL
-        let expectedProfileURL = context.supportRoot
-            .appendingPathComponent("Profiles", isDirectory: true)
-            .appendingPathComponent(
-                context.instanceID.uuidString.uppercased(),
-                isDirectory: true
-            )
+        guard let expectedProfileURL = payload.validatedProfileURL(
+            instanceID: context.instanceID,
+            applicationSupportURL: context.supportRoot
+        ) else {
+            exit(21)
+        }
         let expectedProfileArgument = "--user-data-dir=" + expectedProfileURL.path
         guard sourceURL.pathExtension.lowercased() == "app",
               FileManager.default.fileExists(atPath: sourceURL.path),
-              payload.arguments == [expectedProfileArgument],
-              validatesOwnedProfile(
-                expectedProfileURL,
-                instanceID: context.instanceID,
-                supportRoot: context.supportRoot
-              ) else {
+              payload.arguments == [expectedProfileArgument] else {
             exit(21)
         }
         let scanner = AppScanner()
@@ -218,38 +213,6 @@ enum KlikProManagedLauncher {
             instanceID: instanceID,
             supportRoot: supportRoot
         )
-    }
-
-    private static func validatesOwnedProfile(
-        _ profileURL: URL,
-        instanceID: UUID,
-        supportRoot: URL
-    ) -> Bool {
-        let profilesRoot = supportRoot
-            .appendingPathComponent("Profiles", isDirectory: true)
-            .standardizedFileURL
-        let standardized = profileURL.standardizedFileURL
-        guard standardized.deletingLastPathComponent() == profilesRoot,
-              profilesRoot.resolvingSymlinksInPath() == profilesRoot,
-              standardized.resolvingSymlinksInPath() == standardized,
-              let values = try? standardized.resourceValues(
-                forKeys: [.isDirectoryKey, .isSymbolicLinkKey]
-              ),
-              values.isDirectory == true,
-              values.isSymbolicLink != true else {
-            return false
-        }
-        let marker = standardized.appendingPathComponent(".klik-pro-owned-profile")
-        let markerValues = try? marker.resourceValues(
-            forKeys: [.isRegularFileKey, .isSymbolicLinkKey]
-        )
-        guard markerValues?.isRegularFile == true,
-              markerValues?.isSymbolicLink != true,
-              let data = FileManager.default.contents(atPath: marker.path) else {
-            return false
-        }
-        return String(decoding: data, as: UTF8.self)
-            == instanceID.uuidString.uppercased()
     }
 
     /// Sends the Core "reopen" Apple event (`kAEReopenApplication`, 'rapp') to a

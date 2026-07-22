@@ -19,8 +19,9 @@ so you can summon it in one action.
   opens it immediately.
 - Klik PRO generates a small launcher and an isolated profile automatically.
 - Existing launchers are listed without being converted or modified. Generated
-  launchers can be renamed, repaired, archived, or restored. v1.2.1 maintenance
-  never permanently deletes profile data.
+  launchers can be renamed, repaired, archived, restored, or forgotten when stale.
+  v1.2.2 can also review marker-owned orphaned data and reclaim it through explicit,
+  fail-closed Trash or permanent-delete controls.
 - Every working mouse control chooses either Keyboard Shortcut or Open App. An
   occupied assignment requires Force Release & Assign.
 
