@@ -558,6 +558,16 @@ struct AppProfileManager {
         if instance.state == .archived {
             return .recoverableArchived
         }
+        // A launcher can still exist while its embedded runtime is stale (for
+        // example after the vendor renames Electron's framework). Surface this
+        // as repairable so Advanced offers Repair instead of reporting Healthy.
+        let sourceURL = URL(fileURLWithPath: instance.source.bundleURL, isDirectory: true)
+            .standardizedFileURL
+        guard let current = inspectApplication(sourceURL),
+              current.bundleIdentifier == instance.source.bundleIdentifier,
+              candidate(for: current).canCreate,
+              candidate(for: current).eligibility.compatibilityRuleID == instance.compatibilityRuleID
+        else { return .missingLauncher }
         return (try? generator.validatedLauncherURL(for: instance)) == nil
             ? .missingLauncher
             : .healthy
