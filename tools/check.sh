@@ -603,12 +603,17 @@ grep -q 'Generate another icon for the same app, with a separate login and setti
   "$ROOT/Sources/AppProfilesUI.swift"
 grep -q 'The original app is never copied, cloned or modified.' \
   "$ROOT/Sources/AppProfilesUI.swift"
-grep -q 'AppProfileButton(title: "Generate"' "$ROOT/Sources/AppProfilesUI.swift"
-if grep -q 'Generate Another' "$ROOT/Sources/AppProfilesUI.swift"; then
-  echo "App Profile generator must use the approved Generate label" >&2
+grep -q 'AppProfileButton(title: "+ New Profile"' "$ROOT/Sources/AppProfilesUI.swift"
+if grep -q 'AppProfileButton(title: "Generate"' "$ROOT/Sources/AppProfilesUI.swift"; then
+  echo "App Profile generator must use the approved + New Profile label" >&2
   exit 1
 fi
 grep -q 'Assign Button' "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'case original(QuickLaunchTarget)' "$ROOT/Sources/KlikProConfig.swift"
+grep -q 'case profile(UUID)' "$ROOT/Sources/KlikProConfig.swift"
+grep -q 'func assigningMouseButton(' "$ROOT/Sources/KlikProConfig.swift"
+grep -q 'Original app' "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'mappingProfilesView.onAssignOriginal' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'statusField.frame = NSRect(x: 344, y: 108' "$ROOT/Sources/AppProfilesUI.swift"
 grep -q 'scrollView.frame = NSRect(x: 340, y: 142' "$ROOT/Sources/AppProfilesUI.swift"
 grep -q 'YOUR APP PROFILES' "$ROOT/Sources/AppProfilesUI.swift"

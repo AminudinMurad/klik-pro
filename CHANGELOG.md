@@ -2,6 +2,28 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.3.0
+
+Original ChatGPT and Claude apps join the App Profiles assignment experience without
+becoming managed profiles.
+
+- **Original apps are assignable** — each installed app generator card now offers
+  **+ New Profile** and **Assign Button** as separate actions.
+- **One ownership model** — a physical mouse button belongs to exactly one original
+  app or generated profile; reassignment uses the existing Force Release confirmation.
+- **Mappings includes originals** — installed original apps appear with only **Open**
+  and **Assign Button**, never Rename, Repair, Archive, Change Icon, or data removal.
+- **No Special Feature ghost state** — original-app mouse assignments remain normal
+  launch actions when the legacy Special Feature toggle changes; its dormant shortcut
+  cannot reappear as a duplicate conflict.
+- **Direct original-app launching** — original assignments open the installed ChatGPT
+  or Claude app directly and no longer depend on a legacy launcher wrapper.
+- **Clear from the same dialog** — **None — Clear assignment** restores a button's
+  normal mapping without returning to the legacy Special Feature controls.
+- **Full-size custom icons** — transparent padding embedded inside PNG/ICO artwork and
+  source-app icons is removed before rendering, so plain, tinted, and badged icons fill
+  the macOS squircle instead of appearing as a smaller icon inside it.
+
 ## 1.2.9
 
 A focused Deep Scan correction for previously used durable Data Folders.

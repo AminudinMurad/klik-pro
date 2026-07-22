@@ -102,6 +102,21 @@ private func makeTestBitmap(width: Int, height: Int) -> CGImage {
     return context.makeImage()!
 }
 
+private func makePaddedTestBitmap(size: Int, inset: Int) -> CGImage {
+    let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+    let context = CGContext(
+        data: nil, width: size, height: size,
+        bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace,
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    )!
+    context.setFillColor(CGColor(srgbRed: 0.2, green: 0.4, blue: 0.9, alpha: 1))
+    context.fill(CGRect(
+        x: inset, y: inset,
+        width: size - 2 * inset, height: size - 2 * inset
+    ))
+    return context.makeImage()!
+}
+
 private func alphaByte(_ image: CGImage, x: Int, y: Int) -> UInt8 {
     var pixel: [UInt8] = [0, 0, 0, 0]
     let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
@@ -2051,7 +2066,7 @@ private struct AppProfilesFoundationTests {
     }
 
     private static func testCustomIconShapeUsesFullCanvas() {
-        let source = makeTestBitmap(width: 512, height: 512)
+        let source = makePaddedTestBitmap(size: 512, inset: 72)
         let shaped = LauncherGenerator.macOSIconShaped(source)!
         let size = shaped.width
         expect(size == LauncherGenerator.renderCanvasSize && shaped.height == size,
@@ -2066,6 +2081,13 @@ private struct AppProfilesFoundationTests {
                "custom icon artwork must reach the top middle edge, not sit inside an inset tile")
         expect(alphaByte(shaped, x: 1, y: 1) == 0,
                "custom icon shaping must still keep rounded transparent corners")
+
+        let badged = LauncherGenerator.badgedIcon(
+            source, color: AppProfileMenuColor.pink.iconColor, letter: "P")!
+        expect(alphaByte(badged, x: 1, y: size / 2) > 0,
+               "badged source artwork must discard embedded transparent padding")
+        expect(alphaByte(badged, x: size / 2, y: size - 2) > 0,
+               "badged source artwork must fill the icon canvas vertically")
     }
 
     /// Tint and badge compositions always emit onto the square render canvas,

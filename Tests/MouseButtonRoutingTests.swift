@@ -198,10 +198,10 @@ private struct MouseButtonRoutingTests {
         expect(!hasInstalledQuickLaunchTarget(resolver: { _ in nil }),
                "the Special Feature toggle must remain disabled when both apps are absent")
         expect(quickLaunchTargetCanRun(installed: true, wrapperPresent: true),
-               "an installed app with its wrapper must be runnable")
+               "an installed original app must be runnable")
         expect(!quickLaunchTargetCanRun(installed: false, wrapperPresent: true)
-               && !quickLaunchTargetCanRun(installed: true, wrapperPresent: false),
-               "both the real app and its wrapper are required for launcher dispatch")
+               && quickLaunchTargetCanRun(installed: true, wrapperPresent: false),
+               "original-app dispatch must require the app but not a legacy wrapper")
 
         previewRenderingIsActive = true
         quickLaunchInstalledTargetsPreviewOverride = [.chatGPT]
@@ -241,6 +241,50 @@ private struct MouseButtonRoutingTests {
         expect(KlikProConfig.default.chatGPTMouseButton == .forward
                && KlikProConfig.default.claudeMouseButton == .back,
                "new configurations must link Forward to ChatGPT and Back to Claude")
+
+        // v1.3 presents original apps and managed profiles through one assignment
+        // flow while retaining their backwards-compatible storage fields.
+        let profileID = UUID()
+        var unifiedAssignments = KlikProConfig.default
+        unifiedAssignments.chatGPTMouseButton = .forward
+        unifiedAssignments.claudeMouseButton = nil
+        unifiedAssignments.instances = [AppProfileInstance(
+            id: profileID,
+            label: "ChatGPT X",
+            launcherKind: .managed,
+            launcherPath: "/tmp/Launchers/\(profileID.uuidString).app",
+            profileDirectory: "/tmp/Profiles/\(profileID.uuidString)",
+            profileOwnership: .managed,
+            source: AppProfileSource(
+                bundleIdentifier: "com.openai.codex",
+                bundleURL: "/Applications/ChatGPT.app"
+            ),
+            pinToMenuBar: false,
+            hotkey: ShortcutMapping(enabled: false, combo: unifiedAssignments.chatGPTHotkey.combo),
+            mouseButton: nil
+        )]
+        unifiedAssignments = assigningMouseButton(
+            .forward, to: .profile(profileID), in: unifiedAssignments
+        )
+        expect(unifiedAssignments.chatGPTMouseButton == nil
+               && unifiedAssignments.instances.first { $0.id == profileID }?.mouseButton == .forward,
+               "assigning a profile must release the original app from that button")
+        expect(launchAssignmentOwner(of: .forward, in: unifiedAssignments) == .profile(profileID),
+               "the shared owner lookup must report the managed profile")
+        unifiedAssignments = assigningMouseButton(
+            .forward, to: .original(.chatGPT), in: unifiedAssignments
+        )
+        expect(unifiedAssignments.chatGPTMouseButton == .forward
+               && unifiedAssignments.instances.first { $0.id == profileID }?.mouseButton == nil,
+               "assigning the original app must release the managed profile")
+        expect(launchAssignmentOwner(of: .forward, in: unifiedAssignments) == .original(.chatGPT),
+               "the shared owner lookup must report the original app")
+        unifiedAssignments = clearingMouseButton(
+            from: .original(.chatGPT), in: unifiedAssignments
+        )
+        expect(unifiedAssignments.chatGPTMouseButton == nil
+               && launchAssignmentOwner(of: .forward, in: unifiedAssignments) == nil,
+               "the shared Assign Button flow must be able to clear an original app")
 
         var legacyConfig = KlikProConfig.default
         legacyConfig.schemaVersion = 4
@@ -422,8 +466,8 @@ private struct MouseButtonRoutingTests {
             specialFeatureActive: false,
             chatGPTAvailable: true,
             claudeAvailable: true
-        ) == originalMiddle,
-        "Special Feature OFF must restore the untouched underlying mapping")
+        ).combo.signature == quickLaunchConfig.chatGPTHotkey.combo.signature,
+        "an original-app assignment must remain active when Special Feature is off")
         expect(mapping(
             for: .middleButton,
             in: quickLaunchConfig,
@@ -574,14 +618,14 @@ private struct MouseButtonRoutingTests {
             claudeAvailable: true
         ).enabled,
         "an active Gesture launcher assignment must activate the F20 receiver over a disabled base")
-        expect(!mapping(
+        expect(mapping(
             for: .gestureButton,
             in: gestureOverlayConfig,
             specialFeatureActive: false,
             chatGPTAvailable: true,
             claudeAvailable: true
         ).enabled,
-        "turning Special Feature OFF must restore a disabled underlying Gesture mapping")
+        "an original-app Gesture assignment must remain active when Special Feature is off")
 
         let defaultBack = KlikProConfig.default.backButton
         let defaultForward = KlikProConfig.default.forwardButton
@@ -731,6 +775,8 @@ private struct MouseButtonRoutingTests {
         "Chrome profile traversal must discover configured extension commands read-only")
 
         var chromeConflictCandidate = KlikProConfig.default
+        chromeConflictCandidate.chatGPTMouseButton = nil
+        chromeConflictCandidate.claudeMouseButton = nil
         chromeConflictCandidate.forwardButton.combo = KeyCombo(
             keyCode: UInt16(kVK_ANSI_E), keyDisplay: "E",
             command: true, option: false, control: false, shift: false
@@ -766,9 +812,9 @@ private struct MouseButtonRoutingTests {
             chatGPTAvailable: true,
             claudeAvailable: true
         )
-        expect(dormantStatuses[.middleButton] == .duplicate
-               && dormantStatuses[.backButton] == .duplicate,
-               "Special Feature OFF must evaluate conflicts for the restored base mapping")
+        expect(dormantStatuses[.middleButton] == .ok
+               && dormantStatuses[.backButton] == .ok,
+               "Special Feature OFF must not expose ghost conflicts beneath an original-app assignment")
         let missingLauncherStatuses = evaluateShortcutConflicts(
             candidate: dormantLinkedCandidate,
             persisted: dormantLinkedCandidate,
@@ -813,10 +859,12 @@ private struct MouseButtonRoutingTests {
 
         let backSlot = shortcutSlot(forMouseButtonNumber: 3)!
         let forwardSlot = shortcutSlot(forMouseButtonNumber: 4)!
-        expect(mapping(for: backSlot, in: config, specialFeatureActive: false) == config.backButton,
-               "CG button 3 must resolve the saved Back assignment")
-        expect(mapping(for: forwardSlot, in: config, specialFeatureActive: false) == config.forwardButton,
-               "CG button 4 must resolve the saved Forward assignment")
+        expect(mapping(for: backSlot, in: config, specialFeatureActive: false).combo.signature
+               == config.claudeHotkey.combo.signature,
+               "CG button 3 must keep the original Claude assignment when Special Feature is off")
+        expect(mapping(for: forwardSlot, in: config, specialFeatureActive: false).combo.signature
+               == config.chatGPTHotkey.combo.signature,
+               "CG button 4 must keep the original ChatGPT assignment when Special Feature is off")
         expect(mapping(for: .gestureButton, in: config) == config.gestureButton,
                "Gesture slot must resolve the saved Gesture assignment")
 

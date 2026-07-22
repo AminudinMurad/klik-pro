@@ -149,10 +149,10 @@ private func logMessage(_ message: String) {
 }
 
 private func launchPrimaryChatGPT() {
-    logMessage("Opening primary ChatGPT launcher")
+    logMessage("Opening original ChatGPT app")
     let task = Process()
     task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-    task.arguments = [chatGPTQuickLauncherPath]
+    task.arguments = [QuickLaunchTarget.chatGPT.standardApplicationPath]
 
     do {
         try task.run()
@@ -164,10 +164,10 @@ private func launchPrimaryChatGPT() {
 }
 
 private func launchPrimaryClaude() {
-    logMessage("Opening primary Claude launcher")
+    logMessage("Opening original Claude app")
     let task = Process()
     task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-    task.arguments = [claudeQuickLauncherPath]
+    task.arguments = [QuickLaunchTarget.claude.standardApplicationPath]
 
     do {
         try task.run()

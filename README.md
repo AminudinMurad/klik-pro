@@ -49,20 +49,20 @@ an opt-in Accessibility step), with Back navigation and no dead-ends:
 **Supported controls** — configure compatible mouse controls and see live conflict
 checks:
 
-<img src="assets/screenshot-mappings.png?v=1.2.6-b10" width="940" alt="Klik PRO Mappings tab with supported mouse controls, shortcut settings, and App Profiles using their individual icons">
+<img src="assets/screenshot-mappings.png?v=1.3.0-b14" width="940" alt="Klik PRO Mappings tab with supported mouse controls, shortcut settings, and original apps plus App Profiles as launch targets">
 
 **App Profiles** — generate isolated extra instances of ChatGPT or Claude, each with
 its own login; open or assign each profile, and give it a custom PNG/ICO, colour tint,
 or initial badge so every account is recognisable at a glance:
 
-<img src="assets/screenshot-app-profiles.png?v=1.2.6-b10" width="940" alt="Klik PRO App Profiles tab showing individually styled profile icons, Open and Assign Button controls, per-profile menu-bar toggles, and a gear menu for profile management">
+<img src="assets/screenshot-app-profiles.png?v=1.3.0-b14" width="940" alt="Klik PRO App Profiles tab showing original-app New Profile and Assign Button actions plus individually styled generated profiles">
 
 **Icon customisation** — distinguish profiles with colour tints or initial badges,
 manage them from the per-profile gear menu, and see the same identity immediately in
 Mappings:
 
 <p align="center">
-  <img src="assets/app-profiles-icon-showcase.gif?v=1.2.6-b10" width="600" alt="Klik PRO animation showing tinted and initial-badged App Profile icons, profile management controls, and matching icons in the Mappings tab">
+  <img src="assets/app-profiles-icon-showcase.gif?v=1.3.0-b14" width="600" alt="Klik PRO animation showing full-size tinted and initial-badged App Profile icons, profile management controls, and matching icons in the Mappings tab">
 </p>
 
 **Settings** — launch-at-login, menu-icon visibility, update-check, and guided Accessibility setup/reset controls:
@@ -131,10 +131,10 @@ Once unlocked, point new App Profiles at a durable data folder so their logins s
 
 ## Install (pre-built release)
 
-The current release is **Klik PRO v1.2.9 (build 13)**, provided as one universal
+The current release is **Klik PRO v1.3.0 (build 14)**, provided as one universal
 macOS app for Apple Silicon and Intel Macs. The DMG is the recommended download;
 the ZIP contains the same app as an alternative.
-**[Download Klik PRO v1.2.9](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.2.9).**
+**[Download Klik PRO v1.3.0](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.3.0).**
 
 > [!IMPORTANT]
 > **Update if you use a durable Data Folder.** Version 1.2.9 remembers previously
@@ -260,13 +260,15 @@ only a fallback; custom assignments are always sent exactly as recorded.
 ### ChatGPT / Codex & Claude Quick Launch
 
 - The independently recordable hotkeys default to ⌃⌥⌘G and ⌃⌥⌘C.
-- On a new configuration, **Forward** opens ChatGPT / Codex and **Back** opens Claude
-  while the Special Feature is on. Choosing **None**, another button, or turning the
-  feature off restores the normal saved button behavior.
-- Each app has a **Mouse Button** menu with **None**, **Middle**, **Gesture**,
-  **Forward**, and **Back**. One button cannot serve both apps.
-- A linked button mirrors its launcher hotkey. Turning the feature off, selecting
-  **None**, or losing the launcher restores that button's normal mapping.
+- On a new configuration, **Forward** opens the original ChatGPT / Codex app and
+  **Back** opens the original Claude app. Original-app mouse assignments are normal
+  launch actions and do not depend on the Special Feature toggle.
+- Assign or change those buttons from the original-app cards in **App Profiles** or
+  from **Mappings**. One physical button can belong to exactly one original app or
+  generated profile.
+- Original-app button assignments remain active independently of the Special Feature
+  toggle. Choose **None — Clear assignment** from **Assign Button** to restore that
+  button's normal mapping.
 - The master toggle requires at least one supported app. Klik PRO refreshes app and
   launcher availability while open; unavailable existing assignments remain removable
   through **None**.
@@ -318,13 +320,18 @@ model both executables read, persisted to:
 
 The dedicated **App Profiles** tab fills the window height and places the ChatGPT and
 Claude generators in the left column and the scrollable profile-management list in
-the right. Click **Generate**, accept or edit the suggested name, and Klik PRO
+the right. Click **+ New Profile**, accept or edit the suggested name, and Klik PRO
 creates a small launcher with a separate login and settings, then opens it. The
 original app in `/Applications` is never copied, cloned, renamed, or modified.
 
+Each installed original-app card also has **Assign Button**. This opens the original
+installed app; it does not create profile data. Original apps never receive Rename,
+Repair, Archive, Change Icon, Delete Data, or other managed-profile actions.
+
 The **Mappings** tab uses the same two-column structure: mouse-button shortcuts and
 thumb-wheel tab switching stay on the left, while a scrollable profile list on the
-right provides **Open** and **Assign Button** for each profile. Both tabs render the
+right provides **Open** and **Assign Button** for original apps and generated profiles.
+Both tabs render the
 same current profile icon immediately after a change. The remaining management
 actions and the **Menu Bar Icon** toggle stay on the App Profiles tab.
 
@@ -519,7 +526,7 @@ setups Klik PRO has been tested against:
 | | |
 |---|---|
 | macOS | 26.5.2 (build 25F84) |
-| Klik PRO | v1.2.9 (build 13), universal Apple Silicon + Intel build |
+| Klik PRO | v1.3.0 (build 14), universal Apple Silicon + Intel build |
 | Primary mouse | Logitech MX Master 3 (Mac edition), firmware `MPM19.01_0015`, connected over Bluetooth (BLE) |
 | Additional tested mouse | Logi M650, firmware `RBM16.10_0014` |
 | Vendor software / driver | None — no mouse driver or manufacturer software installed |
@@ -529,8 +536,8 @@ setups Klik PRO has been tested against:
 | Browser Back/Forward routing | Native side-button navigation in Chrome, Brave, and Firefox; Safari fallback uses Back `⌘[` and Forward `⌘]` |
 
 The Special Feature validates those exact standard desktop-app paths and bundle IDs.
-Its separate second-instance launcher wrappers are still required for launching, but
-do not count as installed desktop apps.
+Original-app assignments open those installed apps directly; generated App Profiles
+continue to use their own isolated Klik PRO-managed launchers.
 
 The generic middle and forward/back controls have also been tested with the Logi M650.
 Gesture isolation currently targets only the tested MX Master 3 Mac

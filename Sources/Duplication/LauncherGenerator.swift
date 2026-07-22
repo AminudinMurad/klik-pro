@@ -1349,6 +1349,7 @@ struct LauncherGenerator {
     static func macOSIconShaped(_ source: CGImage) -> CGImage? {
         let size = renderCanvasSize
         guard let context = squareContext(size) else { return nil }
+        let artwork = alphaCropped(source) ?? source
         let s = CGFloat(size)
         let tile = CGRect(x: 0, y: 0, width: s, height: s)
         let radius = tile.width * 0.2237   // macOS icon-grid corner ratio
@@ -1357,10 +1358,10 @@ struct LauncherGenerator {
         ))
         context.clip()
         // Aspect-fill so the rounded tile is fully covered (no transparent gaps).
-        let scale = max(tile.width / CGFloat(source.width), tile.height / CGFloat(source.height))
-        let width = CGFloat(source.width) * scale
-        let height = CGFloat(source.height) * scale
-        context.draw(source, in: CGRect(
+        let scale = max(tile.width / CGFloat(artwork.width), tile.height / CGFloat(artwork.height))
+        let width = CGFloat(artwork.width) * scale
+        let height = CGFloat(artwork.height) * scale
+        context.draw(artwork, in: CGRect(
             x: tile.midX - width / 2, y: tile.midY - height / 2, width: width, height: height
         ))
         return context.makeImage()
@@ -1379,13 +1380,14 @@ struct LauncherGenerator {
     static func tintedIcon(_ source: CGImage, color: IconColor) -> CGImage? {
         let size = renderCanvasSize
         guard let context = squareContext(size) else { return nil }
-        let fitted = aspectFitRect(source, in: size)
-        context.draw(source, in: fitted)
+        let artwork = alphaCropped(source) ?? source
+        let fitted = aspectFitRect(artwork, in: size)
+        context.draw(artwork, in: fitted)
         context.setBlendMode(.color)
         context.setFillColor(color.cgColor)
         context.fill(CGRect(x: 0, y: 0, width: size, height: size))
         context.setBlendMode(.destinationIn)
-        context.draw(source, in: fitted)
+        context.draw(artwork, in: fitted)
         return context.makeImage()
     }
 
@@ -1395,7 +1397,8 @@ struct LauncherGenerator {
     static func badgedIcon(_ source: CGImage, color: IconColor, letter: String) -> CGImage? {
         let size = renderCanvasSize
         guard let context = squareContext(size) else { return nil }
-        context.draw(source, in: aspectFitRect(source, in: size))
+        let artwork = alphaCropped(source) ?? source
+        context.draw(artwork, in: aspectFitRect(artwork, in: size))
         let s = CGFloat(size)
         let diameter = s * 0.44
         let margin = s * 0.03
@@ -1445,6 +1448,43 @@ struct LauncherGenerator {
               ) else { return nil }
         context.interpolationQuality = .high
         return context
+    }
+
+    /// Removes transparent border pixels before artwork is scaled. PNG/ICO files
+    /// and source-app ICNS frames frequently contain their own padded square
+    /// canvas; treating that canvas as artwork reintroduces a second inset even
+    /// when our destination tile itself has no inset.
+    private static func alphaCropped(_ image: CGImage) -> CGImage? {
+        let width = image.width
+        let height = image.height
+        guard width > 0, height > 0,
+              let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
+        let bytesPerRow = width * 4
+        var pixels = [UInt8](repeating: 0, count: bytesPerRow * height)
+        guard let context = CGContext(
+            data: &pixels, width: width, height: height,
+            bitsPerComponent: 8, bytesPerRow: bytesPerRow, space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        var minX = width
+        var minY = height
+        var maxX = -1
+        var maxY = -1
+        for y in 0..<height {
+            for x in 0..<width where pixels[y * bytesPerRow + x * 4 + 3] > 8 {
+                minX = min(minX, x)
+                minY = min(minY, y)
+                maxX = max(maxX, x)
+                maxY = max(maxY, y)
+            }
+        }
+        guard maxX >= minX, maxY >= minY else { return nil }
+        return image.cropping(to: CGRect(
+            x: minX, y: minY,
+            width: maxX - minX + 1, height: maxY - minY + 1
+        ))
     }
 
     private static func aspectFitRect(_ image: CGImage, in size: Int) -> CGRect {

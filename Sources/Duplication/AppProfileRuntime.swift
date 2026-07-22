@@ -289,14 +289,13 @@ struct AppProfileRuntime {
 
     func health(for instance: AppProfileInstance) -> AppProfileRuntimeHealth {
         if instance.launcherKind == .legacyExternal {
+            if let target = instance.legacyQuickLaunchTarget {
+                return quickLaunchTargetIsInstalled(target) ? .ready : .externalUnavailable
+            }
             let url = URL(fileURLWithPath: instance.launcherPath, isDirectory: true)
                 .standardizedFileURL
             guard url.pathExtension.lowercased() == "app",
                   FileManager.default.fileExists(atPath: url.path) else {
-                return .externalUnavailable
-            }
-            if let target = instance.legacyQuickLaunchTarget,
-               (url.path != target.launcherWrapperPath || !quickLaunchTargetIsAvailable(target)) {
                 return .externalUnavailable
             }
             return .ready
@@ -544,15 +543,19 @@ struct AppProfileRuntime {
         _ instance: AppProfileInstance,
         completion: @escaping (Result<pid_t, AppProfileRuntimeError>) -> Void
     ) {
-        let launcherURL = URL(fileURLWithPath: instance.launcherPath, isDirectory: true)
-            .standardizedFileURL
+        let launcherURL: URL
+        if let target = instance.legacyQuickLaunchTarget {
+            guard let originalURL = quickLaunchTargetApplicationURL(target) else {
+                completion(.failure(.unavailable(.externalUnavailable)))
+                return
+            }
+            launcherURL = originalURL
+        } else {
+            launcherURL = URL(fileURLWithPath: instance.launcherPath, isDirectory: true)
+                .standardizedFileURL
+        }
         guard launcherURL.pathExtension.lowercased() == "app",
               FileManager.default.fileExists(atPath: launcherURL.path) else {
-            completion(.failure(.unavailable(.externalUnavailable)))
-            return
-        }
-        if let target = instance.legacyQuickLaunchTarget,
-           (launcherURL.path != target.launcherWrapperPath || !quickLaunchTargetIsAvailable(target)) {
             completion(.failure(.unavailable(.externalUnavailable)))
             return
         }

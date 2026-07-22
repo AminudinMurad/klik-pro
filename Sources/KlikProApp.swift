@@ -1728,6 +1728,11 @@ final class SettingsContentView: NSView {
             selection: config.claudeMouseButton,
             frame: NSRect(x: rxi + pickerWidth + pickerGap, y: 330, width: pickerWidth, height: 46)
         )
+        // v1.3 moves original-app mouse assignment into the same Assign Button
+        // flow as App Profiles. Keep these objects for source/config compatibility,
+        // but remove the duplicate picker UI from the Special Feature card.
+        chatGPTButtonPicker.isHidden = true
+        claudeButtonPicker.isHidden = true
         chatGPTHotkeyRow = RecorderOnlyRowView(
             title: "ChatGPT / Codex Hotkey",
             mapping: config.chatGPTHotkey,
@@ -3167,6 +3172,7 @@ final class ToggleView: NSView {
         config.chatGPTMouseButton = nil
         config.claudeMouseButton = nil
         persistedConfig = config
+        refreshOriginalAssignmentViews()
         refreshQuickLaunchAssignments()
     }
 
@@ -3219,6 +3225,9 @@ final class ToggleView: NSView {
         }
         appProfilesView.onGenerate = { [weak self] candidate in
             self?.createManagedAppProfile(from: candidate)
+        }
+        appProfilesView.onAssignOriginal = { [weak self] target in
+            self?.assignMouseButton(to: .original(target), label: target.title)
         }
         appProfilesView.onOpen = { [weak self] instance in
             self?.launchAppProfile(instance)
@@ -3295,6 +3304,13 @@ final class ToggleView: NSView {
         }
         contentView.mappingProfilesView.onAssign = { [weak self] instance in
             self?.assignMouseButton(to: instance)
+        }
+        contentView.mappingProfilesView.onOpenOriginal = { target in
+            guard let url = quickLaunchTargetApplicationURL(target) else { return }
+            NSWorkspace.shared.openApplication(at: url, configuration: .init())
+        }
+        contentView.mappingProfilesView.onAssignOriginal = { [weak self] target in
+            self?.assignMouseButton(to: .original(target), label: target.title)
         }
         appProfilesView.onInstancesChange = { [weak self] instances in
             self?.contentView.mappingProfilesView.setInstances(instances)
@@ -3528,6 +3544,10 @@ final class ToggleView: NSView {
     private func refreshSupportedAppCandidates(showLoading: Bool = false, force: Bool = false) {
         guard !previewRenderingIsActive else {
             appProfilesView.setSupportedCandidates([])
+            // Preview app discovery is intentionally skipped, but installed-target
+            // overrides still describe the original apps. Keep Mappings truthful
+            // so the v1.3 original-app rows are covered by deterministic fixtures.
+            refreshOriginalAssignmentViews()
             return
         }
         if let cached = supportedAppCandidateCache, !force {
@@ -3546,6 +3566,7 @@ final class ToggleView: NSView {
                 self.supportedAppDiscoveryInProgress = false
                 self.supportedAppCandidateCache = supported
                 self.appProfilesView.setSupportedCandidates(supported)
+                self.refreshOriginalAssignmentViews()
             }
         }
     }
@@ -5042,6 +5063,10 @@ final class ToggleView: NSView {
     }
 
     private func assignMouseButton(to instance: AppProfileInstance) {
+        assignMouseButton(to: .profile(instance.id), label: instance.label)
+    }
+
+    private func assignMouseButton(to target: LaunchAssignmentTarget, label: String) {
         // Gate on a settled configuration, exactly like the other App Profile
         // lifecycle actions. This is what keeps the two sections consistent: the
         // assign flow saves immediately from persistedConfig, so it must not run
@@ -5063,51 +5088,54 @@ final class ToggleView: NSView {
         }
         let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 390, height: 42))
         let picker = NSPopUpButton(frame: NSRect(x: 0, y: 6, width: 390, height: 30))
+        picker.addItem(withTitle: "None — Clear assignment")
         for button in QuickLaunchMouseButton.allCases {
-            let owner = persistedConfig.instances.first {
-                $0.state == .active && $0.mouseButton == button
-            }
-            let state = owner.map { "Used: \($0.label)" } ?? "Available"
+            let owner = launchAssignmentOwner(of: button, in: persistedConfig)
+            let state = owner.map { "Used: \(launchAssignmentLabel($0, in: persistedConfig))" }
+                ?? "Available"
             picker.addItem(withTitle: "\(button.title) Button — \(state)")
         }
         accessory.addSubview(picker)
         let alert = NSAlert()
-        alert.messageText = "Assign a mouse button to \(instance.label)"
+        alert.messageText = "Assign a mouse button to \(label)"
         alert.informativeText = "The selected button will open this app, or bring its existing window forward."
         alert.accessoryView = accessory
         alert.addButton(withTitle: "Assign")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let button = QuickLaunchMouseButton.allCases[picker.indexOfSelectedItem]
-        let currentOwner = persistedConfig.instances.first {
-            $0.state == .active && $0.mouseButton == button && $0.id != instance.id
+        if picker.indexOfSelectedItem == 0 {
+            var updated = clearingMouseButton(from: target, in: persistedConfig)
+            guard KlikProConfigStore.save(updated) else {
+                showAppProfileAlert(
+                    title: "Assignment was not cleared",
+                    message: "Klik PRO could not save the change."
+                )
+                return
+            }
+            updated = normalizedQuickLaunchConfig(updated)
+            let applied = applySavedConfig()
+            config = updated
+            persistedConfig = updated
+            refreshButtonAssignmentViews()
+            appProfilesView.setStatus(
+                applied ? "Mouse button assignment cleared for \(label)." : "Cleared; helper apply is pending.",
+                color: applied ? .systemGreen : .systemOrange
+            )
+            return
         }
-        if let currentOwner {
+        let button = QuickLaunchMouseButton.allCases[picker.indexOfSelectedItem - 1]
+        let currentOwner = launchAssignmentOwner(of: button, in: persistedConfig)
+        if let currentOwner, currentOwner != target {
             let confirmation = NSAlert()
             confirmation.alertStyle = .warning
             confirmation.messageText = "Force Release \(button.title) Button?"
-            confirmation.informativeText = "It is currently assigned to \(currentOwner.label). Only that button assignment will be released; the app and its saved shortcut remain intact."
+            confirmation.informativeText = "It is currently assigned to \(launchAssignmentLabel(currentOwner, in: persistedConfig)). Only that button assignment will be released; the app and its saved shortcut remain intact."
             confirmation.addButton(withTitle: "Force Release & Assign")
             confirmation.addButton(withTitle: "Cancel")
             guard confirmation.runModal() == .alertFirstButtonReturn else { return }
         }
 
-        var updated = persistedConfig
-        updated.instances.indices.forEach { index in
-            if updated.instances[index].mouseButton == button {
-                updated.instances[index].mouseButton = nil
-            }
-        }
-        if updated.chatGPTMouseButton == button { updated.chatGPTMouseButton = nil }
-        if updated.claudeMouseButton == button { updated.claudeMouseButton = nil }
-        if let target = instance.legacyQuickLaunchTarget {
-            switch target {
-            case .chatGPT: updated.chatGPTMouseButton = button
-            case .claude: updated.claudeMouseButton = button
-            }
-        } else if let index = updated.instances.firstIndex(where: { $0.id == instance.id }) {
-            updated.instances[index].mouseButton = button
-        }
+        var updated = assigningMouseButton(button, to: target, in: persistedConfig)
         guard KlikProConfigStore.save(updated) else {
             showAppProfileAlert(title: "Button was not assigned", message: "Klik PRO could not save a valid assignment.")
             return
@@ -5118,7 +5146,7 @@ final class ToggleView: NSView {
         persistedConfig = updated
         refreshButtonAssignmentViews()
         appProfilesView.setStatus(
-            applied ? "\(button.title) Button opens \(instance.label)." : "Assigned; helper apply is pending.",
+            applied ? "\(button.title) Button opens \(label)." : "Assigned; helper apply is pending.",
             color: applied ? .systemGreen : .systemOrange
         )
         refreshAppProfileHealth()
@@ -5966,8 +5994,33 @@ final class ToggleView: NSView {
     /// sections can never drift out of sync. Callers must set `config` first.
     private func refreshButtonAssignmentViews() {
         appProfilesView.setInstances(config.instances)
+        refreshOriginalAssignmentViews()
         refreshQuickLaunchAssignments()
         recomputeConflictBadges()
+    }
+
+    private func launchAssignmentLabel(
+        _ target: LaunchAssignmentTarget,
+        in config: KlikProConfig
+    ) -> String {
+        switch target {
+        case .original(let original): return original.title
+        case .profile(let id):
+            return config.instances.first { $0.id == id }?.label ?? "App Profile"
+        }
+    }
+
+    private func refreshOriginalAssignmentViews() {
+        appProfilesView.setOriginalAssignments(
+            chatGPT: config.chatGPTMouseButton,
+            claude: config.claudeMouseButton
+        )
+        let originals: [(QuickLaunchTarget, String, String, QuickLaunchMouseButton?)] =
+            QuickLaunchTarget.allCases.compactMap { target in
+                guard let url = quickLaunchTargetApplicationURL(target) else { return nil }
+                return (target, target.title, url.path, quickLaunchMouseButton(for: target, in: config))
+            }
+        contentView.mappingProfilesView.setOriginals(originals)
     }
 
     override func updateTrackingAreas() {

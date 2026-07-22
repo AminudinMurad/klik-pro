@@ -252,13 +252,13 @@ private final class DualAppGeneratorCard: NSView {
     private let iconView = NSImageView()
     private let nameField = NSTextField(labelWithString: "")
     private let statusField = NSTextField(labelWithString: "")
-    private let generateButton = AppProfileButton(title: "Generate", frame: .zero)
-    private let changeButton = AppProfileButton(title: "Change App", frame: .zero)
+    private let generateButton = AppProfileButton(title: "+ New Profile", frame: .zero)
+    private let assignButton = AppProfileButton(title: "Assign Button", frame: .zero)
     private(set) var candidate: AppProfileCandidate?
     let bundleIdentifier: String
     let fallbackName: String
     var onGenerate: ((AppProfileCandidate) -> Void)?
-    var onChange: (() -> Void)?
+    var onAssign: (() -> Void)?
 
     override var isFlipped: Bool { true }
 
@@ -278,14 +278,14 @@ private final class DualAppGeneratorCard: NSView {
         nameField.font = .systemFont(ofSize: 15, weight: .semibold)
         statusField.frame = NSRect(x: 76, y: 40, width: width - 90, height: 20)
         statusField.font = .systemFont(ofSize: 11, weight: .medium)
-        generateButton.frame = NSRect(x: 14, y: 70, width: width - 28, height: 28)
-        changeButton.frame = NSRect(x: width / 2 + 4, y: 70, width: width / 2 - 18, height: 28)
+        generateButton.frame = NSRect(x: 14, y: 70, width: width / 2 - 18, height: 28)
+        assignButton.frame = NSRect(x: width / 2 + 4, y: 70, width: width / 2 - 18, height: 28)
         generateButton.onPress = { [weak self] in
             guard let self, let candidate = self.candidate else { return }
             self.onGenerate?(candidate)
         }
-        changeButton.onPress = { [weak self] in self?.onChange?() }
-        [iconView, nameField, statusField, generateButton, changeButton].forEach(addSubview)
+        assignButton.onPress = { [weak self] in self?.onAssign?() }
+        [iconView, nameField, statusField, generateButton, assignButton].forEach(addSubview)
         showLoading()
     }
 
@@ -299,9 +299,8 @@ private final class DualAppGeneratorCard: NSView {
         statusField.stringValue = "Loading apps…"
         statusField.textColor = .appTextSecondary
         generateButton.isEnabled = false
-        changeButton.isEnabled = false
-        changeButton.isHidden = true
-        generateButton.frame = NSRect(x: 14, y: 70, width: bounds.width - 28, height: 28)
+        assignButton.isEnabled = false
+        updateAssignment(nil)
     }
 
     func update(candidate: AppProfileCandidate?, alternativesAvailable: Bool) {
@@ -318,18 +317,22 @@ private final class DualAppGeneratorCard: NSView {
             statusField.textColor = .appTextSecondary
             generateButton.isEnabled = false
         }
-        changeButton.isEnabled = alternativesAvailable
-        changeButton.isHidden = !alternativesAvailable
-        if alternativesAvailable {
-            generateButton.frame = NSRect(x: 14, y: 70, width: bounds.width / 2 - 18, height: 28)
-            changeButton.frame = NSRect(
-                x: bounds.width / 2 + 4,
-                y: 70,
-                width: bounds.width / 2 - 18,
-                height: 28
+        assignButton.isEnabled = candidate != nil
+        _ = alternativesAvailable
+    }
+
+    func updateAssignment(_ button: QuickLaunchMouseButton?) {
+        if let button {
+            let title = "\(button.title) Button"
+            assignButton.configureAssignment(
+                restTitle: title, symbolName: "link", hoverTitle: "Change ⋯", assigned: true
             )
+            assignButton.setAccessibilityLabel("Change button assignment, currently \(title)")
         } else {
-            generateButton.frame = NSRect(x: 14, y: 70, width: bounds.width - 28, height: 28)
+            assignButton.configureAssignment(
+                restTitle: "Assign Button", symbolName: "link.badge.plus", hoverTitle: nil
+            )
+            assignButton.setAccessibilityLabel("Assign a mouse button to the original app")
         }
     }
 }
@@ -594,6 +597,71 @@ private final class MappingAppProfileOpenRowView: NSView {
     required init?(coder: NSCoder) { nil }
 }
 
+/// An installed vendor app shown as an assignment target. It intentionally has
+/// only Open and Assign: originals never receive managed-profile lifecycle actions.
+private final class MappingOriginalAppRowView: NSView {
+    static let rowHeight: CGFloat = 92
+    private let target: QuickLaunchTarget
+    var onOpen: ((QuickLaunchTarget) -> Void)?
+    var onAssign: ((QuickLaunchTarget) -> Void)?
+
+    override var isFlipped: Bool { true }
+
+    init(
+        target: QuickLaunchTarget,
+        name: String,
+        path: String,
+        mouseButton: QuickLaunchMouseButton?,
+        width: CGFloat
+    ) {
+        self.target = target
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: Self.rowHeight))
+        wantsLayer = true
+        layer?.cornerRadius = innerCardCornerRadius
+        layer?.backgroundColor = innerCardFillColor.cgColor
+        layer?.borderColor = NSColor.separatorColor.cgColor
+        layer?.borderWidth = 1
+
+        let icon = NSImageView(frame: NSRect(x: 14, y: 19, width: 54, height: 54))
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        icon.image = NSWorkspace.shared.icon(forFile: path)
+        let title = NSTextField(labelWithString: name)
+        title.frame = NSRect(x: 82, y: 16, width: max(80, width - 100), height: 24)
+        title.font = .systemFont(ofSize: 14, weight: .semibold)
+        title.textColor = .appTextPrimary
+        let original = NSTextField(labelWithString: "Original app")
+        original.frame = NSRect(x: 82, y: 38, width: 100, height: 16)
+        original.font = .systemFont(ofSize: 10, weight: .medium)
+        original.textColor = .appTextSecondary
+
+        let assign = AppProfileButton(title: "Assign Button", frame: .zero)
+        let open = AppProfileButton(title: "Open", frame: .zero)
+        assign.frame = NSRect(x: width - 150, y: 48, width: 132, height: 28)
+        open.frame = NSRect(x: width - 210, y: 48, width: 52, height: 28)
+        if let mouseButton {
+            assign.configureAssignment(
+                restTitle: "\(mouseButton.title) Button",
+                symbolName: "link",
+                hoverTitle: "Change ⋯",
+                assigned: true
+            )
+        } else {
+            assign.configureAssignment(
+                restTitle: "Assign Button", symbolName: "link.badge.plus", hoverTitle: nil
+            )
+        }
+        assign.onPress = { [weak self] in
+            guard let self else { return }; self.onAssign?(self.target)
+        }
+        open.onPress = { [weak self] in
+            guard let self else { return }; self.onOpen?(self.target)
+        }
+        [icon, title, original, open, assign].forEach(addSubview)
+    }
+
+    required init?(coder: NSCoder) { nil }
+}
+
 /// The approved Mappings right column: a fixed header and independently scrolling
 /// profile list. It offers quick Open and Assign Button; other management stays
 /// on the App Profiles tab.
@@ -604,8 +672,11 @@ final class MappingAppProfilesView: NSView {
     private let stackView = FlippedProfileStackView()
     private var instances: [AppProfileInstance]
     private var runtimeHealth: [UUID: AppProfileRuntimeHealth] = [:]
+    private var originals: [(target: QuickLaunchTarget, name: String, path: String, button: QuickLaunchMouseButton?)] = []
     var onOpen: ((AppProfileInstance) -> Void)?
     var onAssign: ((AppProfileInstance) -> Void)?
+    var onOpenOriginal: ((QuickLaunchTarget) -> Void)?
+    var onAssignOriginal: ((QuickLaunchTarget) -> Void)?
 
     override var isFlipped: Bool { true }
 
@@ -657,6 +728,15 @@ final class MappingAppProfilesView: NSView {
         rebuildRows()
     }
 
+    func setOriginals(
+        _ originals: [(QuickLaunchTarget, String, String, QuickLaunchMouseButton?)]
+    ) {
+        self.originals = originals.map {
+            (target: $0.0, name: $0.1, path: $0.2, button: $0.3)
+        }
+        rebuildRows()
+    }
+
     func setStatus(_ message: String, color: NSColor = .appTextSecondary) {
         statusField.stringValue = message
         statusField.textColor = color
@@ -675,7 +755,21 @@ final class MappingAppProfilesView: NSView {
                 || FileManager.default.fileExists(atPath: instance.launcherPath))
         }.sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
 
-        if visible.isEmpty {
+        for original in originals {
+            let row = MappingOriginalAppRowView(
+                target: original.target,
+                name: original.name,
+                path: original.path,
+                mouseButton: original.button,
+                width: rowWidth
+            )
+            row.onOpen = { [weak self] in self?.onOpenOriginal?($0) }
+            row.onAssign = { [weak self] in self?.onAssignOriginal?($0) }
+            stackView.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalToConstant: rowWidth).isActive = true
+            row.heightAnchor.constraint(equalToConstant: MappingOriginalAppRowView.rowHeight).isActive = true
+        }
+        if visible.isEmpty && originals.isEmpty {
             let empty = NSTextField(labelWithString: "No App Profiles yet")
             empty.font = .systemFont(ofSize: 13)
             empty.textColor = .appTextSecondary
@@ -703,7 +797,10 @@ final class MappingAppProfilesView: NSView {
             x: 0,
             y: 0,
             width: rowWidth,
-            height: max(scrollView.contentSize.height, CGFloat(max(1, visible.count)) * 100 + 3)
+            height: max(
+                scrollView.contentSize.height,
+                CGFloat(max(1, visible.count + originals.count)) * 100 + 3
+            )
         )
     }
 }
@@ -722,6 +819,7 @@ final class AppProfilesContentView: NSView {
     private let scrollView = NSScrollView()
     private let stackView = FlippedProfileStackView()
     var onGenerate: ((AppProfileCandidate) -> Void)?
+    var onAssignOriginal: ((QuickLaunchTarget) -> Void)?
     var onOpen: ((AppProfileInstance) -> Void)?
     var onAssign: ((AppProfileInstance) -> Void)?
     var onToggleMenuBar: ((AppProfileInstance) -> Void)?
@@ -798,8 +896,8 @@ final class AppProfilesContentView: NSView {
 
         chatGPTCard.onGenerate = { [weak self] in self?.onGenerate?($0) }
         claudeCard.onGenerate = { [weak self] in self?.onGenerate?($0) }
-        chatGPTCard.onChange = { [weak self] in self?.onChangeApp?("com.openai.codex") }
-        claudeCard.onChange = { [weak self] in self?.onChangeApp?("com.anthropic.claudefordesktop") }
+        chatGPTCard.onAssign = { [weak self] in self?.onAssignOriginal?(.chatGPT) }
+        claudeCard.onAssign = { [weak self] in self?.onAssignOriginal?(.claude) }
         [explanationField, chatGPTCard, claudeCard, loadingView, statusField, refreshButton, scrollView].forEach(addSubview)
         setAppDiscoveryLoading()
         setInstances(instances)
@@ -834,6 +932,11 @@ final class AppProfilesContentView: NSView {
         if statusField.stringValue == "Scanning installed apps…" {
             setStatus("")
         }
+    }
+
+    func setOriginalAssignments(chatGPT: QuickLaunchMouseButton?, claude: QuickLaunchMouseButton?) {
+        chatGPTCard.updateAssignment(chatGPT)
+        claudeCard.updateAssignment(claude)
     }
 
     func setAppDiscoveryLoading() {

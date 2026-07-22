@@ -349,7 +349,10 @@ func hasInstalledQuickLaunchTarget(
 }
 
 func quickLaunchTargetCanRun(installed: Bool, wrapperPresent: Bool) -> Bool {
-    installed && wrapperPresent
+    // v1.3 opens the installed vendor app directly. A legacy mirror wrapper is
+    // no longer a runtime prerequisite for an original-app assignment.
+    _ = wrapperPresent
+    return installed
 }
 
 enum QuickLaunchTargetReadiness: Equatable {
@@ -1788,6 +1791,95 @@ func quickLaunchMouseButton(
     }
 }
 
+/// A single assignment namespace for every launch target shown by Klik PRO.
+/// Original installed apps deliberately remain separate from managed App Profiles:
+/// this type unifies mouse-button ownership without giving originals a UUID-backed
+/// data lifecycle, launcher ownership, repair, archive, or deletion semantics.
+enum LaunchAssignmentTarget: Equatable {
+    case original(QuickLaunchTarget)
+    case profile(UUID)
+}
+
+func launchAssignmentOwner(
+    of button: QuickLaunchMouseButton,
+    in config: KlikProConfig
+) -> LaunchAssignmentTarget? {
+    var owners: [LaunchAssignmentTarget] = []
+    if config.chatGPTMouseButton == button { owners.append(.original(.chatGPT)) }
+    if config.claudeMouseButton == button { owners.append(.original(.claude)) }
+    owners.append(contentsOf: config.instances.compactMap { instance in
+        guard instance.state == .active,
+              instance.legacyQuickLaunchTarget == nil,
+              instance.mouseButton == button else { return nil }
+        return .profile(instance.id)
+    })
+    return owners.count == 1 ? owners[0] : nil
+}
+
+func mouseButton(
+    assignedTo target: LaunchAssignmentTarget,
+    in config: KlikProConfig
+) -> QuickLaunchMouseButton? {
+    switch target {
+    case .original(let original):
+        return quickLaunchMouseButton(for: original, in: config)
+    case .profile(let id):
+        return config.instances.first { $0.id == id && $0.state == .active }?.mouseButton
+    }
+}
+
+/// Returns a copy with `button` owned by exactly `target`. Moving a target also
+/// releases its previous button. Legacy mirror rows are cleared alongside the
+/// original fields so older configurations cannot retain a ghost duplicate.
+func assigningMouseButton(
+    _ button: QuickLaunchMouseButton,
+    to target: LaunchAssignmentTarget,
+    in config: KlikProConfig
+) -> KlikProConfig {
+    var updated = config
+    updated.instances.indices.forEach { index in
+        let instanceTarget = updated.instances[index].legacyQuickLaunchTarget
+        if updated.instances[index].mouseButton == button
+            || (target == .profile(updated.instances[index].id))
+            || (instanceTarget.map { target == .original($0) } ?? false) {
+            updated.instances[index].mouseButton = nil
+        }
+    }
+    if updated.chatGPTMouseButton == button || target == .original(.chatGPT) {
+        updated.chatGPTMouseButton = nil
+    }
+    if updated.claudeMouseButton == button || target == .original(.claude) {
+        updated.claudeMouseButton = nil
+    }
+    switch target {
+    case .original(.chatGPT): updated.chatGPTMouseButton = button
+    case .original(.claude): updated.claudeMouseButton = button
+    case .profile(let id):
+        if let index = updated.instances.firstIndex(where: {
+            $0.id == id && $0.state == .active && $0.legacyQuickLaunchTarget == nil
+        }) {
+            updated.instances[index].mouseButton = button
+        }
+    }
+    return normalizedQuickLaunchConfig(updated)
+}
+
+func clearingMouseButton(
+    from target: LaunchAssignmentTarget,
+    in config: KlikProConfig
+) -> KlikProConfig {
+    var updated = config
+    switch target {
+    case .original(.chatGPT): updated.chatGPTMouseButton = nil
+    case .original(.claude): updated.claudeMouseButton = nil
+    case .profile(let id):
+        if let index = updated.instances.firstIndex(where: { $0.id == id }) {
+            updated.instances[index].mouseButton = nil
+        }
+    }
+    return normalizedQuickLaunchConfig(updated)
+}
+
 func quickLaunchMouseAssignmentsAreValid(_ config: KlikProConfig) -> Bool {
     guard let chatGPT = config.chatGPTMouseButton,
           let claude = config.claudeMouseButton else {
@@ -2079,8 +2171,12 @@ func activeQuickLaunchTarget(
     chatGPTAvailable: Bool,
     claudeAvailable: Bool
 ) -> QuickLaunchTarget? {
-    guard specialFeatureActive,
-          let target = assignedQuickLaunchTarget(for: slot, in: config) else {
+    // v1.3 mouse-button assignments are normal launch actions shared with App
+    // Profiles. The legacy Special Feature switch continues to govern original-app
+    // hotkeys/menu presentation, but no longer makes an assigned physical button
+    // disappear or reveal the shortcut stored underneath it.
+    _ = specialFeatureActive
+    guard let target = assignedQuickLaunchTarget(for: slot, in: config) else {
         return nil
     }
     switch target {
