@@ -1262,6 +1262,7 @@ final class AdvancedSettingsContentView: NSView {
                 frame: NSRect(x: buttonX, y: y + 13, width: 104, height: 28)
             )
             button.onPress = primary.action
+            button.toolTip = Self.maintenanceButtonTooltip(for: primary.title)
             maintenanceDocument.addSubview(button)
             buttonX -= 100
         }
@@ -1271,7 +1272,27 @@ final class AdvancedSettingsContentView: NSView {
                 frame: NSRect(x: buttonX, y: y + 13, width: 92, height: 28)
             )
             button.onPress = delete.action
+            button.toolTip = Self.maintenanceButtonTooltip(for: delete.title)
             maintenanceDocument.addSubview(button)
+        }
+    }
+
+    /// Hover help for each App Profile Maintenance action. Keyed on the button
+    /// title so both the standard rows and the orphan-data row stay in sync.
+    private static func maintenanceButtonTooltip(for title: String) -> String? {
+        switch title {
+        case "Repair":
+            return "Rebuild this profile's launcher — its login data is not touched."
+        case "Restore":
+            return "Bring this archived profile back with its original identity and icon."
+        case "Archive":
+            return "Deactivate this profile but keep its login data, settings, and icon to restore later."
+        case "Forget…":
+            return "Remove this profile's entry after its data went missing — nothing on disk is deleted."
+        case "Delete Data…":
+            return "Remove the launcher, Klik PRO entry, and login/profile data after confirmation."
+        default:
+            return nil
         }
     }
 

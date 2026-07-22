@@ -2182,6 +2182,12 @@ final class PreferencesContentView: NSView {
                 height: 28
             )
         )
+        openAccessibilityLink.toolTip =
+            "Open the Accessibility permission list in System Settings."
+        recheckAccessibilityLink.toolTip =
+            "Re-check whether Klik PRO Helper currently has Accessibility permission."
+        resetAccessibilityLink.toolTip =
+            "Clear Klik PRO Helper's Accessibility permission and restart guided setup."
         openSourceLink = URLLinkView(
             title: "© 2026 Aminudin Murad · GPL-3.0",
             urlString: "https://github.com/AminudinMurad/klik-pro/blob/main/LICENSE",
