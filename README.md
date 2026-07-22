@@ -353,16 +353,33 @@ app search, unsupported-app list, Browse flow, or Convert action.
 ### Repair, archive, and restore
 
 Unlock **Advanced** to open **App Profile Maintenance**. Every managed profile is
-classified independently:
+classified independently, with a safe action offered for each state:
 
-- **Healthy** — its owned data and generated launcher both validate.
-- **Missing launcher — repair available** — profile data is still present, so Klik
-  PRO can rebuild only the launcher without changing the login.
-- **Archived — data preserved** — the launcher and runtime assignments are inactive,
-  while the profile recipe, login data, assignment choices, and custom icon remain
-  available for Restore.
-- **Profile data is missing** — Klik PRO reports the problem and refuses to guess or
-  recreate user data.
+| Status | What it means | What you can do |
+|---|---|---|
+| **Healthy** | Owned data and generated launcher both validate. | Use it normally. |
+| **Missing launcher — repair available** | Login data is intact; only the launcher is gone (for example, deleted in Finder). | **Repair** rebuilds just the launcher — the login is unchanged. |
+| **Archived — data preserved** | Launcher and runtime assignments are inactive; the profile recipe, login data, assignment choices, and custom icon are all kept. | **Restore** brings it back with the same identity and icon. |
+| **Profile data is missing** | Klik PRO reports the problem and refuses to guess or recreate your data. | Reported only — restore or relocate the data yourself. |
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    Healthy --> Archived: Archive
+    Archived --> Healthy: Restore
+    Healthy --> Missing_launcher: launcher deleted
+    Missing_launcher --> Healthy: Repair
+    Healthy --> Missing_data: data moved / deleted
+    Archived --> Missing_data: data moved / deleted
+    note right of Archived
+        Recipe, login, assignments,
+        and custom icon preserved.
+    end note
+    note right of Missing_data
+        Reported only — never
+        guessed or recreated.
+    end note
+```
 
 Archive and Restore are intentionally non-destructive. v1.2.1 does not permanently
 delete profile data. The configuration remains the source of truth, while the vault
