@@ -5487,21 +5487,26 @@ final class ToggleView: NSView {
         Klik PRO Helper isn’t currently trusted for Accessibility, so mouse \
         buttons and hotkeys won’t work until it’s granted.
 
-        If you just updated Klik PRO, macOS may still show “Klik PRO Helper” as \
-        enabled even though the updated helper needs to be granted again. To fix it:
+        If you just updated Klik PRO, macOS may still show an old “Klik PRO \
+        Helper” as enabled even though the updated helper needs granting again.
 
-        1. Open Privacy & Security → Accessibility.
-        2. If “Klik PRO Helper” is already listed, select it and click “–” to remove it.
-        3. Turn Klik PRO Helper on (enable it) when it reappears or when prompted.
+        Click “Register Helper” and Klik PRO makes the current helper’s toggle \
+        appear in Privacy & Security → Accessibility — you do not need the “+” \
+        button (the helper lives inside the app bundle and can’t be added by hand). \
+        Then:
+
+        1. If an old “Klik PRO Helper” is already listed, select it and click \
+        “–” to remove the stale entry.
+        2. Turn on the “Klik PRO Helper” that just appeared.
         """
-        alert.addButton(withTitle: "Open Accessibility Settings")
+        alert.addButton(withTitle: "Register Helper")
         alert.addButton(withTitle: "Later")
-        alert.beginSheetModal(for: window) { response in
-            guard response == .alertFirstButtonReturn,
-                  let url = URL(
-                    string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
-                  ) else { return }
-            NSWorkspace.shared.open(url)
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            // Force the current helper to register its trust request so its
+            // Accessibility toggle appears immediately, instead of leaving the
+            // user to hunt for a nested helper that “+” cannot reach.
+            self?.beginAccessibilitySetup()
         }
     }
 
