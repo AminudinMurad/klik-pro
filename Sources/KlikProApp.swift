@@ -3287,6 +3287,9 @@ final class ToggleView: NSView {
         advancedView.onDeleteOrphan = { [weak self] orphan in
             self?.confirmDeleteOrphanData(orphan)
         }
+        advancedView.onRevealOrphan = { orphan in
+            NSWorkspace.shared.activateFileViewerSelecting(orphan.dataPaths)
+        }
         contentView.mappingProfilesView.onOpen = { [weak self] instance in
             self?.launchAppProfile(instance)
         }
@@ -4144,11 +4147,68 @@ final class ToggleView: NSView {
 
     // MARK: Deep scan for leftovers
 
+    /// Returns the validated roots that are safe to include in a read-only scan.
+    /// If an older config has already lost its `dataRoot` pointer and has no root
+    /// history, the user can identify the previous Data Folder explicitly. This
+    /// never adopts the vault and never changes where new profiles are stored.
+    private func additionalVaultRootsForDeepScan() -> [URL]? {
+        var normalized = normalizedQuickLaunchConfig(persistedConfig)
+        var paths = normalized.knownDataRoots
+        if let active = normalized.dataRoot {
+            paths.removeAll { $0 == active }
+        }
+        let availableRoots = paths.compactMap { path -> URL? in
+            let root = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+            guard vaultPathRejectionReason(root.path) == nil,
+                  VaultManifest.read(vaultRoot: root) != nil else { return nil }
+            return root
+        }
+        if !availableRoots.isEmpty {
+            return availableRoots
+        }
+        guard normalized.dataRoot == nil else { return [] }
+
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.showsHiddenFiles = true
+        panel.prompt = "Scan Folder"
+        panel.message = "Choose a previously used Klik PRO Data Folder so Deep Scan can check its Instances folder. This is read-only and does not adopt or delete anything."
+        guard panel.runModal() == .OK, let selected = panel.url else { return nil }
+        let root = selected.standardizedFileURL
+        if let reason = vaultPathRejectionReason(root.path) {
+            advancedView.setStatus(reason, color: .systemRed)
+            return nil
+        }
+        guard VaultManifest.read(vaultRoot: root) != nil else {
+            advancedView.setStatus(
+                "That folder is not a Klik PRO Data Folder (vault.json is missing or invalid).",
+                color: .systemRed
+            )
+            return nil
+        }
+        normalized.knownDataRoots.append(root.path)
+        normalized = normalizedQuickLaunchConfig(normalized)
+        if KlikProConfigStore.save(normalized) {
+            persistedConfig = normalized
+            config = normalized
+        }
+        return [root]
+    }
+
     private func performDeepScanForLeftovers() {
         guard !hasUnsavedConfigurationChanges else {
             showAppProfileAlert(
                 title: "Save current changes first",
                 message: "Save or restore your current changes before scanning for leftovers."
+            )
+            return
+        }
+        guard let additionalVaultRoots = additionalVaultRootsForDeepScan() else {
+            advancedView.setStatus(
+                "Deep Scan cancelled — no previous Data Folder was scanned.",
+                color: .appTextSecondary
             )
             return
         }
@@ -4164,7 +4224,10 @@ final class ToggleView: NSView {
         appProfileQueue.async { [weak self] in
             guard let self else { return }
             let leftovers = self.appProfileManager.scanLauncherLeftovers(config: currentConfig)
-            let orphans = self.appProfileManager.scanOrphans(config: currentConfig)
+            let orphans = self.appProfileManager.scanOrphans(
+                config: currentConfig,
+                additionalVaultRoots: additionalVaultRoots
+            )
             let staleDockPaths = Self.staleKlikProDockTilePaths()
             DispatchQueue.main.async {
                 self.finishAppProfileLifecycle()
@@ -4219,12 +4282,18 @@ final class ToggleView: NSView {
         if cleanableTotal == 0 {
             alert.informativeText = lines.joined(separator: "\n")
                 + "\n\nThese folders no longer have Klik PRO ownership markers, so they need manual review before deletion."
+            alert.addButton(withTitle: "Reveal in Finder")
             alert.addButton(withTitle: "OK")
-            _ = alert.runModal()
+            if alert.runModal() == .alertFirstButtonReturn {
+                NSWorkspace.shared.activateFileViewerSelecting(
+                    reviewOrphans.flatMap(\.dataPaths)
+                )
+            }
             advancedView.setStatus(
                 "\(reviewOrphans.count) data folder(s) need manual review before deletion.",
                 color: .systemOrange
             )
+            refreshAppProfileHealth()
             return
         }
         let manualSuffix = reviewOrphans.isEmpty
@@ -5379,6 +5448,10 @@ final class ToggleView: NSView {
             return
         }
         let currentConfig = persistedConfig
+        let additionalVaultRoots = currentConfig.knownDataRoots.compactMap { path -> URL? in
+            guard path != currentConfig.dataRoot else { return nil }
+            return URL(fileURLWithPath: path, isDirectory: true)
+        }
         appProfileHealthQueue.async { [weak self] in
             guard let self else { return }
             let runtimeHealth = Dictionary(uniqueKeysWithValues: instances.map {
@@ -5387,7 +5460,10 @@ final class ToggleView: NSView {
             let maintenanceHealth = Dictionary(uniqueKeysWithValues: instances.map {
                 ($0.id, self.appProfileManager.maintenanceHealth(for: $0))
             })
-            let orphans = self.appProfileManager.scanOrphans(config: currentConfig)
+            let orphans = self.appProfileManager.scanOrphans(
+                config: currentConfig,
+                additionalVaultRoots: additionalVaultRoots
+            )
             DispatchQueue.main.async {
                 self.appProfilesView.setRuntimeHealth(runtimeHealth)
                 self.advancedView.setMaintenanceInstances(

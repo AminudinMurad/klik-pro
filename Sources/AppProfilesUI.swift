@@ -1006,6 +1006,7 @@ final class AdvancedSettingsContentView: NSView {
     var onDeleteData: ((AppProfileInstance) -> Void)?
     /// Reclaim record-less orphaned data on disk.
     var onDeleteOrphan: ((OrphanFinding) -> Void)?
+    var onRevealOrphan: ((OrphanFinding) -> Void)?
 
     private var isLocked = true
     /// Whether the tab is currently locked — read by the tab bar to show a lock glyph.
@@ -1191,13 +1192,16 @@ final class AdvancedSettingsContentView: NSView {
             let path = orphan.dataPaths.first?.path ?? orphan.instanceID.uuidString
             let size = ByteCountFormatter.string(fromByteCount: orphan.sizeBytes, countStyle: .file)
             let detail = "\(orphan.state.displayName) · \(size) · \(path)"
+            let primary: (title: String, action: () -> Void)? = orphan.state == .needsManualReview
+                ? ("Reveal in Finder", { [weak self] in self?.onRevealOrphan?(orphan) })
+                : nil
             let delete: (title: String, action: () -> Void)? = orphan.state == .orphanedData
                 ? ("Delete Data…", { [weak self] in self?.onDeleteOrphan?(orphan) })
                 : nil
             addMaintenanceRow(
                 at: y, width: width, title: "Unknown profile",
                 detail: detail, detailColor: orphan.state.displayColor,
-                primary: nil, delete: delete
+                primary: primary, delete: delete
             )
             if index + 1 < orphans.count {
                 addMaintenanceDivider(at: y + rowHeight - 1, width: width)
@@ -1299,6 +1303,8 @@ final class AdvancedSettingsContentView: NSView {
             return "Remove this profile's entry after its data went missing — nothing on disk is deleted."
         case "Delete Data…":
             return "Remove the launcher, Klik PRO entry, and login/profile data after confirmation."
+        case "Reveal in Finder":
+            return "Show this manual-review folder in Finder. Klik PRO will not delete it."
         default:
             return nil
         }

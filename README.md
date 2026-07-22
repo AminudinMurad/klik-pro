@@ -131,15 +131,16 @@ Once unlocked, point new App Profiles at a durable data folder so their logins s
 
 ## Install (pre-built release)
 
-The current release is **Klik PRO v1.2.8 (build 12)**, provided as one universal
+The current release is **Klik PRO v1.2.9 (build 13)**, provided as one universal
 macOS app for Apple Silicon and Intel Macs. The DMG is the recommended download;
 the ZIP contains the same app as an alternative.
-**[Download Klik PRO v1.2.8](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.2.8).**
+**[Download Klik PRO v1.2.9](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.2.9).**
 
 > [!IMPORTANT]
-> **Update if you use App Profiles.** Version 1.2.7 improves custom PNG app-profile
-> icon scaling in Dock and Launchpad. Version 1.2.8 also makes Deep Scan report
-> markerless leftover data folders instead of saying everything is clean.
+> **Update if you use a durable Data Folder.** Version 1.2.9 remembers previously
+> used Data Folders after the active setting is cleared. Deep Scan can also ask for
+> an older Data Folder directly, report markerless UUID folders for manual review,
+> and reveal them in Finder without offering automatic deletion.
 
 Klik PRO is **not notarized or signed with an Apple Developer ID** — it's an
 ad-hoc-signed, self-built utility — so a downloaded copy is quarantined and
@@ -435,9 +436,14 @@ after an interrupted operation or relaunch.
 **Deep Scan for Leftovers** checks only Klik PRO-owned locations and UUID-keyed
 artifacts. It can find orphaned profile folders, persisted custom-icon copies, lock
 files, safely generated launchers, and stale Dock tiles pointing directly into Klik
-PRO's managed launcher folder. Results can be moved to Trash, or permanently deleted
-after a second destructive confirmation. Active profiles, arbitrary apps, markerless
-data, and paths outside Klik PRO's controlled roots are excluded.
+PRO's managed launcher folder. Previously used durable Data Folders remain on a
+bounded scan allow-list after the active setting is cleared; users upgrading from an
+older release can identify such a folder through a read-only folder picker. Results
+with validated ownership can be moved to Trash, or permanently deleted after a second
+destructive confirmation. Markerless UUID folders are reported as **Needs manual
+review** with **Reveal in Finder**, but Klik PRO never deletes them automatically.
+Active profiles, arbitrary apps, and paths outside validated Klik PRO roots remain
+excluded.
 
 ### How the durable data folder works
 
@@ -513,7 +519,7 @@ setups Klik PRO has been tested against:
 | | |
 |---|---|
 | macOS | 26.5.2 (build 25F84) |
-| Klik PRO | v1.2.8 (build 12), universal Apple Silicon + Intel build |
+| Klik PRO | v1.2.9 (build 13), universal Apple Silicon + Intel build |
 | Primary mouse | Logitech MX Master 3 (Mac edition), firmware `MPM19.01_0015`, connected over Bluetooth (BLE) |
 | Additional tested mouse | Logi M650, firmware `RBM16.10_0014` |
 | Vendor software / driver | None — no mouse driver or manufacturer software installed |

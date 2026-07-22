@@ -2,6 +2,19 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.2.9
+
+A focused Deep Scan correction for previously used durable Data Folders.
+
+- **Previously used Data Folders remain discoverable** — clearing the active Data
+  Folder keeps its validated path in a bounded scan allow-list; older configurations
+  can select the previous folder through a read-only picker.
+- **Markerless folders stay manual-review-only** — UUID-named folders without Klik
+  PRO ownership markers are reported instead of producing a false clean result, but
+  remain completely outside Move to Trash and Delete Permanently flows.
+- **Reveal in Finder is visible** — manual-review results can be revealed from both
+  the scan summary and App Profile Maintenance for safe inspection and manual cleanup.
+
 ## 1.2.8
 
 A focused Advanced cleanup hotfix.

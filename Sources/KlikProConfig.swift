@@ -526,6 +526,11 @@ struct KlikProConfig: Codable, Equatable {
     // or nil (= Application Support, today's behavior exactly). Validated by
     // vaultPathRejectionReason before use; existing instances never move.
     var dataRoot: String?
+    // Validated Data Folders that were configured or explicitly selected for a
+    // read-only Deep Scan. Clearing `dataRoot` must not erase this history: it is
+    // the only safe way to find leftovers in a previously used durable root
+    // without broadly searching the user's Documents folder.
+    var knownDataRoots: [String]
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, onboardingCompleted, showMenuBarIcon, showQuickLaunchMenuIcons
@@ -533,7 +538,7 @@ struct KlikProConfig: Codable, Equatable {
         case middleButton, gestureButton
         case chatGPTHotkey, claudeHotkey, chatGPTMouseButton, claudeMouseButton
         case forwardButton, backButton, thumbWheel, instances
-        case suppressedLegacyInstanceIDs, dataRoot
+        case suppressedLegacyInstanceIDs, dataRoot, knownDataRoots
     }
 
     /// `showMenuBarIcon` was added in schema 6. Quick Launch side-button defaults were
@@ -604,6 +609,9 @@ struct KlikProConfig: Codable, Equatable {
         } else {
             dataRoot = try container.decodeIfPresent(String.self, forKey: .dataRoot)
         }
+        knownDataRoots = try container.decodeIfPresent(
+            [String].self, forKey: .knownDataRoots
+        ) ?? []
         // Schema 11 → 12 is also additive. AppProfileInstance defaults missing
         // lifecycle fields to active/nil, so no profile is re-keyed or moved.
         if schemaVersion < 12 {
@@ -632,7 +640,8 @@ struct KlikProConfig: Codable, Equatable {
         thumbWheel: ThumbWheelConfig,
         instances: [AppProfileInstance] = [],
         suppressedLegacyInstanceIDs: Set<UUID> = [],
-        dataRoot: String? = nil
+        dataRoot: String? = nil,
+        knownDataRoots: [String] = []
     ) {
         self.schemaVersion = schemaVersion
         self.onboardingCompleted = onboardingCompleted
@@ -652,6 +661,7 @@ struct KlikProConfig: Codable, Equatable {
         self.instances = instances
         self.suppressedLegacyInstanceIDs = suppressedLegacyInstanceIDs
         self.dataRoot = dataRoot
+        self.knownDataRoots = knownDataRoots
     }
 }
 
@@ -2039,6 +2049,16 @@ func normalizedQuickLaunchConfig(_ config: KlikProConfig) -> KlikProConfig {
     var normalized = config
     normalized.schemaVersion = 12
     normalized.instances = synchronizedLegacyQuickLaunchInstances(in: normalized)
+    var roots: [String] = []
+    var seen = Set<String>()
+    for candidate in normalized.knownDataRoots + [normalized.dataRoot].compactMap({ $0 }) {
+        let path = URL(fileURLWithPath: candidate, isDirectory: true).standardizedFileURL.path
+        guard vaultPathRejectionReason(path) == nil, seen.insert(path).inserted else { continue }
+        roots.append(path)
+    }
+    // Keep the history deliberately small. This is a scan allow-list, not an
+    // inventory of arbitrary filesystem locations.
+    normalized.knownDataRoots = Array(roots.suffix(8))
     return normalized
 }
 

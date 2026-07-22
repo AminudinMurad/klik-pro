@@ -3242,6 +3242,53 @@ private struct AppProfilesFoundationTests {
         expect(!findings.contains { finding in
             finding.dataPaths.contains { $0.lastPathComponent == "not-a-uuid" }
         }, "non-UUID names must never be enumerated")
+
+        // Regression: the active config no longer has dataRoot, but a validated
+        // previously used vault still contains markerless UUID folders. Deep
+        // Scan must enumerate those folders as reveal-only manual review.
+        let previousVault = fixture.root.appendingPathComponent(
+            "Previous Vault", isDirectory: true
+        )
+        expect(VaultManifest(
+            schemaVersion: VaultManifest.currentSchemaVersion,
+            instances: []
+        ).write(to: previousVault), "the previous-vault fixture manifest must be writable")
+        let previousID = UUID()
+        let previousFolder = previousVault
+            .appendingPathComponent("Instances", isDirectory: true)
+            .appendingPathComponent(previousID.uuidString.uppercased(), isDirectory: true)
+        try! FileManager.default.createDirectory(
+            at: previousFolder.appendingPathComponent("user-data", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        var rootlessConfig = config
+        rootlessConfig.dataRoot = nil
+        rootlessConfig.knownDataRoots = [previousVault.path]
+        let previousFindings = env.manager.scanOrphans(
+            config: rootlessConfig,
+            additionalVaultRoots: [previousVault]
+        )
+        expect(previousFindings.contains {
+            $0.instanceID == previousID
+                && $0.state == .needsManualReview
+                && $0.dataPaths == [previousFolder.standardizedFileURL]
+                && !$0.markerPresent
+        }, "a markerless UUID in a previous durable root must be Needs Manual Review")
+        expect(FileManager.default.fileExists(atPath: previousFolder.path),
+               "the previous-root scan must be read-only")
+
+        // Normalization retains a valid current root in the bounded history so
+        // clearing dataRoot later cannot make that durable root undiscoverable.
+        var configured = config
+        configured.dataRoot = previousVault.path
+        configured.knownDataRoots = []
+        configured = normalizedQuickLaunchConfig(configured)
+        expect(configured.knownDataRoots == [previousVault.standardizedFileURL.path],
+               "normalization must remember a configured durable root")
+        configured.dataRoot = nil
+        configured = normalizedQuickLaunchConfig(configured)
+        expect(configured.knownDataRoots == [previousVault.standardizedFileURL.path],
+               "clearing dataRoot must retain the previous durable root for Deep Scan")
     }
 
     private static func testReclaimDataTrashPermanentAndFailClosed() {

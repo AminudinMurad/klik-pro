@@ -194,6 +194,11 @@ grep -q 'func makeLauncherGenerator(forDataRoot' \
   "$ROOT/Sources/Duplication/AppProfileManager.swift"
 grep -q 'func makeAppProfileManager(forDataRoot' \
   "$ROOT/Sources/Duplication/AppProfileManager.swift"
+grep -q 'additionalVaultRoots: \[URL\] = \[\]' \
+  "$ROOT/Sources/Duplication/AppProfileManager.swift"
+grep -q 'a markerless UUID in a previous durable root must be Needs Manual Review' \
+  "$ROOT/Tests/AppProfilesFoundationTests.swift"
+grep -q 'Reveal in Finder' "$ROOT/Sources/AppProfilesUI.swift"
 grep -q 'vaultPathRejectionReason(dataRoot) == nil else' \
   "$ROOT/Sources/Duplication/AppProfileManager.swift"
 grep -q 'testDataRootWiringFactorySelectsGenerator' \

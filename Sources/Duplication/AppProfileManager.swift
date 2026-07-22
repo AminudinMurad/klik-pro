@@ -747,11 +747,17 @@ struct AppProfileManager {
     /// Read-only reconciliation of the Klik PRO data roots against the config
     /// and the vault manifest (spec §5). Returns record-less UUID data roots:
     /// marker-owned ones are `.orphanedData` (reclaimable), markerless ones are
-    /// `.needsManualReview` (surfaced only). Never touches data (I5). The
+    /// `.needsManualReview` (surfaced only). `additionalVaultRoots` are validated
+    /// previously used roots; every finding from them is manual-review-only even
+    /// when an ownership marker survives, because this manager is not wired to
+    /// mutate those inactive roots. Never touches data (I5). The
     /// fail-closed *in-use* protection is enforced at removal time by the
     /// exclusive per-instance lock, not here — listing a running profile is
     /// harmless because `reclaimData` refuses it.
-    func scanOrphans(config: KlikProConfig) -> [OrphanFinding] {
+    func scanOrphans(
+        config: KlikProConfig,
+        additionalVaultRoots: [URL] = []
+    ) -> [OrphanFinding] {
         let recordIDs = Set(config.instances.map { $0.id })
         let manifestIDs: Set<UUID> = {
             guard let vaultRoot = generator.vaultRootURL,
@@ -777,8 +783,33 @@ struct AppProfileManager {
                 markerPresent: candidate.markerPresent
             ))
         }
+        let activeVaultPath = generator.vaultRootURL?.standardizedFileURL.path
+        var scannedPaths = Set(findings.flatMap { $0.dataPaths.map(\.standardizedFileURL.path) })
+        for requestedRoot in additionalVaultRoots {
+            let root = requestedRoot.standardizedFileURL
+            guard root.path != activeVaultPath,
+                  vaultPathRejectionReason(root.path) == nil,
+                  let manifest = VaultManifest.read(vaultRoot: root) else { continue }
+            let protectedIDs = recordIDs.union(manifest.instances.map(\.id))
+            let supplemental = LauncherGenerator(vaultRootURL: root)
+            for candidate in supplemental.scanProfileDataCandidates() where candidate.storage == .vault {
+                let path = candidate.dataURL.standardizedFileURL
+                guard !protectedIDs.contains(candidate.instanceID),
+                      scannedPaths.insert(path.path).inserted else { continue }
+                findings.append(OrphanFinding(
+                    instanceID: candidate.instanceID,
+                    storage: .vault,
+                    state: .needsManualReview,
+                    dataPaths: [path],
+                    sizeBytes: supplemental.dataSize(at: path),
+                    markerPresent: candidate.markerPresent
+                ))
+            }
+        }
         return findings.sorted {
-            $0.instanceID.uuidString < $1.instanceID.uuidString
+            let lhsPath = $0.dataPaths.first?.path ?? $0.instanceID.uuidString
+            let rhsPath = $1.dataPaths.first?.path ?? $1.instanceID.uuidString
+            return lhsPath.localizedStandardCompare(rhsPath) == .orderedAscending
         }
     }
 
