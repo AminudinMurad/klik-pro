@@ -19,7 +19,7 @@ help support continued development and mouse/browser compatibility testing:**
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/aminudinmurad)
 [![PayPal](https://img.shields.io/badge/PayPal-Support-003087?logo=paypal&logoColor=white)](https://www.paypal.com/paypalme/aminudinmurad)
 
-[Features](#features) · [Install](#install-pre-built-release) · [Shortcuts](#default-shortcuts) · [App Profiles](#app-profiles) · [Changelog](CHANGELOG.md) · [How it works](#how-it-works) · [Building](#building) · [Tested with](#tested-with) · [Support](#support-development) · [Contributing](#contributing) · [License](#license)
+[Features](#features) · [Install](#install-pre-built-release) · [Shortcuts](#default-shortcuts) · [App Profiles](#app-profiles) · [Advanced](#advanced-tab) · [Changelog](CHANGELOG.md) · [How it works](#how-it-works) · [Building](#building) · [Tested with](#tested-with) · [Support](#support-development) · [Contributing](#contributing) · [License](#license)
 
 </div>
 
@@ -211,6 +211,15 @@ Choosing **View Mappings** keeps onboarding open as a review: use the visible
 [`docs/INSTALL.md`](docs/INSTALL.md) for repair steps, logs, and the confirmed
 **Reset Access…** workflow.
 
+The **Settings** tab keeps these Accessibility controls under its **Permissions**
+section (each is also shown as a hover tooltip):
+
+| Control | What it does |
+|---|---|
+| **Set Up Accessibility… / Open Accessibility…** | Opens the Accessibility permission list in System Settings. On first setup it also registers the correct Klik PRO Helper entry. |
+| **Recheck** | Re-checks whether Klik PRO Helper currently has Accessibility permission. |
+| **Reset Access…** | Clears Klik PRO Helper's Accessibility permission and restarts the guided setup. |
+
 Prefer to compile it yourself? See [Building](#building).
 
 ## Default shortcuts
@@ -364,6 +373,15 @@ the other immediately. The four working mouse controls can each be set to a **Ke
 Shortcut** or **Open App**, while thumb-wheel browser switching is unchanged. Only
 installed apps on Klik PRO's small, human-tested list are shown; there is no general
 app search, unsupported-app list, Browse flow, or Convert action.
+
+## Advanced tab
+
+The **Advanced** tab is lock-gated: because its options change where App Profile data
+lives on disk, clicking the padlock shows a risk confirmation before anything unlocks.
+Once unlocked it provides two things — a **durable data folder** for App Profile
+storage, and **App Profile Maintenance**, where every managed profile is classified
+and offered a single safe action. Accessibility and other macOS permissions live on
+the **Settings** tab, not here.
 
 ### Repair, archive, and restore
 
