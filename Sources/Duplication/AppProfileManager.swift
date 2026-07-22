@@ -39,7 +39,7 @@ struct AppProfileCandidate: Identifiable, Equatable {
 
     var id: UUID { app.id }
     var canCreate: Bool {
-        eligibility.kind != .unsupported && eligibility.compatibilityRuleID != nil
+        eligibility.allowsManagedProfile
     }
 }
 

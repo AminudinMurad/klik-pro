@@ -430,8 +430,7 @@ struct AppProfileRuntime {
             throw AppProfileRuntimeError.unavailable(.sourceUnavailable)
         }
         let eligibility = detector.eligibility(for: current, registry: registry)
-        guard eligibility.kind != .unsupported,
-              eligibility.compatibilityRuleID != nil else {
+        guard eligibility.allowsManagedProfile else {
             throw AppProfileRuntimeError.unavailable(
                 .verificationRequired(eligibility.reason)
             )

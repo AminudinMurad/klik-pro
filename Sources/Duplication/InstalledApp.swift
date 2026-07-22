@@ -40,6 +40,19 @@ struct AppProfileEligibility: Equatable {
     static func unsupported(_ reason: String) -> AppProfileEligibility {
         AppProfileEligibility(kind: .unsupported, reason: reason, compatibilityRuleID: nil)
     }
+
+    /// True only when eligibility came from an explicit production rule. This
+    /// includes Verified rules and owner-enabled Untested rules, but excludes a
+    /// generic Experimental engine detection with no isolation recipe.
+    var allowsManagedProfile: Bool {
+        kind != .unsupported && compatibilityRuleID != nil
+    }
+
+    /// Revalidates the exact rule baked into a generated launcher. A changed or
+    /// removed rule ID fails closed even when the app still looks compatible.
+    func allowsManagedProfile(usingRuleID ruleID: String) -> Bool {
+        allowsManagedProfile && compatibilityRuleID == ruleID
+    }
 }
 
 /// One result from an application scan. Its UUID identifies this scan result rather

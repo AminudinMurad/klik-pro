@@ -2,6 +2,18 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.2.6
+
+A focused correction for owner-enabled ChatGPT App Profiles created in v1.2.5.
+
+- **ChatGPT Dock and Launchpad launch fixed** — generated launchers now accept the
+  same explicit production-rule eligibility as profile creation and the working
+  menu-bar runtime. Owner-enabled Untested rules remain visibly Untested, while their
+  exact signed bundle, Team ID, engine, persisted rule ID, and isolation paths are
+  revalidated before every launch.
+- **Fail-closed rule matching retained** — generic Experimental engine detections,
+  unsupported apps, removed rules, and mismatched persisted rule IDs remain rejected.
+
 ## 1.2.5
 
 Completes App Profile removal cleanup and adds a safe, ownership-gated scan for

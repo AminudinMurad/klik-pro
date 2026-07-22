@@ -90,7 +90,7 @@ printf '%s\n' "$production_block" | grep -qF 'homeSymlinkPrefix: "claude"'
 printf '%s\n' "$production_block" | grep -qF 'homeSymlinkPrefix: "codex"'
 grep -q 'M1 removes only Klik PRO' "$ROOT/Sources/Duplication/LauncherGenerator.swift"
 grep -q 'currentCandidate.canCreate' "$ROOT/Sources/Duplication/AppProfileManager.swift"
-grep -q 'eligibility.compatibilityRuleID != nil' "$ROOT/Sources/Duplication/AppProfileRuntime.swift"
+grep -q 'eligibility.allowsManagedProfile' "$ROOT/Sources/Duplication/AppProfileRuntime.swift"
 # A relaunch of an already-running profile must reopen that instance, never spawn
 # a duplicate — apps like Claude for Desktop enforce no single-instance lock of
 # their own. Menu-bar path reopens the one running pid; the Dock/Launchpad/Finder
@@ -254,6 +254,8 @@ grep -q 'bundleIdentifierPrefix = "local.klik-pro.launcher.i"' \
 grep -q 'isInternalLauncher || isVisibleLauncher' \
   "$ROOT/Sources/KlikProManagedLauncher.swift"
 grep -q 'payload.validatedProfileURL(' \
+  "$ROOT/Sources/KlikProManagedLauncher.swift"
+grep -q 'allowsManagedProfile(usingRuleID: payload.compatibilityRuleID)' \
   "$ROOT/Sources/KlikProManagedLauncher.swift"
 grep -q 'case applicationSupport' \
   "$ROOT/Sources/Duplication/ManagedLauncherPayload.swift"

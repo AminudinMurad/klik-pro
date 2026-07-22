@@ -47,7 +47,7 @@ enum KlikProManagedLauncher {
               EngineDetector().eligibility(
                 for: current,
                 registry: .production
-              ) == .verified(ruleID: payload.compatibilityRuleID) else {
+              ).allowsManagedProfile(usingRuleID: payload.compatibilityRuleID) else {
             exit(27)
         }
         guard let expectedExecutablePath = Bundle(url: sourceURL)?.executableURL?

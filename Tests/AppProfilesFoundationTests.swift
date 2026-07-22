@@ -567,6 +567,10 @@ private struct AppProfilesFoundationTests {
                "an owner-enabled Untested rule must never be labelled Verified")
         expect(untestedEligibility.compatibilityRuleID == untestedRule.id,
                "an owner-enabled Untested rule must expose its isolation recipe")
+        expect(untestedEligibility.allowsManagedProfile(usingRuleID: untestedRule.id),
+               "an owner-enabled Untested rule must pass exact launcher revalidation")
+        expect(!untestedEligibility.allowsManagedProfile(usingRuleID: "wrong-rule"),
+               "a generated launcher with a changed rule ID must fail closed")
         expect(
             AppProfileCandidate(
                 app: electron,
@@ -583,6 +587,8 @@ private struct AppProfilesFoundationTests {
             ).canCreate,
             "generic engine detection must remain creation-disabled without an explicit rule"
         )
+        expect(!detector.eligibility(for: renamed).allowsManagedProfile,
+               "generic Experimental detection must never pass launcher revalidation")
 
         var wrongTeam = electron
         wrongTeam.teamIdentifier = "OTHERTEAM1"
