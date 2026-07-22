@@ -742,12 +742,24 @@ struct LauncherGenerator {
             at: spec.profileURL,
             storage: instance.storage
         )
-        guard !itemExistsIncludingDanglingSymlink(at: spec.launcherURL) else {
-            throw LauncherGeneratorError.alreadyExists
+        // A stale launcher can still occupy the target path — a compatibility-rule
+        // mismatch or a structurally broken bundle both leave it on disk. Allow the
+        // rebuild to replace it, but only when it is a Klik PRO-owned generated
+        // launcher; never overwrite unrelated content at that path.
+        var replaceExisting = false
+        if itemExistsIncludingDanglingSymlink(at: spec.launcherURL) {
+            guard (try? isSafeGeneratedLauncher(
+                spec.launcherURL,
+                expectedBundleID: spec.bundleIdentifier
+            )) == true else {
+                throw LauncherGeneratorError.alreadyExists
+            }
+            replaceExisting = true
         }
         let iconURL = try buildLauncherBundle(
             spec: spec,
-            compatibilityRuleID: compatibilityRuleID
+            compatibilityRuleID: compatibilityRuleID,
+            replaceExisting: replaceExisting
         )
         return ManagedLauncherMaterialization(
             launcherURL: spec.launcherURL,
@@ -761,7 +773,8 @@ struct LauncherGenerator {
     /// Returns the copied icon's final URL, if the source app provided one.
     private func buildLauncherBundle(
         spec: ManagedLauncherSpecification,
-        compatibilityRuleID: String
+        compatibilityRuleID: String,
+        replaceExisting: Bool = false
     ) throws -> URL? {
         guard let runner = launcherExecutableURL,
               fileManager.isExecutableFile(atPath: runner.path) else {
@@ -839,7 +852,25 @@ struct LauncherGenerator {
             guard signLauncher(temporaryLauncher) else {
                 throw LauncherGeneratorError.materializationFailed
             }
-            try fileManager.moveItem(at: temporaryLauncher, to: spec.launcherURL)
+            if replaceExisting, itemExistsIncludingDanglingSymlink(at: spec.launcherURL) {
+                // Repair may target a stale launcher still on disk. Move the old
+                // owned bundle aside only after the replacement is built and
+                // signed, then swap it in; restore the old copy if the swap fails.
+                let asideURL = launchersRoot.appendingPathComponent(
+                    "." + spec.instanceID.uuidString + ".replacing-" + UUID().uuidString + ".app",
+                    isDirectory: true
+                )
+                try fileManager.moveItem(at: spec.launcherURL, to: asideURL)
+                do {
+                    try fileManager.moveItem(at: temporaryLauncher, to: spec.launcherURL)
+                } catch {
+                    try? fileManager.moveItem(at: asideURL, to: spec.launcherURL)
+                    throw error
+                }
+                try? fileManager.removeItem(at: asideURL)
+            } else {
+                try fileManager.moveItem(at: temporaryLauncher, to: spec.launcherURL)
+            }
             refreshLaunchServicesRegistration(for: spec.launcherURL)
             return copiedIcon.map {
                 spec.launcherURL.appendingPathComponent(
