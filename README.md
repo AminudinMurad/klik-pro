@@ -43,39 +43,39 @@ assigned buttons remain active. Actual button and wheel support varies by hardwa
 an opt-in Accessibility step), with Back navigation and no dead-ends:
 
 <p align="center">
-  <img src="assets/onboarding-flow.gif?v=1.2.2-b6" width="462" alt="Klik PRO first-launch onboarding animation cycling through its three steps: Welcome, Preferences, and an opt-in Accessibility step">
+  <img src="assets/onboarding-flow.gif?v=1.2.6-b10" width="462" alt="Klik PRO first-launch onboarding animation cycling through its three steps: Welcome, Preferences, and an opt-in Accessibility step">
 </p>
 
 **Supported controls** — configure compatible mouse controls and see live conflict
 checks:
 
-<img src="assets/screenshot-mappings.png?v=1.2.2-b6" width="940" alt="Klik PRO Mappings tab with supported mouse controls, shortcut settings, and App Profiles using their individual icons">
+<img src="assets/screenshot-mappings.png?v=1.2.6-b10" width="940" alt="Klik PRO Mappings tab with supported mouse controls, shortcut settings, and App Profiles using their individual icons">
 
 **App Profiles** — generate isolated extra instances of ChatGPT or Claude, each with
 its own login; open or assign each profile, and give it a custom PNG/ICO, colour tint,
 or initial badge so every account is recognisable at a glance:
 
-<img src="assets/screenshot-app-profiles.png?v=1.2.2-b6" width="940" alt="Klik PRO App Profiles tab showing individually styled profile icons, Open and Assign Button controls, per-profile menu-bar toggles, and a gear menu for profile management">
+<img src="assets/screenshot-app-profiles.png?v=1.2.6-b10" width="940" alt="Klik PRO App Profiles tab showing individually styled profile icons, Open and Assign Button controls, per-profile menu-bar toggles, and a gear menu for profile management">
 
 **Icon customisation** — distinguish profiles with colour tints or initial badges,
 manage them from the per-profile gear menu, and see the same identity immediately in
 Mappings:
 
 <p align="center">
-  <img src="assets/app-profiles-icon-showcase.gif?v=1.2.2-b6" width="600" alt="Klik PRO animation showing tinted and initial-badged App Profile icons, profile management controls, and matching icons in the Mappings tab">
+  <img src="assets/app-profiles-icon-showcase.gif?v=1.2.6-b10" width="600" alt="Klik PRO animation showing tinted and initial-badged App Profile icons, profile management controls, and matching icons in the Mappings tab">
 </p>
 
 **Settings** — launch-at-login, menu-icon visibility, update-check, and guided Accessibility setup/reset controls:
 
-<img src="assets/screenshot-settings.png?v=1.2.2-b6" width="940" alt="Klik PRO Settings tab with separated Recheck control and outlined Granted permission status">
+<img src="assets/screenshot-settings.png?v=1.2.6-b10" width="940" alt="Klik PRO Settings tab with separated Recheck control and outlined Granted permission status">
 
 **Advanced — durable data folder (lock-gated).** The Advanced tab is locked by default. Its options change where App Profile data is stored on disk, so clicking the padlock shows a risk confirmation before anything unlocks:
 
-<img src="assets/screenshot-advanced-locked.png?v=1.2.2-b6" width="940" alt="Klik PRO Advanced tab locked: a padlock, a warning that these options change where App Profile data is stored on disk and can leave profiles unfindable, and a Click the lock to unlock hint">
+<img src="assets/screenshot-advanced-locked.png?v=1.2.6-b10" width="940" alt="Klik PRO Advanced tab locked: a padlock, a warning that these options change where App Profile data is stored on disk and can leave profiles unfindable, and a Click the lock to unlock hint">
 
 Once unlocked, point new App Profiles at a durable data folder so their logins survive uninstalling Klik PRO, scan an existing folder to recover profiles after a reinstall, and review profile health. Missing launchers can be repaired; active profiles can be archived without deleting their login data or custom icon, then restored later with the same identity:
 
-<img src="assets/screenshot-advanced.png?v=1.2.2-b6" width="940" alt="Klik PRO Advanced tab unlocked, showing durable data-folder controls and App Profile Maintenance rows for healthy, repairable, archived, stale, and orphaned profiles">
+<img src="assets/screenshot-advanced.png?v=1.2.6-b10" width="940" alt="Klik PRO Advanced tab unlocked, showing durable data-folder controls and App Profile Maintenance rows for healthy, repairable, archived, stale, and orphaned profiles">
 
 ## Features
 
@@ -118,9 +118,12 @@ Once unlocked, point new App Profiles at a durable data folder so their logins s
   profile is healthy, missing its launcher, missing its data, or archived. Repair
   safely rebuilds a missing launcher; Archive removes runtime access while preserving
   login data, assignments, identity, and custom artwork; Restore brings it back.
-  Stale entries can be forgotten without touching data, while marker-owned orphaned
-  data can be reviewed and moved to Trash or permanently deleted after explicit
-  confirmation and fail-closed ownership and in-use checks.
+  Delete Data now separates **Remove Icons (Keep Data)** from **Delete All Data**:
+  both clear the launcher, Dock, Launchpad, and menu-bar presence, while only Delete
+  All Data removes validated login/profile data. Stale entries can be forgotten
+  without touching data, while marker-owned orphaned data can be reviewed and moved
+  to Trash or permanently deleted after explicit confirmation and fail-closed
+  ownership and in-use checks.
 - **Caffeinate** — an optional keep-awake menu on the Klik PRO menu-bar icon
   (30 minutes, 1 hour, 2 hours, or until turned off), powered by macOS's own
   `caffeinate`, with a coffee-cup status icon while active.
@@ -128,19 +131,18 @@ Once unlocked, point new App Profiles at a durable data folder so their logins s
 
 ## Install (pre-built release)
 
-The current release is **Klik PRO v1.2.2 (build 6)**, provided as one universal
+The current release is **Klik PRO v1.2.6 (build 10)**, provided as one universal
 macOS app for Apple Silicon and Intel Macs. The DMG is the recommended download;
 the ZIP contains the same app as an alternative.
-**[Download Klik PRO v1.2.2](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.2.2).**
+**[Download Klik PRO v1.2.6](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.2.6).**
 
 > [!IMPORTANT]
-> **Update from v1.2.1 if you use a selected App Profile Data Folder.** Version
-> 1.2.1 generated launchers that incorrectly required the default Application Support
-> path, so newly created profiles stored in a selected durable Data Folder could fail
-> to launch. Version 1.2.2 signs the exact validated storage location into new
-> launchers and refreshes older managed launchers when they are used, without moving
-> or changing their login data. Profiles kept in the default Application Support
-> location were not affected by this defect.
+> **Update from v1.2.5 if you created ChatGPT App Profiles.** Version 1.2.5 could
+> generate ChatGPT profile launchers that worked from the menu bar but not from the
+> Dock or Launchpad. Version 1.2.6 fixes that path while keeping the same explicit
+> compatibility checks and preserving existing login data. If you skipped earlier
+> releases, v1.2.6 also includes the durable data-folder launcher fix from v1.2.2 and
+> the Advanced cleanup tools from v1.2.5.
 
 Klik PRO is **not notarized or signed with an Apple Developer ID** — it's an
 ad-hoc-signed, self-built utility — so a downloaded copy is quarantined and
@@ -376,12 +378,14 @@ Existing ChatGPT and Claude launchers remain untouched and appear under **Your A
 Profiles** with **Open** and **Assign Button**. Generated entries also offer
 **Rename** and **Remove from Klik PRO** — Remove deletes the generated launcher and
 managed entry, but keeps its login/profile data on disk for recovery. **Delete Data**
-in Advanced removes the launcher, managed entry, and validated profile data after
-offering Move to Trash or Delete Permanently. Assigning a button on either tab updates
-the other immediately. The four working mouse controls can each be set to a **Keyboard
-Shortcut** or **Open App**, while thumb-wheel browser switching is unchanged. Only
-installed apps on Klik PRO's small, human-tested list are shown; there is no general
-app search, unsupported-app list, Browse flow, or Convert action.
+in Advanced first asks whether to **Remove Icons (Keep Data)** or **Delete All Data**.
+Both choices clear the launcher, Dock tile, Launchpad entry, and menu-bar icon; Delete
+All Data then removes validated profile data after offering Move to Trash or Delete
+Permanently. Assigning a button on either tab updates the other immediately. The four
+working mouse controls can each be set to a **Keyboard Shortcut** or **Open App**,
+while thumb-wheel browser switching is unchanged. Only installed apps on Klik PRO's
+small, human-tested list are shown; there is no general app search, unsupported-app
+list, Browse flow, or Convert action.
 
 ## Advanced tab
 
@@ -512,12 +516,12 @@ setups Klik PRO has been tested against:
 | | |
 |---|---|
 | macOS | 26.5.2 (build 25F84) |
-| Klik PRO | v1.2.2 (build 6), universal Apple Silicon + Intel build |
+| Klik PRO | v1.2.6 (build 10), universal Apple Silicon + Intel build |
 | Primary mouse | Logitech MX Master 3 (Mac edition), firmware `MPM19.01_0015`, connected over Bluetooth (BLE) |
 | Additional tested mouse | Logi M650, firmware `RBM16.10_0014` |
 | Vendor software / driver | None — no mouse driver or manufacturer software installed |
-| ChatGPT / Codex desktop app (Special Feature target) | `/Applications/ChatGPT.app` — version `26.707.62119` (build `5211`), bundle ID `com.openai.codex` |
-| Claude Desktop app (Special Feature target) | `/Applications/Claude.app` — version/build `1.20186.1`, bundle ID `com.anthropic.claudefordesktop` |
+| ChatGPT / Codex desktop app (Special Feature target) | `/Applications/ChatGPT.app` — version `26.715.72359` (build `5718`), bundle ID `com.openai.codex` |
+| Claude Desktop app (Special Feature target) | `/Applications/Claude.app` — version/build `1.24012.1`, bundle ID `com.anthropic.claudefordesktop` |
 | Browsers (thumb-wheel tab switching) | Google Chrome `150.0.7871.115`, Brave `150.1.92.139`, Firefox `152.0.5`, Safari `26.5.2` |
 | Browser Back/Forward routing | Native side-button navigation in Chrome, Brave, and Firefox; Safari fallback uses Back `⌘[` and Forward `⌘]` |
 
