@@ -2,6 +2,24 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.2.3
+
+A maintenance update that improves App Profile repair detection and adds hover help
+throughout the permission and maintenance controls.
+
+- **Smarter repair detection** — a managed App Profile whose launcher exists but whose
+  source app or embedded runtime no longer matches the recorded compatibility rule is
+  now surfaced as **Repair** in Advanced instead of reporting Healthy. Repair rebuilds
+  only the generated launcher; login and profile data are never touched.
+- **Renamed vendor frameworks recognised** — the ChatGPT/Codex app's renamed
+  `Codex Framework.framework` is accepted as a valid Electron engine hint. Registry
+  identity and signing checks still gate compatibility.
+- **Hover tooltips** — the Settings tab's Accessibility controls (Open Accessibility,
+  Recheck, Reset Access) and every App Profile Maintenance action (Repair, Restore,
+  Archive, Forget, Delete Data) now show a short hover tooltip explaining what they do.
+- **Documentation** — the README gains a dedicated Advanced tab section and a
+  Permissions controls reference.
+
 ## 1.2.2
 
 This release completes App Profile cleanup and recovery with explicit, fail-closed
