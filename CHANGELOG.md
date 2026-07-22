@@ -2,6 +2,18 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.2.4
+
+Smooths the after-update Accessibility re-grant so the helper's toggle can be summoned
+with one click.
+
+- **"Register Helper" button** — the after-update Accessibility guidance dialog now has
+  a **Register Helper** button that makes the current Klik PRO Helper's Accessibility
+  toggle appear immediately, instead of waiting for it to show up or trying to add it
+  with "+". Because the helper lives inside the app bundle, it cannot be added by hand
+  with "+"; the button re-registers the helper so macOS lists — and prompts for — the
+  correct entry. The dialog wording no longer instructs the user to use "+".
+
 ## 1.2.3
 
 A maintenance update that improves App Profile repair detection and adds hover help
