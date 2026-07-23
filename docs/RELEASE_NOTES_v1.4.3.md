@@ -15,6 +15,11 @@ Dock icon, and keeps the generator card in sync with your customizations.
 - **Generator card reflects your changes.** After Rename Dock Icon or Change Icon,
   the generator card tile now updates to show the new name and custom icon, matching
   the Dock launcher. Reset returns the tile to the native app's own name and icon.
+- **Reliable Dock icons when both are added at once.** Creating a profile that adds
+  both its own Dock icon and the native launcher in one step now lands both reliably;
+  previously the profile's tile could be dropped during the Dock relaunch.
+- **Add to Dock for a profile.** Each App Profile's gear menu gains **Add to Dock**,
+  so you can put a profile's icon in the Dock at any time.
 
 Because the Dock and LaunchServices cache icons and labels, a change may take a
 moment — or a relaunch — to appear on the tile.
