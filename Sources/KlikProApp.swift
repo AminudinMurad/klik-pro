@@ -2830,14 +2830,16 @@ final class ToggleView: NSView {
     // Set by a successful check when a newer release exists; lights up the header button.
     private var updateAvailableURL: URL?
     static let autoCheckKey = "klikpro.autoCheckUpdates"
-    // Mappings | Settings | App Profiles | Advanced tabs (below the title).
+    // Tab bar centered in the 940-wide window header (visual order: Mappings,
+    // App Profiles, Settings, Advanced). Indices are unchanged — Mappings=0,
+    // Settings=1, App Profiles=2, Advanced=3 — only the on-screen x/y differ, so
+    // hit-testing and selectTab logic stay tied to these named rects.
     private var activeTab = 0
-    private let mappingsTabRect = NSRect(x: 38, y: 84, width: 86, height: 26)
-    private let settingsTabRect = NSRect(x: 138, y: 84, width: 78, height: 26)
-    private let appProfilesTabRect = NSRect(x: 230, y: 84, width: 76, height: 26)
-    // x=346 keeps the gap before "Advanced" even with the other tabs (App Profiles
-    // ends ~307); width covers the label plus its locked-state glyph for hit-testing.
-    private let advancedTabRect = NSRect(x: 346, y: 84, width: 100, height: 26)
+    private let mappingsTabRect = NSRect(x: 279, y: 46, width: 86, height: 26)
+    private let appProfilesTabRect = NSRect(x: 379, y: 46, width: 76, height: 26)
+    private let settingsTabRect = NSRect(x: 469, y: 46, width: 78, height: 26)
+    // Rightmost; width covers the "Advanced" label plus its locked-state glyph.
+    private let advancedTabRect = NSRect(x: 561, y: 46, width: 100, height: 26)
     private var appActivationObserver: NSObjectProtocol?
 
     override var isFlipped: Bool { true }

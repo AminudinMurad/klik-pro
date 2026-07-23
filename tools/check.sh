@@ -666,7 +666,8 @@ if grep -Eq 'AppProfilePicker|Search installed apps|Browse…|＋ Add app|Search
 fi
 grep -q 'KlikProManagedLauncher' "$ROOT/tools/build-release.sh"
 grep -q 'final class MappingAppProfilesView' "$ROOT/Sources/AppProfilesUI.swift"
-grep -q 'scrollView.autohidesScrollers = false' "$ROOT/Sources/AppProfilesUI.swift"
+# Mappings cards auto-hide their scrollers so a group that fits shows no stub handle.
+grep -q 'scrollView.autohidesScrollers = true' "$ROOT/Sources/AppProfilesUI.swift"
 # The Mappings right column splits into two stacked, independently-scrolling cards —
 # the installed native apps on top and the generated App Profiles below — instead of
 # one combined list under a "YOUR APP PROFILES" heading.

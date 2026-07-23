@@ -834,6 +834,8 @@ private final class MappingSectionCardView: NSView {
     private let titleField = NSTextField(labelWithString: "")
     private let scrollView = NSScrollView()
     private let stackView = FlippedProfileStackView()
+    private let spinner = NSProgressIndicator()
+    private let loadingLabel = NSTextField(labelWithString: "Loading apps…")
 
     override var isFlipped: Bool { true }
 
@@ -850,13 +852,15 @@ private final class MappingSectionCardView: NSView {
         titleField.textColor = .appTextSecondary
         titleField.stringValue = title
 
-        // Each card scrolls its own group; the scroller is always shown so the two
-        // cards read as symmetric panes on the right column.
-        scrollView.frame = NSRect(
-            x: 12, y: 36, width: frame.width - 24, height: frame.height - 48
-        )
+        // Each card scrolls its own group. The scroller auto-hides when everything
+        // fits, so the two-item Native Apps card doesn't show a near-full-height
+        // stub handle; it appears with a proportional handle only when the profiles
+        // overflow.
+        let scrollY: CGFloat = 36
+        let scrollH = frame.height - 48
+        scrollView.frame = NSRect(x: 12, y: scrollY, width: frame.width - 24, height: scrollH)
         scrollView.hasVerticalScroller = true
-        scrollView.autohidesScrollers = false
+        scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
         stackView.orientation = .vertical
         stackView.alignment = .leading
@@ -864,7 +868,24 @@ private final class MappingSectionCardView: NSView {
         stackView.edgeInsets = NSEdgeInsets(top: 1, left: 0, bottom: 2, right: 0)
         scrollView.documentView = stackView
 
-        [titleField, scrollView].forEach(addSubview)
+        // Loading state (mirrors the App Profiles tab): a centered spinner + caption
+        // shown until the first data arrives, so first launch never flashes a
+        // misleading empty/"No native apps" state over empty space during the scan.
+        spinner.frame = NSRect(
+            x: frame.width / 2 - 12, y: scrollY + scrollH / 2 - 26, width: 24, height: 24
+        )
+        spinner.style = .spinning
+        spinner.isIndeterminate = true
+        spinner.isDisplayedWhenStopped = false
+        loadingLabel.frame = NSRect(
+            x: 0, y: scrollY + scrollH / 2 + 6, width: frame.width, height: 18
+        )
+        loadingLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        loadingLabel.textColor = .appTextSecondary
+        loadingLabel.alignment = .center
+        loadingLabel.isHidden = true
+
+        [titleField, scrollView, spinner, loadingLabel].forEach(addSubview)
     }
 
     required init?(coder: NSCoder) { nil }
@@ -877,11 +898,16 @@ private final class MappingSectionCardView: NSView {
     /// callbacks are already wired) at `rowContentWidth`; an empty group shows a
     /// centered caption instead.
     func setRows(_ rows: [NSView], rowHeight: CGFloat, emptyMessage: String) {
+        // Leaving the loading state: stop the spinner and reveal the list.
+        spinner.stopAnimation(nil)
+        loadingLabel.isHidden = true
+        scrollView.isHidden = false
         stackView.arrangedSubviews.forEach {
             stackView.removeArrangedSubview($0)
             $0.removeFromSuperview()
         }
         let width = rowContentWidth
+        let emptyRowHeight: CGFloat = 56
         if rows.isEmpty {
             let empty = NSTextField(labelWithString: emptyMessage)
             empty.font = .systemFont(ofSize: 13)
@@ -889,7 +915,7 @@ private final class MappingSectionCardView: NSView {
             empty.alignment = .center
             stackView.addArrangedSubview(empty)
             empty.widthAnchor.constraint(equalToConstant: width).isActive = true
-            empty.heightAnchor.constraint(equalToConstant: 56).isActive = true
+            empty.heightAnchor.constraint(equalToConstant: emptyRowHeight).isActive = true
         } else {
             for row in rows {
                 stackView.addArrangedSubview(row)
@@ -897,13 +923,31 @@ private final class MappingSectionCardView: NSView {
                 row.heightAnchor.constraint(equalToConstant: rowHeight).isActive = true
             }
         }
+        // Accurate content height (no trailing spacing) so a group that fits does NOT
+        // overflow by a few points — which is what produced a near-full-height,
+        // barely-scrollable handle. With autohide, an exact fit shows no scroller.
+        let itemCount = rows.isEmpty ? 1 : rows.count
+        let perItemHeight = rows.isEmpty ? emptyRowHeight : rowHeight
+        let contentHeight = stackView.edgeInsets.top + stackView.edgeInsets.bottom
+            + CGFloat(itemCount) * perItemHeight
+            + CGFloat(max(0, itemCount - 1)) * stackView.spacing
         stackView.frame = NSRect(
             x: 0, y: 0, width: width,
-            height: max(
-                scrollView.contentSize.height,
-                CGFloat(max(1, rows.count)) * (rowHeight + stackView.spacing) + 3
-            )
+            height: max(scrollView.contentSize.height, contentHeight)
         )
+    }
+
+    /// Shows the centered spinner + caption and clears any rows — for the window on
+    /// first launch before the app scan first reports data. Cleared by `setRows`.
+    func showLoading(_ message: String = "Loading apps…") {
+        stackView.arrangedSubviews.forEach {
+            stackView.removeArrangedSubview($0)
+            $0.removeFromSuperview()
+        }
+        scrollView.isHidden = true
+        loadingLabel.stringValue = message
+        loadingLabel.isHidden = false
+        spinner.startAnimation(nil)
     }
 }
 
@@ -916,6 +960,9 @@ final class MappingAppProfilesView: NSView {
     private var instances: [AppProfileInstance]
     private var runtimeHealth: [UUID: AppProfileRuntimeHealth] = [:]
     private var originals: [(target: QuickLaunchTarget, name: String, path: String, button: QuickLaunchMouseButton?)] = []
+    // False until the first setOriginals call (the app scan reporting in). Until then
+    // the Native Apps card shows a loading spinner rather than "No native apps".
+    private var originalsLoaded = false
     var onOpen: ((AppProfileInstance) -> Void)?
     var onAssign: ((AppProfileInstance) -> Void)?
     var onOpenOriginal: ((QuickLaunchTarget) -> Void)?
@@ -966,6 +1013,7 @@ final class MappingAppProfilesView: NSView {
         self.originals = originals.map {
             (target: $0.0, name: $0.1, path: $0.2, button: $0.3)
         }
+        originalsLoaded = true
         rebuildRows()
     }
 
@@ -977,25 +1025,31 @@ final class MappingAppProfilesView: NSView {
     }
 
     private func rebuildRows() {
-        // Top card: the installed native apps.
-        let nativeWidth = nativeCard.rowContentWidth
-        let nativeRows: [NSView] = originals.map { original in
-            let row = MappingOriginalAppRowView(
-                target: original.target,
-                name: original.name,
-                path: original.path,
-                mouseButton: original.button,
-                width: nativeWidth
+        // Top card: the installed native apps. Until the first setOriginals call (the
+        // scan hasn't reported yet on first launch), show a loading state instead of a
+        // premature "No native apps installed" over empty space.
+        if originalsLoaded {
+            let nativeWidth = nativeCard.rowContentWidth
+            let nativeRows: [NSView] = originals.map { original in
+                let row = MappingOriginalAppRowView(
+                    target: original.target,
+                    name: original.name,
+                    path: original.path,
+                    mouseButton: original.button,
+                    width: nativeWidth
+                )
+                row.onOpen = { [weak self] in self?.onOpenOriginal?($0) }
+                row.onAssign = { [weak self] in self?.onAssignOriginal?($0) }
+                return row
+            }
+            nativeCard.setRows(
+                nativeRows,
+                rowHeight: MappingOriginalAppRowView.rowHeight,
+                emptyMessage: "No native apps installed"
             )
-            row.onOpen = { [weak self] in self?.onOpenOriginal?($0) }
-            row.onAssign = { [weak self] in self?.onAssignOriginal?($0) }
-            return row
+        } else {
+            nativeCard.showLoading()
         }
-        nativeCard.setRows(
-            nativeRows,
-            rowHeight: MappingOriginalAppRowView.rowHeight,
-            emptyMessage: "No native apps installed"
-        )
 
         // Bottom card: the generated App Profiles.
         let profilesWidth = profilesCard.rowContentWidth
