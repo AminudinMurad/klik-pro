@@ -2821,7 +2821,7 @@ final class ToggleView: NSView {
         frame: NSRect(x: 48, y: 854, width: 120, height: 42)
     )
     // Check-for-updates button, top-right of the header (where the status pill used to be).
-    private let updateButtonRect = NSRect(x: 714, y: 30, width: 174, height: 30)
+    private let updateButtonRect = NSRect(x: 732, y: 30, width: 156, height: 30)
     private var updateButtonTrackingArea: NSTrackingArea?
     private var updateButtonHovered = false
     private let closeButtonRect = NSRect(x: 808, y: 854, width: 90, height: 42)
@@ -2830,16 +2830,15 @@ final class ToggleView: NSView {
     // Set by a successful check when a newer release exists; lights up the header button.
     private var updateAvailableURL: URL?
     static let autoCheckKey = "klikpro.autoCheckUpdates"
-    // Tab bar centered in the 940-wide window header (visual order: Mappings,
-    // App Profiles, Settings, Advanced). Indices are unchanged — Mappings=0,
-    // Settings=1, App Profiles=2, Advanced=3 — only the on-screen x/y differ, so
-    // hit-testing and selectTab logic stay tied to these named rects.
+    // Pill tab bar. Segment frames are recomputed each draw from measured label
+    // widths (even padding, centered as a group) and stored back into these named
+    // rects, so mouseDown/selectTab stay in sync. Indices are unchanged: Mappings=0,
+    // Settings=1, App Profiles=2, Advanced=3 — only the on-screen order/position differ.
     private var activeTab = 0
-    private let mappingsTabRect = NSRect(x: 279, y: 46, width: 86, height: 26)
-    private let appProfilesTabRect = NSRect(x: 379, y: 46, width: 76, height: 26)
-    private let settingsTabRect = NSRect(x: 469, y: 46, width: 78, height: 26)
-    // Rightmost; width covers the "Advanced" label plus its locked-state glyph.
-    private let advancedTabRect = NSRect(x: 561, y: 46, width: 100, height: 26)
+    private var mappingsTabRect = NSRect.zero
+    private var settingsTabRect = NSRect.zero
+    private var appProfilesTabRect = NSRect.zero
+    private var advancedTabRect = NSRect.zero
     private var appActivationObserver: NSObjectProtocol?
 
     override var isFlipped: Bool { true }
@@ -7176,41 +7175,78 @@ final class ToggleView: NSView {
         let cfuSize = cfu.size(withAttributes: cfuAttrs)
         cfu.draw(at: NSPoint(x: updateButtonRect.midX - cfuSize.width / 2, y: updateButtonRect.midY - cfuSize.height / 2), withAttributes: cfuAttrs)
 
-        // Tabs: Mappings | Settings | App Profiles | Advanced
-        for (label, rect, idx) in [
-            ("Mappings", mappingsTabRect, 0),
-            ("Settings", settingsTabRect, 1),
-            ("App Profiles", appProfilesTabRect, 2),
-            ("Advanced", advancedTabRect, 3),
-        ] {
-            let active = activeTab == idx
+        // Pill tab bar: a rounded track holds the four tabs (visual order Mappings,
+        // App Profiles, Settings, Advanced) with even padding; the active tab is a
+        // filled accent pill with white text. Segment frames are measured here and
+        // stored back into the named rects so mouseDown/selectTab stay in sync.
+        let tabFont = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        let tabHPad: CGFloat = 18
+        let tabTrackPad: CGFloat = 4
+        let tabTrackY: CGFloat = 42
+        let tabTrackHeight: CGFloat = 32
+        let tabLockGap: CGFloat = 5
+        let tabLockWidth: CGFloat = 13
+        let tabOrder: [(label: String, idx: Int)] = [
+            ("Mappings", 0), ("App Profiles", 2), ("Settings", 1), ("Advanced", 3),
+        ]
+        let tabWidths: [CGFloat] = tabOrder.map { tab in
+            let labelWidth = (tab.label as NSString).size(withAttributes: [.font: tabFont]).width
+            let glyphWidth: CGFloat = (tab.idx == 3 && advancedView.locked) ? tabLockGap + tabLockWidth : 0
+            return ceil(labelWidth) + glyphWidth + tabHPad * 2
+        }
+        let tabTrackWidth = tabWidths.reduce(0, +) + tabTrackPad * 2
+        let tabTrackX = ((bounds.width - tabTrackWidth) / 2).rounded()
+        NSColor.appTextPrimary.withAlphaComponent(0.06).setFill()
+        NSBezierPath(
+            roundedRect: NSRect(x: tabTrackX, y: tabTrackY, width: tabTrackWidth, height: tabTrackHeight),
+            xRadius: tabTrackHeight / 2, yRadius: tabTrackHeight / 2
+        ).fill()
+        var tabX = tabTrackX + tabTrackPad
+        let tabPillY = tabTrackY + tabTrackPad
+        let tabPillHeight = tabTrackHeight - tabTrackPad * 2
+        for (i, tab) in tabOrder.enumerated() {
+            let segWidth = tabWidths[i]
+            let segRect = NSRect(x: tabX, y: tabTrackY, width: segWidth, height: tabTrackHeight)
+            switch tab.idx {
+            case 0: mappingsTabRect = segRect
+            case 1: settingsTabRect = segRect
+            case 2: appProfilesTabRect = segRect
+            default: advancedTabRect = segRect
+            }
+            let active = activeTab == tab.idx
+            if active {
+                NSColor.controlAccentColor.setFill()
+                NSBezierPath(
+                    roundedRect: NSRect(x: tabX, y: tabPillY, width: segWidth, height: tabPillHeight),
+                    xRadius: tabPillHeight / 2, yRadius: tabPillHeight / 2
+                ).fill()
+            }
             let tAttrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
-                .foregroundColor: active ? NSColor.controlAccentColor : NSColor.appTextSecondary
+                .font: tabFont,
+                .foregroundColor: active ? NSColor.white : NSColor.appTextSecondary,
             ]
-            (label as NSString).draw(at: NSPoint(x: rect.minX, y: rect.minY + 4), withAttributes: tAttrs)
-            let w = (label as NSString).size(withAttributes: tAttrs).width
+            let labelWidth = (tab.label as NSString).size(withAttributes: tAttrs).width
+            let glyphWidth: CGFloat = (tab.idx == 3 && advancedView.locked) ? tabLockGap + tabLockWidth : 0
+            let labelX = tabX + (segWidth - labelWidth - glyphWidth) / 2
+            (tab.label as NSString).draw(at: NSPoint(x: labelX, y: tabTrackY + 8), withAttributes: tAttrs)
             // A small lock glyph marks the Advanced tab while its options are locked.
-            if idx == 3, advancedView.locked,
+            if tab.idx == 3, advancedView.locked,
                let lockGlyph = NSImage(
                    systemSymbolName: "lock.fill",
                    accessibilityDescription: "Locked"
                )?.withSymbolConfiguration(
                    NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
-                       .applying(.init(paletteColors: [active ? .controlAccentColor : .appTextSecondary]))
+                       .applying(.init(paletteColors: [active ? .white : .appTextSecondary]))
                ) {
                 let gh = lockGlyph.size.height
                 lockGlyph.draw(in: NSRect(
-                    x: rect.minX + w + 5,
-                    y: rect.minY + 4 + (13 - gh) / 2 + 1,
+                    x: labelX + labelWidth + tabLockGap,
+                    y: tabTrackY + 8 + (13 - gh) / 2 + 1,
                     width: lockGlyph.size.width,
                     height: gh
                 ))
             }
-            if active {
-                NSColor.controlAccentColor.setFill()
-                NSBezierPath(rect: NSRect(x: rect.minX, y: rect.minY + 24, width: w, height: 2)).fill()
-            }
+            tabX += segWidth
         }
     }
 
