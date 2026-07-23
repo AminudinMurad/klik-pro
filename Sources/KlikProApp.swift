@@ -1,5 +1,6 @@
 import AppKit
 import Carbon
+import ImageIO
 import QuartzCore
 import UniformTypeIdentifiers
 
@@ -3244,6 +3245,18 @@ final class ToggleView: NSView {
         appProfilesView.onAssignOriginal = { [weak self] target in
             self?.assignMouseButton(to: .original(target), label: target.title)
         }
+        appProfilesView.onCreateOriginalDock = { [weak self] target in
+            self?.createOriginalDockIcon(for: target)
+        }
+        appProfilesView.onDeleteOriginalDock = { [weak self] target in
+            self?.deleteOriginalDockIcon(for: target)
+        }
+        appProfilesView.onRemoveNativeOriginalDock = { [weak self] target in
+            self?.removeNativeOriginalDockTile(for: target)
+        }
+        appProfilesView.onToggleOriginalMenuBar = { [weak self] target in
+            self?.toggleOriginalMenuBarPin(for: target)
+        }
         appProfilesView.onOpen = { [weak self] instance in
             self?.launchAppProfile(instance)
         }
@@ -3274,8 +3287,18 @@ final class ToggleView: NSView {
             // profiles list (picking up wrappers created/removed on disk) with their health.
             self.refreshSupportedAppCandidates(showLoading: true, force: true)
             self.appProfilesView.setInstances(self.persistedConfig.instances)
+            self.appProfilesView.setOriginalDockPinned(self.originalDockPinStates())
+            self.appProfilesView.setOriginalMenuBarPinned(self.originalMenuBarPinStates())
             self.refreshAppProfileHealth()
         }
+        // Reflect the current Dock pin state of the original-app launchers on their
+        // cards at startup. Skipped in preview renders, which must not read the Dock.
+        if !previewRenderingIsActive {
+            appProfilesView.setOriginalDockPinned(originalDockPinStates())
+        }
+        // Menu-bar pin state is persisted in config (not read from the Dock), so it is
+        // safe to reflect on the cards even while rendering deterministic previews.
+        appProfilesView.setOriginalMenuBarPinned(originalMenuBarPinStates())
         advancedView.onUnlock = { [weak self] in
             guard let self = self, confirmUnlockAdvancedSettings() else { return }
             self.advancedView.setLocked(false)
@@ -4440,12 +4463,23 @@ final class ToggleView: NSView {
             return
         }
         let proposedName = nextDualAppName(for: candidate)
+        // Known vendor (ChatGPT / Claude) gets a compulsory original-app Dock icon.
+        // Other eligible apps have no "original launcher" concept, so the forced row
+        // is not shown and the compulsory step is skipped for them.
+        let vendorTarget = QuickLaunchTarget.allCases.first {
+            $0.applicationBundleIdentifier == candidate.app.bundleIdentifier
+        }
+        let vendorName = vendorTarget.map {
+            URL(fileURLWithPath: $0.standardApplicationPath)
+                .deletingPathExtension().lastPathComponent
+        }
         guard let request = requestDualAppNameOptions(
             title: "Name your App Profile",
             informativeText: "This name appears under the generated icon. You can rename it later.",
             initialValue: proposedName,
             actionTitle: "Generate",
-            allowDockOption: true
+            allowDockOption: true,
+            forcedOriginalDockVendorName: vendorName
         ) else { return }
         let requestedName = request.name
         guard beginAppProfileLifecycle() else {
@@ -4459,6 +4493,42 @@ final class ToggleView: NSView {
         let currentConfig = persistedConfig
         appProfileQueue.async { [weak self] in
             guard let self else { return }
+            // Compulsory original-app Dock icon (Decision: block on failure). It runs
+            // before the profile is created, because once a profile is live the native
+            // vendor tile can no longer reopen the original. Running it on every
+            // generation also backfills users who already have profiles but no
+            // original icon yet.
+            var originalDockOutcome: DockPinResult?
+            if let vendor = vendorTarget {
+                // Source the required Dock icon from the exact app this profile is
+                // built from, so an install outside /Applications (e.g. ~/Applications)
+                // no longer hard-blocks profile creation.
+                let outcome = self.ensureOriginalDockIcon(
+                    for: vendor,
+                    preferredSourceURL: candidate.app.bundleURL
+                )
+                switch outcome {
+                case .some(.added), .some(.alreadyPresent):
+                    originalDockOutcome = outcome
+                default:
+                    DispatchQueue.main.async {
+                        self.finishAppProfileLifecycle()
+                        self.appProfilesView.setStatus(
+                            "App Profile was not created.", color: .systemRed
+                        )
+                        self.appProfilesView.setOriginalDockPinned(self.originalDockPinStates())
+                        self.showAppProfileAlert(
+                            title: "Dock icon is required",
+                            message: "Klik PRO could not create the required Dock icon "
+                                + "for native \(vendorName ?? "app"). This can happen if an item "
+                                + "already exists at \(vendor.originalDockLauncherPath) that isn't a "
+                                + "Klik PRO launcher — remove it and try again. The App Profile was "
+                                + "not created."
+                        )
+                    }
+                    return
+                }
+            }
             do {
                 let result = try self.appProfileManager.create(
                     from: candidate,
@@ -4474,6 +4544,7 @@ final class ToggleView: NSView {
                     self.config = result.config
                     self.persistedConfig = result.config
                     self.appProfilesView.setInstances(result.config.instances)
+                    self.appProfilesView.setOriginalDockPinned(self.originalDockPinStates())
                     let dockSuffix: String
                     switch dockResult {
                     case .notRequested:
@@ -4485,10 +4556,13 @@ final class ToggleView: NSView {
                     case .failed:
                         dockSuffix = " Dock icon was not added."
                     }
+                    let originalSuffix = originalDockOutcome == .added
+                        ? " Dock icon for native \(vendorName ?? "app") added."
+                        : ""
                     self.appProfilesView.setStatus(
                         applied
-                            ? "\(result.instance.label) was generated and opened.\(dockSuffix)"
-                            : "\(result.instance.label) was generated; helper apply is pending.\(dockSuffix)",
+                            ? "\(result.instance.label) was generated and opened.\(dockSuffix)\(originalSuffix)"
+                            : "\(result.instance.label) was generated; helper apply is pending.\(dockSuffix)\(originalSuffix)",
                         color: applied && dockResult != .failed ? .systemGreen : .systemOrange
                     )
                     self.refreshAppProfileHealth()
@@ -4552,6 +4626,319 @@ final class ToggleView: NSView {
         case failed
     }
 
+    /// True when a Klik PRO original-app launcher tile for `target` is currently
+    /// pinned in the Dock. Pin state is read from the Dock itself (no persisted
+    /// flag), so the App Profiles card checkbox always reflects reality.
+    private func originalDockIconIsPinned(for target: QuickLaunchTarget) -> Bool {
+        let launcherPath = URL(
+            fileURLWithPath: target.originalDockLauncherPath,
+            isDirectory: true
+        ).standardizedFileURL.path
+        return Self.dockPersistentAppsContain(path: launcherPath)
+    }
+
+    /// Ensures the original-app launcher exists and its tile is pinned in the Dock.
+    /// Append-only: it never rewrites or removes the user's native vendor tile, and
+    /// it is idempotent (a second call returns `.alreadyPresent`). Returns nil only
+    /// when the launcher could not be created (e.g. a stale non-Klik-PRO item squats
+    /// the launcher path) — the caller decides how to surface that.
+    @discardableResult
+    private func ensureOriginalDockIcon(
+        for target: QuickLaunchTarget,
+        preferredSourceURL: URL? = nil
+    ) -> DockPinResult? {
+        guard let launcherURL = Self.ensureOriginalDockLauncher(
+            for: target,
+            preferredSourceURL: preferredSourceURL
+        ) else {
+            return nil
+        }
+        return Self.addLauncherToDock(launcherURL)
+    }
+
+    /// Removes Klik PRO's badged original-app launcher: it unpins the tile (if the
+    /// user still has it in the Dock), then deletes the generated launcher bundle and
+    /// its Launch Services registration so no artifact is left behind. Works even when
+    /// the tile was manually unpinned but the bundle still lingers on disk. Only ever
+    /// touches a bundle that passes the strict `originalDockLauncherIsValid` check —
+    /// never the native vendor app. Returns whether anything was actually removed.
+    @discardableResult
+    private func removeOriginalDockIcon(for target: QuickLaunchTarget) -> Bool {
+        let launcherURL = URL(
+            fileURLWithPath: target.originalDockLauncherPath,
+            isDirectory: true
+        ).standardizedFileURL
+        let wasPinned = Self.dockPersistentAppsContain(path: launcherURL.path)
+        Self.removeDockLauncherIfPresent(launcherURL)
+        guard Self.originalDockLauncherIsValid(launcherURL, target: target) else {
+            return wasPinned
+        }
+        Self.unregisterLaunchServicesRegistration(forOriginalDockLauncher: launcherURL)
+        try? FileManager.default.removeItem(at: launcherURL)
+        return true
+    }
+
+    private func originalVendorName(_ target: QuickLaunchTarget) -> String {
+        URL(fileURLWithPath: target.standardApplicationPath)
+            .deletingPathExtension().lastPathComponent
+    }
+
+    /// Bundle URL of the currently-discovered vendor candidate for `target`, if any.
+    /// Lets the gear-menu Dock icon be sourced from the exact install App Profiles
+    /// were discovered from — including one outside `/Applications`.
+    private func candidateBundleURL(for target: QuickLaunchTarget) -> URL? {
+        supportedAppCandidateCache?.first {
+            $0.app.bundleIdentifier == target.applicationBundleIdentifier
+        }?.app.bundleURL
+    }
+
+    /// Gear → "Create Dock Icon" on the App Profiles tab. Creates the badged
+    /// original-app launcher and pins it. If one already exists, confirms a replace
+    /// (delete + recreate) first. Never touches the native vendor Dock tile.
+    private func createOriginalDockIcon(for target: QuickLaunchTarget) {
+        let vendorName = originalVendorName(target)
+        let preferredSourceURL = candidateBundleURL(for: target)
+        // Confirm a replace on the main thread (NSAlert must run there) before the
+        // slow work is dispatched off the UI thread.
+        let replaceExisting: Bool
+        if originalDockIconIsPinned(for: target) {
+            let alert = NSAlert()
+            alert.messageText = "Replace \(vendorName)'s Dock icon?"
+            alert.informativeText = "A Klik PRO Dock icon for native \(vendorName) already "
+                + "exists. Replace it with a fresh one? Your built-in \(vendorName) Dock icon is "
+                + "not affected."
+            alert.addButton(withTitle: "Replace")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            replaceExisting = true
+        } else {
+            replaceExisting = false
+        }
+        // The badge render, ad-hoc codesign and Launch Services registration are slow
+        // enough to freeze the window; run them on the App Profile queue (serialized
+        // with generation so Dock mutations never overlap) and hop back to main only
+        // for the status/alert/pin-state UI.
+        appProfileQueue.async { [weak self] in
+            guard let self else { return }
+            if replaceExisting {
+                self.removeOriginalDockIcon(for: target)
+            }
+            let outcome = self.ensureOriginalDockIcon(
+                for: target,
+                preferredSourceURL: preferredSourceURL
+            )
+            DispatchQueue.main.async {
+                switch outcome {
+                case .some(.added), .some(.alreadyPresent):
+                    self.saveStatusMessage = "Added a Dock icon for native \(vendorName)."
+                default:
+                    self.showAppProfileAlert(
+                        title: "Dock icon was not created",
+                        message: "Klik PRO could not create the Dock icon for native "
+                            + "\(vendorName). This can happen if an item already exists at "
+                            + "\(target.originalDockLauncherPath) that isn't a Klik PRO launcher — "
+                            + "remove it and try again."
+                    )
+                }
+                self.appProfilesView.setOriginalDockPinned(self.originalDockPinStates())
+                self.needsDisplay = true
+            }
+        }
+    }
+
+    /// Gear → "Delete Dock Icon" on the App Profiles tab. Removes Klik PRO's original
+    /// launcher tile and its generated bundle. The native vendor Dock tile is left
+    /// untouched.
+    private func deleteOriginalDockIcon(for target: QuickLaunchTarget) {
+        let vendorName = originalVendorName(target)
+        // Per product decision, deleting the Dock icon also clears the app's
+        // menu-bar pin. When it does, this modifies persisted config, so it takes the
+        // same save/apply path and unsaved-edits guards as the menu-bar toggle.
+        let clearsMenuBarPin = persistedConfig.menuBarPinnedOriginals.contains(target)
+        if clearsMenuBarPin {
+            guard !saveInProgress, !appProfileLifecycleInProgress else {
+                showAppProfileAlert(
+                    title: "Please wait",
+                    message: "Finish the current Save or App Profile change before removing this Dock icon."
+                )
+                return
+            }
+            guard !hasUnsavedConfigurationChanges else {
+                showAppProfileAlert(
+                    title: "Save current changes first",
+                    message: "Save or restore the current mapping changes before removing this Dock icon."
+                )
+                return
+            }
+            appProfileLifecycleInProgress = true
+            saveButton.isEnabled = false
+        }
+        var updated = persistedConfig
+        updated.menuBarPinnedOriginals.remove(target)
+        let previous = persistedConfig
+        // Removing the launcher bundle and its Launch Services registration touches the
+        // filesystem and runs `defaults`/`killall Dock`; keep it off the UI thread. The
+        // menu-bar un-pin persists config and restarts the helper so its icon clears too.
+        appProfileQueue.async { [weak self] in
+            guard let self else { return }
+            let removed = self.removeOriginalDockIcon(for: target)
+            var configSaved = false
+            if clearsMenuBarPin {
+                configSaved = KlikProConfigStore.save(updated)
+                if configSaved { _ = applySavedConfig() }
+            }
+            DispatchQueue.main.async {
+                if clearsMenuBarPin {
+                    self.appProfileLifecycleInProgress = false
+                    self.saveButton.isEnabled = !self.saveInProgress
+                    if configSaved {
+                        self.config = updated
+                        self.persistedConfig = updated
+                    } else {
+                        self.config = previous
+                        self.persistedConfig = previous
+                    }
+                }
+                self.saveStatusMessage = removed
+                    ? "Removed \(vendorName)'s Dock icon."
+                    : "No Klik PRO Dock icon for \(vendorName) to remove."
+                self.appProfilesView.setOriginalDockPinned(self.originalDockPinStates())
+                self.appProfilesView.setOriginalMenuBarPinned(self.originalMenuBarPinStates())
+                self.needsDisplay = true
+            }
+        }
+    }
+
+    /// Removes the NATIVE vendor app's own Dock tile (ChatGPT/Claude), leaving the app
+    /// installed and launchable from Launchpad, Finder, or Klik PRO's own Dock icon.
+    /// Offered only once Klik PRO's own Dock icon exists (so a working Dock launcher
+    /// remains) and confirmed first because it changes the user's Dock — it is
+    /// reversible by dragging the app back from Launchpad/Finder.
+    private func removeNativeOriginalDockTile(for target: QuickLaunchTarget) {
+        let vendorName = originalVendorName(target)
+        guard originalDockIconIsPinned(for: target) else {
+            showAppProfileAlert(
+                title: "Create Klik PRO's Dock icon first",
+                message: "Add Klik PRO's Dock icon for \(vendorName) before removing the native "
+                    + "app's Dock icon, so you keep a working Dock launcher."
+            )
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Remove \(vendorName)'s own Dock icon?"
+        alert.informativeText = "This removes only \(vendorName)'s native Dock tile. \(vendorName) "
+            + "stays installed and can still be opened from Launchpad, Finder, or Klik PRO's Dock icon."
+        alert.addButton(withTitle: "Remove from Dock")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let nativeURL = URL(fileURLWithPath: target.standardApplicationPath, isDirectory: true)
+        // Touches the Dock plist and runs `killall Dock`; keep it off the UI thread.
+        appProfileQueue.async { [weak self] in
+            guard let self else { return }
+            let absent = Self.removeDockLauncherIfPresent(nativeURL)
+            DispatchQueue.main.async {
+                self.saveStatusMessage = absent
+                    ? "Removed \(vendorName)'s native Dock icon. It's still in Launchpad."
+                    : "Could not remove \(vendorName)'s native Dock icon."
+                self.needsDisplay = true
+            }
+        }
+    }
+
+    /// Current pin state of both original-app Dock icons, for the App Profiles cards.
+    private func originalDockPinStates() -> [QuickLaunchTarget: Bool] {
+        var states: [QuickLaunchTarget: Bool] = [:]
+        for target in QuickLaunchTarget.allCases {
+            states[target] = originalDockIconIsPinned(for: target)
+        }
+        return states
+    }
+
+    /// Current persisted menu-bar pin state of both original apps, for the cards.
+    private func originalMenuBarPinStates() -> [QuickLaunchTarget: Bool] {
+        var states: [QuickLaunchTarget: Bool] = [:]
+        for target in QuickLaunchTarget.allCases {
+            states[target] = persistedConfig.menuBarPinnedOriginals.contains(target)
+        }
+        return states
+    }
+
+    /// Card "Menu Bar Icon" toggle for an original app: flips whether ChatGPT/Claude
+    /// shows its own menu-bar icon (which opens the original app) and persists it, then
+    /// restarts the helper so the change takes effect. Mirrors the per-instance App
+    /// Profile menu-bar toggle, including its save/apply and unsaved-edits guards.
+    private func toggleOriginalMenuBarPin(for target: QuickLaunchTarget) {
+        guard !saveInProgress, !appProfileLifecycleInProgress else {
+            showAppProfileAlert(
+                title: "Please wait",
+                message: "Finish the current Save or App Profile change before changing menu-bar visibility."
+            )
+            appProfilesView.setOriginalMenuBarPinned(originalMenuBarPinStates())
+            return
+        }
+        guard !hasUnsavedConfigurationChanges else {
+            showAppProfileAlert(
+                title: "Save current changes first",
+                message: "Save or restore the current mapping changes before changing menu-bar visibility."
+            )
+            appProfilesView.setOriginalMenuBarPinned(originalMenuBarPinStates())
+            return
+        }
+
+        let vendorName = originalVendorName(target)
+        var updated = persistedConfig
+        let willPin = !updated.menuBarPinnedOriginals.contains(target)
+        if willPin {
+            updated.menuBarPinnedOriginals.insert(target)
+        } else {
+            updated.menuBarPinnedOriginals.remove(target)
+        }
+        let previous = persistedConfig
+        appProfileLifecycleInProgress = true
+        saveButton.isEnabled = false
+        appProfilesView.setStatus(
+            willPin
+                ? "Showing native \(vendorName) in the menu bar…"
+                : "Hiding native \(vendorName) from the menu bar…",
+            color: .appTextSecondary
+        )
+        needsDisplay = true
+
+        appProfileQueue.async { [weak self] in
+            guard let self else { return }
+            let saved = KlikProConfigStore.save(updated)
+            let applied = saved && applySavedConfig()
+            DispatchQueue.main.async {
+                self.appProfileLifecycleInProgress = false
+                self.saveButton.isEnabled = !self.saveInProgress
+                if saved {
+                    self.config = updated
+                    self.persistedConfig = updated
+                    self.appProfilesView.setStatus(
+                        willPin
+                            ? "Native \(vendorName) will show in the menu bar."
+                            : "Native \(vendorName) will not show in the menu bar.",
+                        color: applied ? .systemGreen : .systemOrange
+                    )
+                } else {
+                    self.config = previous
+                    self.persistedConfig = previous
+                    self.appProfilesView.setStatus(
+                        "Menu bar setting was not changed.",
+                        color: .systemRed
+                    )
+                    self.showAppProfileAlert(
+                        title: "Menu bar setting was not changed",
+                        message: "Klik PRO could not save the menu-bar change for native "
+                            + "\(vendorName)."
+                    )
+                }
+                self.appProfilesView.setOriginalMenuBarPinned(self.originalMenuBarPinStates())
+                self.needsDisplay = true
+            }
+        }
+    }
+
     private func requestDualAppName(
         title: String,
         informativeText: String,
@@ -4575,27 +4962,62 @@ final class ToggleView: NSView {
         initialValue: String,
         actionTitle: String,
         excludingInstanceID: UUID? = nil,
-        allowDockOption: Bool
+        allowDockOption: Bool,
+        forcedOriginalDockVendorName: String? = nil
     ) -> DualAppNameRequest? {
         let field = NSTextField(string: initialValue)
-        field.frame = NSRect(x: 0, y: allowDockOption ? 30 : 0, width: 320, height: 26)
-        field.selectText(nil)
-        let addToDockCheckbox = NSButton(checkboxWithTitle: "Add launcher icon to Dock", target: nil, action: nil)
-        addToDockCheckbox.frame = NSRect(x: 0, y: 0, width: 320, height: 22)
-        addToDockCheckbox.state = .off
+        let profileDockCheckbox = NSButton(
+            checkboxWithTitle: "Add a Dock icon for this App Profile", target: nil, action: nil
+        )
+        profileDockCheckbox.state = .off
+
         let accessory: NSView
         if allowDockOption {
-            field.frame.origin.y = 30
-            let view = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 58))
+            let width: CGFloat = 340
+            let rowHeight: CGFloat = 22
+            let gap: CGFloat = 6
+            let fieldHeight: CGFloat = 26
+            // Bottom-up layout (NSView is not flipped): profile checkbox lowest, then
+            // the locked original-app checkbox, then the name field on top.
+            var y: CGFloat = 0
+            profileDockCheckbox.frame = NSRect(x: 0, y: y, width: width, height: rowHeight)
+            y += rowHeight + gap
+            var originalDockCheckbox: NSButton?
+            if let vendorName = forcedOriginalDockVendorName {
+                // Shown checked and disabled: Klik PRO always creates this icon, and
+                // the user cannot turn it off. It exists purely to make the guarantee
+                // visible each time a profile is generated.
+                let checkbox = NSButton(
+                    checkboxWithTitle: "Add a Dock icon for native \(vendorName)  ·  always on",
+                    target: nil, action: nil
+                )
+                checkbox.state = .on
+                checkbox.isEnabled = false
+                checkbox.frame = NSRect(x: 0, y: y, width: width, height: rowHeight)
+                y += rowHeight + gap
+                originalDockCheckbox = checkbox
+            }
+            field.frame = NSRect(x: 0, y: y, width: width, height: fieldHeight)
+            y += fieldHeight
+            let view = NSView(frame: NSRect(x: 0, y: 0, width: width, height: y))
             view.addSubview(field)
-            view.addSubview(addToDockCheckbox)
+            view.addSubview(profileDockCheckbox)
+            if let originalDockCheckbox { view.addSubview(originalDockCheckbox) }
             accessory = view
         } else {
+            field.frame = NSRect(x: 0, y: 0, width: 320, height: 26)
             accessory = field
         }
+        field.selectText(nil)
         let alert = NSAlert()
         alert.messageText = title
-        alert.informativeText = informativeText
+        var info = informativeText
+        if let vendorName = forcedOriginalDockVendorName {
+            info += "\n\nKlik PRO always keeps a dedicated Dock icon for native "
+                + "\(vendorName): once an App Profile is running, \(vendorName)'s built-in "
+                + "Dock icon can no longer reopen the native app."
+        }
+        alert.informativeText = info
         alert.accessoryView = accessory
         alert.addButton(withTitle: actionTitle)
         alert.addButton(withTitle: "Cancel")
@@ -4616,7 +5038,7 @@ final class ToggleView: NSView {
         }
         return DualAppNameRequest(
             name: name,
-            addLauncherToDock: allowDockOption && addToDockCheckbox.state == .on
+            addLauncherToDock: allowDockOption && profileDockCheckbox.state == .on
         )
     }
 
@@ -4651,6 +5073,431 @@ final class ToggleView: NSView {
         }
         _ = runProcess("/usr/bin/killall", ["Dock"])
         return dockPersistentAppsContain(path: launcherPath) ? .added : .failed
+    }
+
+    /// Resolves the installed vendor `.app` to source the original-app Dock icon
+    /// from, tolerating installs outside `/Applications` (e.g. `~/Applications`).
+    /// Prefers an explicit `preferred` bundle URL — the App Profile candidate's
+    /// already-validated install, so the icon is sourced from the very app the
+    /// profile is built from — then the standard-path probe, then a Launch Services
+    /// lookup by bundle identifier. The last branch is skipped while rendering
+    /// deterministic previews so a snapshot never consults live services.
+    private static func originalDockIconSourceURL(
+        for target: QuickLaunchTarget,
+        preferred: URL?
+    ) -> URL? {
+        let fileManager = FileManager.default
+        if let preferred,
+           preferred.pathExtension.lowercased() == "app",
+           fileManager.fileExists(atPath: preferred.standardizedFileURL.path) {
+            return preferred
+        }
+        if let standard = quickLaunchTargetApplicationURL(target) {
+            return standard
+        }
+        if !previewRenderingIsActive,
+           let resolved = NSWorkspace.shared.urlForApplication(
+            withBundleIdentifier: target.applicationBundleIdentifier
+           ),
+           resolved.pathExtension.lowercased() == "app",
+           fileManager.fileExists(atPath: resolved.path) {
+            return resolved
+        }
+        return nil
+    }
+
+    private static func ensureOriginalDockLauncher(
+        for target: QuickLaunchTarget,
+        preferredSourceURL: URL?
+    ) -> URL? {
+        guard let sourceURL = originalDockIconSourceURL(for: target, preferred: preferredSourceURL),
+              let runnerURL = Bundle.main.url(
+                forResource: "KlikProOriginalLauncher",
+                withExtension: nil
+              ) else {
+            return nil
+        }
+        let fileManager = FileManager.default
+        let launcherURL = URL(
+            fileURLWithPath: target.originalDockLauncherPath,
+            isDirectory: true
+        ).standardizedFileURL
+        if originalDockLauncherIsValid(launcherURL, target: target) {
+            return launcherURL
+        }
+        if fileManager.fileExists(atPath: launcherURL.path) {
+            return nil
+        }
+
+        let parentURL = launcherURL.deletingLastPathComponent()
+        let temporaryURL = parentURL.appendingPathComponent(
+            "." + launcherURL.deletingPathExtension().lastPathComponent
+                + ".tmp-" + UUID().uuidString + ".app",
+            isDirectory: true
+        )
+        do {
+            try fileManager.createDirectory(
+                at: parentURL,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o755]
+            )
+            let parentValues = try parentURL.resourceValues(forKeys: [
+                .isDirectoryKey,
+                .isSymbolicLinkKey,
+            ])
+            guard parentValues.isDirectory == true,
+                  parentValues.isSymbolicLink != true,
+                  parentURL.resolvingSymlinksInPath() == parentURL else {
+                return nil
+            }
+
+            let contentsURL = temporaryURL.appendingPathComponent("Contents", isDirectory: true)
+            let macOSURL = contentsURL.appendingPathComponent("MacOS", isDirectory: true)
+            let resourcesURL = contentsURL.appendingPathComponent("Resources", isDirectory: true)
+            try fileManager.createDirectory(
+                at: macOSURL,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o755]
+            )
+            try fileManager.createDirectory(
+                at: resourcesURL,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o755]
+            )
+
+            let copiedRunner = macOSURL.appendingPathComponent(
+                "KlikProOriginalLauncher",
+                isDirectory: false
+            )
+            try fileManager.copyItem(at: runnerURL, to: copiedRunner)
+            try fileManager.setAttributes(
+                [.posixPermissions: 0o755],
+                ofItemAtPath: copiedRunner.path
+            )
+
+            let iconDestination = resourcesURL.appendingPathComponent(
+                "AppIcon.icns", isDirectory: false
+            )
+            // Badge the vendor icon (green disc + white star, top-left) so the
+            // original-app Dock tile is distinguishable from the native vendor tile
+            // and from profile tiles. Fall back to the plain vendor icon if the
+            // badge pipeline fails, so the tile never ends up generic.
+            let copiedIcon = writeBadgedOriginalIcon(from: sourceURL, to: iconDestination)
+                || copyDeclaredBundleIcon(from: sourceURL, to: iconDestination)
+            var info: [String: Any] = [
+                "CFBundleDevelopmentRegion": "en",
+                "CFBundleDisplayName": sourceURL.deletingPathExtension().lastPathComponent,
+                "CFBundleExecutable": "KlikProOriginalLauncher",
+                "CFBundleIdentifier": target.originalDockLauncherBundleIdentifier,
+                "CFBundleInfoDictionaryVersion": "6.0",
+                "CFBundleName": sourceURL.deletingPathExtension().lastPathComponent,
+                "CFBundlePackageType": "APPL",
+                "CFBundleShortVersionString": "1.0",
+                "CFBundleVersion": "1",
+                "LSMinimumSystemVersion": "13.0",
+                "LSUIElement": true,
+                "NSAppleEventsUsageDescription": LauncherGenerator.appleEventsUsageDescription,
+            ]
+            if copiedIcon { info["CFBundleIconFile"] = "AppIcon" }
+            let infoData = try PropertyListSerialization.data(
+                fromPropertyList: info,
+                format: .xml,
+                options: 0
+            )
+            try infoData.write(
+                to: contentsURL.appendingPathComponent("Info.plist", isDirectory: false),
+                options: .atomic
+            )
+            guard runProcess("/usr/bin/codesign", [
+                "--force", "--sign", "-", "--timestamp=none", temporaryURL.path
+            ]) == 0 else {
+                try? fileManager.removeItem(at: temporaryURL)
+                return nil
+            }
+            try fileManager.moveItem(at: temporaryURL, to: launcherURL)
+            refreshLaunchServicesRegistration(forOriginalDockLauncher: launcherURL)
+            return launcherURL
+        } catch {
+            try? fileManager.removeItem(at: temporaryURL)
+            return nil
+        }
+    }
+
+    private static func originalDockLauncherIsValid(
+        _ launcherURL: URL,
+        target: QuickLaunchTarget
+    ) -> Bool {
+        let fileManager = FileManager.default
+        guard launcherURL.pathExtension.lowercased() == "app",
+              fileManager.fileExists(atPath: launcherURL.path) else {
+            return false
+        }
+        // Read Info.plist straight from disk rather than via Bundle(url:), which caches
+        // one Bundle per URL for the life of the process. A validity check made before
+        // the bundle was materialized would otherwise poison that cache, so a freshly
+        // created — and genuinely valid — launcher reads back as invalid on the next
+        // check (the false "item already exists that isn't a Klik PRO launcher" error,
+        // which also wrongly blocks profile creation).
+        let infoURL = launcherURL.appendingPathComponent("Contents/Info.plist", isDirectory: false)
+        guard let data = try? Data(contentsOf: infoURL),
+              let info = try? PropertyListSerialization.propertyList(
+                from: data, options: [], format: nil
+              ) as? [String: Any],
+              info["CFBundleIdentifier"] as? String == target.originalDockLauncherBundleIdentifier,
+              info["CFBundlePackageType"] as? String == "APPL",
+              info["CFBundleExecutable"] as? String == "KlikProOriginalLauncher" else {
+            return false
+        }
+        // Symlink guard so a later removeItem only ever deletes a real bundle we own,
+        // never a link pointing elsewhere. A path-value check avoids the brittle
+        // URL-equality (trailing slash, /private) that resolvingSymlinksInPath invites.
+        let bundleIsSymlink = (try? launcherURL.resourceValues(
+            forKeys: [.isSymbolicLinkKey]
+        ))?.isSymbolicLink == true
+        guard !bundleIsSymlink else { return false }
+        let executableURL = launcherURL
+            .appendingPathComponent("Contents/MacOS", isDirectory: true)
+            .appendingPathComponent("KlikProOriginalLauncher", isDirectory: false)
+        let values = try? executableURL.resourceValues(forKeys: [
+            .isRegularFileKey,
+            .isSymbolicLinkKey,
+        ])
+        return values?.isRegularFile == true
+            && values?.isSymbolicLink != true
+            && fileManager.isExecutableFile(atPath: executableURL.path)
+    }
+
+    @discardableResult
+    private static func copyDeclaredBundleIcon(from sourceURL: URL, to destinationURL: URL) -> Bool {
+        let infoURL = sourceURL.appendingPathComponent("Contents/Info.plist", isDirectory: false)
+        guard let data = try? Data(contentsOf: infoURL),
+              let info = try? PropertyListSerialization.propertyList(
+                from: data,
+                options: [],
+                format: nil
+              ) as? [String: Any],
+              var iconName = info["CFBundleIconFile"] as? String,
+              !iconName.isEmpty else {
+            return false
+        }
+        if (iconName as NSString).pathExtension.isEmpty { iconName += ".icns" }
+        guard (iconName as NSString).lastPathComponent == iconName else { return false }
+        let iconURL = sourceURL
+            .appendingPathComponent("Contents/Resources", isDirectory: true)
+            .appendingPathComponent(iconName, isDirectory: false)
+        do {
+            // Clear any partial file a prior (failed) icon copy may have left, so this
+            // plain-icon fallback isn't defeated by a "file already exists" error.
+            try? FileManager.default.removeItem(at: destinationURL)
+            try FileManager.default.copyItem(at: iconURL, to: destinationURL)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Resolves the vendor app's declared `.icns`, then writes a badged `.icns` to
+    /// `destinationURL`: the vendor icon with a brand-green disc + white star drawn
+    /// top-left, rendered per size so it stays crisp at Dock resolution. Pure
+    /// CoreGraphics/ImageIO + `iconutil` (no AppKit drawing), so it is safe to run on
+    /// the background App Profile queue. Writes `destinationURL` only on full success;
+    /// returns false (leaving no partial file) so the caller can fall back to the
+    /// plain vendor icon.
+    @discardableResult
+    private static func writeBadgedOriginalIcon(from sourceURL: URL, to destinationURL: URL) -> Bool {
+        guard let baseImage = largestDeclaredIconImage(in: sourceURL) else { return false }
+        let sizes = [16, 32, 64, 128, 256, 512, 1024]
+        // iconutil file name → pixel size (points@scale).
+        let iconsetFiles: [(name: String, size: Int)] = [
+            ("icon_16x16.png", 16), ("icon_16x16@2x.png", 32),
+            ("icon_32x32.png", 32), ("icon_32x32@2x.png", 64),
+            ("icon_128x128.png", 128), ("icon_128x128@2x.png", 256),
+            ("icon_256x256.png", 256), ("icon_256x256@2x.png", 512),
+            ("icon_512x512.png", 512), ("icon_512x512@2x.png", 1024),
+        ]
+        let fileManager = FileManager.default
+        let scratchURL = fileManager.temporaryDirectory.appendingPathComponent(
+            "klik-pro-original-icon-" + UUID().uuidString, isDirectory: true
+        )
+        let iconsetURL = scratchURL.appendingPathComponent("AppIcon.iconset", isDirectory: true)
+        let outputURL = scratchURL.appendingPathComponent("AppIcon.icns", isDirectory: false)
+        defer { try? fileManager.removeItem(at: scratchURL) }
+        do {
+            try fileManager.createDirectory(at: iconsetURL, withIntermediateDirectories: true)
+            var rendered: [Int: CGImage] = [:]
+            for size in sizes {
+                guard let image = badgedIconImage(base: baseImage, pixelSize: size) else {
+                    return false
+                }
+                rendered[size] = image
+            }
+            for entry in iconsetFiles {
+                guard let image = rendered[entry.size],
+                      writePNG(image, to: iconsetURL.appendingPathComponent(entry.name, isDirectory: false))
+                else {
+                    return false
+                }
+            }
+            guard runProcess("/usr/bin/iconutil", [
+                "-c", "icns", iconsetURL.path, "-o", outputURL.path
+            ]) == 0,
+            fileManager.fileExists(atPath: outputURL.path) else {
+                return false
+            }
+            // Drop any leftover partial file first so a retry or the caller's
+            // plain-icon fallback isn't blocked by a "file already exists" error.
+            try? fileManager.removeItem(at: destinationURL)
+            try fileManager.copyItem(at: outputURL, to: destinationURL)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Largest representation of the source app's declared `.icns`, read with
+    /// ImageIO (thread-safe, no AppKit). Returns nil when the app has no readable
+    /// `CFBundleIconFile` icns (the badge step then declines and the caller falls
+    /// back to a plain copy).
+    private static func largestDeclaredIconImage(in sourceURL: URL) -> CGImage? {
+        let infoURL = sourceURL.appendingPathComponent("Contents/Info.plist", isDirectory: false)
+        guard let data = try? Data(contentsOf: infoURL),
+              let info = try? PropertyListSerialization.propertyList(
+                from: data, options: [], format: nil
+              ) as? [String: Any],
+              var iconName = info["CFBundleIconFile"] as? String,
+              !iconName.isEmpty else {
+            return nil
+        }
+        if (iconName as NSString).pathExtension.isEmpty { iconName += ".icns" }
+        guard (iconName as NSString).lastPathComponent == iconName else { return nil }
+        let iconURL = sourceURL
+            .appendingPathComponent("Contents/Resources", isDirectory: true)
+            .appendingPathComponent(iconName, isDirectory: false)
+        guard let source = CGImageSourceCreateWithURL(iconURL as CFURL, nil) else { return nil }
+        let count = CGImageSourceGetCount(source)
+        guard count > 0 else { return nil }
+        var best: CGImage?
+        var bestWidth = 0
+        for index in 0..<count {
+            guard let image = CGImageSourceCreateImageAtIndex(source, index, nil) else { continue }
+            if image.width > bestWidth {
+                best = image
+                bestWidth = image.width
+            }
+        }
+        return best
+    }
+
+    /// Composites the base icon at `pixelSize` with the brand-green star badge in the
+    /// top-left corner. All drawing is CoreGraphics into an offscreen bitmap.
+    private static func badgedIconImage(base: CGImage, pixelSize: Int) -> CGImage? {
+        let size = CGFloat(pixelSize)
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                data: nil,
+                width: pixelSize,
+                height: pixelSize,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else {
+            return nil
+        }
+        context.interpolationQuality = .high
+        context.draw(base, in: CGRect(x: 0, y: 0, width: size, height: size))
+
+        // Badge geometry: a disc in the top-left (CoreGraphics is y-up, so "top" is
+        // high y). Sized ~32% of the icon so it reads at Dock scale.
+        let discDiameter = size * 0.32
+        let discRadius = discDiameter / 2
+        let inset = size * 0.06
+        let center = CGPoint(x: inset + discRadius, y: size - inset - discRadius)
+
+        // White separator ring so the badge stays legible on any underlying icon.
+        context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
+        context.fillEllipse(in: CGRect(
+            x: center.x - discRadius - size * 0.012,
+            y: center.y - discRadius - size * 0.012,
+            width: discDiameter + size * 0.024,
+            height: discDiameter + size * 0.024
+        ))
+        // Brand-green disc (#19BB13).
+        context.setFillColor(CGColor(srgbRed: 25 / 255, green: 187 / 255, blue: 19 / 255, alpha: 1))
+        context.fillEllipse(in: CGRect(
+            x: center.x - discRadius, y: center.y - discRadius,
+            width: discDiameter, height: discDiameter
+        ))
+        // White five-pointed star centered in the disc.
+        context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
+        context.addPath(starPath(center: center, outerRadius: discRadius * 0.62))
+        context.fillPath()
+
+        return context.makeImage()
+    }
+
+    /// A five-pointed star centered at `center`, first point up. `innerRadius`
+    /// defaults to 0.40× the outer radius (the classic star proportion).
+    private static func starPath(center: CGPoint, outerRadius: CGFloat) -> CGPath {
+        let innerRadius = outerRadius * 0.40
+        let path = CGMutablePath()
+        for index in 0..<10 {
+            let radius = index % 2 == 0 ? outerRadius : innerRadius
+            let angle = CGFloat.pi / 2 + CGFloat(index) * CGFloat.pi / 5
+            let point = CGPoint(
+                x: center.x + radius * cos(angle),
+                y: center.y + radius * sin(angle)
+            )
+            if index == 0 { path.move(to: point) } else { path.addLine(to: point) }
+        }
+        path.closeSubpath()
+        return path
+    }
+
+    private static func writePNG(_ image: CGImage, to url: URL) -> Bool {
+        guard let destination = CGImageDestinationCreateWithURL(
+            url as CFURL, "public.png" as CFString, 1, nil
+        ) else {
+            return false
+        }
+        CGImageDestinationAddImage(destination, image, nil)
+        return CGImageDestinationFinalize(destination)
+    }
+
+    private static func refreshLaunchServicesRegistration(
+        forOriginalDockLauncher launcherURL: URL
+    ) {
+        let process = Process()
+        process.executableURL = URL(
+            fileURLWithPath: "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+        )
+        process.arguments = ["-f", launcherURL.path]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return
+        }
+    }
+
+    private static func unregisterLaunchServicesRegistration(
+        forOriginalDockLauncher launcherURL: URL
+    ) {
+        let process = Process()
+        process.executableURL = URL(
+            fileURLWithPath: "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+        )
+        process.arguments = ["-u", launcherURL.path]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return
+        }
     }
 
     private static func xmlEscaped(_ value: String) -> String {
@@ -4998,7 +5845,7 @@ final class ToggleView: NSView {
         )
         let alert = NSAlert()
         alert.messageText = "Change icon for \(instance.label)"
-        alert.informativeText = "The original app is never modified."
+        alert.informativeText = "The native app is never modified."
         alert.accessoryView = panel
         alert.addButton(withTitle: "Apply")
         alert.addButton(withTitle: "Cancel")
@@ -5488,8 +6335,8 @@ final class ToggleView: NSView {
             guard case .failure = result else { return }
             DispatchQueue.main.async {
                 self?.showAppProfileAlert(
-                    title: "Original app could not be opened",
-                    message: "Klik PRO could not safely open the original \(target.title) app."
+                    title: "Native app could not be opened",
+                    message: "Klik PRO could not safely open the native \(target.title) app."
                 )
             }
         }

@@ -255,12 +255,21 @@ private final class DualAppGeneratorCard: NSView {
     private let openButton = AppProfileButton(title: "Open", frame: .zero)
     private let generateButton = AppProfileButton(title: "+ New Profile", frame: .zero)
     private let assignButton = AppProfileButton(title: "Assign Button", frame: .zero)
+    private let dockGearButton = AppProfileGearButton(frame: .zero)
+    private let menuBarLabel = NSTextField(labelWithString: "Menu Bar Icon")
+    private let menuBarToggle = ToggleSwitchView(isOn: false, frame: .zero)
     private(set) var candidate: AppProfileCandidate?
+    private var dockPinned = false
+    private var menuBarPinned = false
     let bundleIdentifier: String
     let fallbackName: String
     var onGenerate: ((AppProfileCandidate) -> Void)?
     var onOpen: ((AppProfileCandidate) -> Void)?
     var onAssign: (() -> Void)?
+    var onCreateDock: (() -> Void)?
+    var onDeleteDock: (() -> Void)?
+    var onRemoveNativeDock: (() -> Void)?
+    var onToggleMenuBar: (() -> Void)?
 
     override var isFlipped: Bool { true }
 
@@ -276,23 +285,38 @@ private final class DualAppGeneratorCard: NSView {
 
         iconView.frame = NSRect(x: 14, y: 14, width: 48, height: 48)
         iconView.imageScaling = .scaleProportionallyUpOrDown
-        nameField.frame = NSRect(x: 76, y: 14, width: width - 90, height: 24)
+        let dockGearSize: CGFloat = 26
+        // A gear at the card's top-right manages the original app's Klik PRO Dock
+        // icon (create / delete). It never touches the native vendor Dock tile.
+        dockGearButton.frame = NSRect(
+            x: width - 14 - dockGearSize, y: 13, width: dockGearSize, height: dockGearSize
+        )
+        dockGearButton.toolTip = "Create or delete Klik PRO's Dock icon for this app"
+        // A "Menu Bar Icon" toggle mirrors the App Profiles list: it sits on the top
+        // row immediately left of the gear. When on, the background helper shows a
+        // menu-bar icon that opens the original app.
+        let menuToggleW: CGFloat = 40
+        let menuCaptionW: CGFloat = 82
+        let menuGap: CGFloat = 8
+        let menuToggleX = dockGearButton.frame.minX - menuGap - menuToggleW
+        menuBarToggle.frame = NSRect(x: menuToggleX, y: 15, width: menuToggleW, height: 22)
+        menuBarToggle.setAccessibilityLabel("Show in menu bar")
+        let menuLabelX = menuToggleX - 6 - menuCaptionW
+        menuBarLabel.frame = NSRect(x: menuLabelX, y: 18, width: menuCaptionW, height: 16)
+        menuBarLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        menuBarLabel.textColor = .appTextSecondary
+        menuBarLabel.alignment = .right
+        // The name owns the rest of the top row, ending before the menu-bar label.
+        nameField.frame = NSRect(
+            x: 76, y: 14, width: max(60, menuLabelX - 76 - menuGap), height: 24
+        )
         nameField.font = .systemFont(ofSize: 15, weight: .semibold)
         statusField.frame = NSRect(x: 76, y: 40, width: width - 90, height: 20)
         statusField.font = .systemFont(ofSize: 11, weight: .medium)
-        let actionY: CGFloat = 70
-        let actionH: CGFloat = 28
-        let gap: CGFloat = 8
-        let openW: CGFloat = 52
-        let generateW: CGFloat = 96
-        let assignX = 14 + openW + gap + generateW + gap
-        openButton.frame = NSRect(x: 14, y: actionY, width: openW, height: actionH)
-        generateButton.frame = NSRect(
-            x: openButton.frame.maxX + gap, y: actionY, width: generateW, height: actionH
-        )
-        assignButton.frame = NSRect(
-            x: assignX, y: actionY, width: width - assignX - 14, height: actionH
-        )
+        assignButton.font = .systemFont(ofSize: 11, weight: .semibold)
+        // The three actions (Open, + New Profile, Assign) are laid out right-flushed
+        // in relayoutActionButtons(); the assignment pill sizes to its own label
+        // rather than stretching across the card.
         openButton.onPress = { [weak self] in
             guard let self, let candidate = self.candidate else { return }
             self.onOpen?(candidate)
@@ -302,7 +326,19 @@ private final class DualAppGeneratorCard: NSView {
             self.onGenerate?(candidate)
         }
         assignButton.onPress = { [weak self] in self?.onAssign?() }
-        [iconView, nameField, statusField, openButton, generateButton, assignButton]
+        dockGearButton.onPress = { [weak self] in self?.presentDockMenu() }
+        menuBarToggle.onChange = { [weak self] _ in
+            guard let self else { return }
+            // The controller owns the real menu-bar state and pushes it back via
+            // setMenuBarPinned on a successful change; revert the optimistic flip so a
+            // blocked change (e.g. unsaved edits) never leaves the toggle out of sync.
+            self.menuBarToggle.isOn = self.menuBarPinned
+            self.onToggleMenuBar?()
+        }
+        [
+            iconView, nameField, statusField, openButton, generateButton,
+            assignButton, dockGearButton, menuBarLabel, menuBarToggle,
+        ]
             .forEach(addSubview)
         showLoading()
     }
@@ -320,7 +356,86 @@ private final class DualAppGeneratorCard: NSView {
         openButton.isEnabled = false
         assignButton.isEnabled = false
         updateAssignment(nil)
+        updateDockGear()
     }
+
+    /// Reflects whether the original app's Klik PRO Dock icon is currently pinned.
+    /// Driven by the controller (live Dock state); affects the gear menu label —
+    /// Create becomes Replace when an icon is already pinned. Delete stays available
+    /// regardless, so a leftover launcher can always be cleaned up.
+    func setDockPinned(_ pinned: Bool) {
+        dockPinned = pinned
+        updateDockGear()
+    }
+
+    /// Reflects whether the original app is currently pinned to the menu bar. Driven by
+    /// the controller (persisted config state), so the toggle always mirrors reality.
+    func setMenuBarPinned(_ pinned: Bool) {
+        menuBarPinned = pinned
+        menuBarToggle.isOn = pinned
+        menuBarToggle.setAccessibilityLabel(pinned ? "Hide from menu bar" : "Show in menu bar")
+    }
+
+    private func updateDockGear() {
+        // The original launcher can only be created (and the app only pinned to the
+        // menu bar) when the vendor app is installed, so both controls are disabled
+        // until the card has a candidate.
+        dockGearButton.isEnabled = candidate != nil
+        dockGearButton.setAccessibilityLabel("Manage the Dock icon")
+        menuBarToggle.isEnabled = candidate != nil
+    }
+
+    /// Gear menu: create (or replace) the original app's Klik PRO Dock icon, delete it,
+    /// or remove the NATIVE app's own Dock tile. The first two manage only Klik PRO's
+    /// own launcher tile; the third unpins the vendor app's tile (the app itself stays
+    /// installed) and is offered only once Klik PRO's own Dock icon exists. The
+    /// controller confirms a replace.
+    private func presentDockMenu() {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        // Star-themed icons make it unmistakable that this gear manages Klik PRO's
+        // generated launcher Dock icon — not the native (original) vendor Dock tile
+        // and not any App Profile's icon.
+        let create = NSMenuItem(
+            title: dockPinned ? "Replace Dock Icon…" : "Create Dock Icon",
+            action: #selector(menuCreateDock), keyEquivalent: ""
+        )
+        create.target = self
+        create.image = NSImage(systemSymbolName: "star", accessibilityDescription: nil)
+        menu.addItem(create)
+        let delete = NSMenuItem(
+            title: "Delete Dock Icon", action: #selector(menuDeleteDock), keyEquivalent: ""
+        )
+        delete.target = self
+        // Available whenever the app is present (same gate as the gear), not only when
+        // the tile is currently pinned — so a manually-unpinned but still-on-disk
+        // Klik PRO launcher can always be removed. Removes only the badged Klik PRO
+        // launcher, never the native vendor Dock tile.
+        delete.isEnabled = candidate != nil
+        delete.image = NSImage(systemSymbolName: "star.slash", accessibilityDescription: nil)
+        menu.addItem(delete)
+        menu.addItem(.separator())
+        // Removes the NATIVE app's own Dock tile — not the app, which stays installed
+        // and launchable from Launchpad/Finder. Enabled only once Klik PRO's own Dock
+        // icon exists (dockPinned), so a working Dock launcher remains afterward.
+        let removeNative = NSMenuItem(
+            title: "Remove Native App Dock Icon",
+            action: #selector(menuRemoveNativeDock), keyEquivalent: ""
+        )
+        removeNative.target = self
+        removeNative.isEnabled = candidate != nil && dockPinned
+        removeNative.image = NSImage(systemSymbolName: "dock.rectangle", accessibilityDescription: nil)
+        removeNative.toolTip = dockPinned
+            ? "Removes the app's own Dock tile; the app stays in Launchpad."
+            : "Create Klik PRO's Dock icon first, then this can remove the native tile."
+        menu.addItem(removeNative)
+        let origin = NSPoint(x: dockGearButton.frame.minX, y: dockGearButton.frame.maxY + 4)
+        menu.popUp(positioning: nil, at: origin, in: self)
+    }
+
+    @objc private func menuCreateDock() { onCreateDock?() }
+    @objc private func menuDeleteDock() { onDeleteDock?() }
+    @objc private func menuRemoveNativeDock() { onRemoveNativeDock?() }
 
     func update(candidate: AppProfileCandidate?, alternativesAvailable: Bool) {
         self.candidate = candidate
@@ -339,6 +454,7 @@ private final class DualAppGeneratorCard: NSView {
             openButton.isEnabled = false
         }
         assignButton.isEnabled = candidate != nil
+        updateDockGear()
         _ = alternativesAvailable
     }
 
@@ -353,8 +469,36 @@ private final class DualAppGeneratorCard: NSView {
             assignButton.configureAssignment(
                 restTitle: "Assign Button", symbolName: "link.badge.plus", hoverTitle: nil
             )
-            assignButton.setAccessibilityLabel("Assign a mouse button to the original app")
+            assignButton.setAccessibilityLabel("Assign a mouse button to the native app")
         }
+        relayoutActionButtons()
+    }
+
+    /// Lays out Open, + New Profile, and Assign right-flushed. The assignment pill is
+    /// sized to its current label (clamped) instead of a fixed width, so a short
+    /// assignment like "Back Button" doesn't leave a stretched control. A right inset
+    /// keeps the actions clear of a list scroll bar.
+    private func relayoutActionButtons() {
+        let actionY: CGFloat = 70
+        let actionH: CGFloat = 28
+        let gap: CGFloat = 8
+        let openW: CGFloat = 52
+        let generateW: CGFloat = 96
+        let font = assignButton.font ?? .systemFont(ofSize: 11, weight: .semibold)
+        let titleWidth = (assignButton.title as NSString)
+            .size(withAttributes: [.font: font]).width
+        let iconAllowance: CGFloat = assignButton.image != nil ? 22 : 0
+        // Cap so Open and + New Profile still fit with a left margin (rightEdge keeps
+        // a matching right margin for scroll-bar clearance).
+        let maxAssign = max(84, bounds.width - openW - generateW - 2 * gap - 28)
+        let assignW = min(max(ceil(titleWidth) + iconAllowance + 24, 84), maxAssign)
+        let rightEdge = bounds.width - 14
+        let assignX = rightEdge - assignW
+        let generateX = assignX - gap - generateW
+        let openX = generateX - gap - openW
+        openButton.frame = NSRect(x: openX, y: actionY, width: openW, height: actionH)
+        generateButton.frame = NSRect(x: generateX, y: actionY, width: generateW, height: actionH)
+        assignButton.frame = NSRect(x: assignX, y: actionY, width: assignW, height: actionH)
     }
 }
 
@@ -649,7 +793,7 @@ private final class MappingOriginalAppRowView: NSView {
         title.frame = NSRect(x: 82, y: 16, width: max(80, width - 100), height: 24)
         title.font = .systemFont(ofSize: 14, weight: .semibold)
         title.textColor = .appTextPrimary
-        let original = NSTextField(labelWithString: "Original app")
+        let original = NSTextField(labelWithString: "Native app")
         original.frame = NSRect(x: 82, y: 38, width: 100, height: 16)
         original.font = .systemFont(ofSize: 10, weight: .medium)
         original.textColor = .appTextSecondary
@@ -682,14 +826,93 @@ private final class MappingOriginalAppRowView: NSView {
     required init?(coder: NSCoder) { nil }
 }
 
-/// The approved Mappings right column: a fixed header and independently scrolling
-/// profile list. It offers quick Open and Assign Button; other management stays
-/// on the App Profiles tab.
-final class MappingAppProfilesView: NSView {
-    private let titleField = NSTextField(labelWithString: "YOUR APP PROFILES")
-    private let statusField = NSTextField(labelWithString: "")
+/// One titled, independently-scrolling card in the Mappings right column. The
+/// column stacks two of these — the installed native apps on top and the generated
+/// App Profiles below — so each group is its own card with its own caption and its
+/// own vertical scroller.
+private final class MappingSectionCardView: NSView {
+    private let titleField = NSTextField(labelWithString: "")
     private let scrollView = NSScrollView()
     private let stackView = FlippedProfileStackView()
+
+    override var isFlipped: Bool { true }
+
+    init(title: String, frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.cornerRadius = 12
+        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        layer?.borderColor = NSColor.separatorColor.cgColor
+        layer?.borderWidth = 1
+
+        titleField.frame = NSRect(x: 18, y: 14, width: frame.width - 36, height: 16)
+        titleField.font = .boldSystemFont(ofSize: 11)
+        titleField.textColor = .appTextSecondary
+        titleField.stringValue = title
+
+        // Each card scrolls its own group; the scroller is always shown so the two
+        // cards read as symmetric panes on the right column.
+        scrollView.frame = NSRect(
+            x: 12, y: 36, width: frame.width - 24, height: frame.height - 48
+        )
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = false
+        scrollView.drawsBackground = false
+        stackView.orientation = .vertical
+        stackView.alignment = .leading
+        stackView.spacing = 8
+        stackView.edgeInsets = NSEdgeInsets(top: 1, left: 0, bottom: 2, right: 0)
+        scrollView.documentView = stackView
+
+        [titleField, scrollView].forEach(addSubview)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    /// Row content width inside this card, mirroring the sizing the single Mappings
+    /// list used before the column split into two cards.
+    var rowContentWidth: CGFloat { max(320, scrollView.contentSize.width - 4) }
+
+    /// Replaces the card's rows. Rows are prebuilt by the owner (so their Open/Assign
+    /// callbacks are already wired) at `rowContentWidth`; an empty group shows a
+    /// centered caption instead.
+    func setRows(_ rows: [NSView], rowHeight: CGFloat, emptyMessage: String) {
+        stackView.arrangedSubviews.forEach {
+            stackView.removeArrangedSubview($0)
+            $0.removeFromSuperview()
+        }
+        let width = rowContentWidth
+        if rows.isEmpty {
+            let empty = NSTextField(labelWithString: emptyMessage)
+            empty.font = .systemFont(ofSize: 13)
+            empty.textColor = .appTextSecondary
+            empty.alignment = .center
+            stackView.addArrangedSubview(empty)
+            empty.widthAnchor.constraint(equalToConstant: width).isActive = true
+            empty.heightAnchor.constraint(equalToConstant: 56).isActive = true
+        } else {
+            for row in rows {
+                stackView.addArrangedSubview(row)
+                row.widthAnchor.constraint(equalToConstant: width).isActive = true
+                row.heightAnchor.constraint(equalToConstant: rowHeight).isActive = true
+            }
+        }
+        stackView.frame = NSRect(
+            x: 0, y: 0, width: width,
+            height: max(
+                scrollView.contentSize.height,
+                CGFloat(max(1, rows.count)) * (rowHeight + stackView.spacing) + 3
+            )
+        )
+    }
+}
+
+/// The approved Mappings right column: two stacked, independently-scrolling cards —
+/// the installed native apps on top and the generated App Profiles below. Each card
+/// offers quick Open and Assign Button; other management stays on the App Profiles tab.
+final class MappingAppProfilesView: NSView {
+    private let nativeCard: MappingSectionCardView
+    private let profilesCard: MappingSectionCardView
     private var instances: [AppProfileInstance]
     private var runtimeHealth: [UUID: AppProfileRuntimeHealth] = [:]
     private var originals: [(target: QuickLaunchTarget, name: String, path: String, button: QuickLaunchMouseButton?)] = []
@@ -702,36 +925,25 @@ final class MappingAppProfilesView: NSView {
 
     init(instances: [AppProfileInstance], frame: NSRect) {
         self.instances = instances
+        // Two cards stacked with a small gap fill the column; the outer view itself is
+        // a transparent container (no card chrome, no "YOUR APP PROFILES" title). The
+        // native-apps card is sized to show its up-to-two rows; the profiles card takes
+        // the remaining height and scrolls.
+        let gap: CGFloat = 8
+        let nativeHeight: CGFloat = 244
+        nativeCard = MappingSectionCardView(
+            title: "NATIVE APPS",
+            frame: NSRect(x: 0, y: 0, width: frame.width, height: nativeHeight)
+        )
+        profilesCard = MappingSectionCardView(
+            title: "APP PROFILES",
+            frame: NSRect(
+                x: 0, y: nativeHeight + gap,
+                width: frame.width, height: frame.height - nativeHeight - gap
+            )
+        )
         super.init(frame: frame)
-        wantsLayer = true
-        layer?.cornerRadius = 12
-        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
-        layer?.borderColor = NSColor.separatorColor.cgColor
-        layer?.borderWidth = 1
-
-        titleField.frame = NSRect(x: 18, y: 20, width: frame.width - 36, height: 19)
-        titleField.font = .boldSystemFont(ofSize: 12)
-        titleField.textColor = .appTextSecondary
-        // The status line ("… is ready.") is hidden here too; the list is the
-        // content. Hiding it lets the list start higher and show more profiles.
-        statusField.frame = NSRect(x: 18, y: 43, width: frame.width - 36, height: 16)
-        statusField.font = .systemFont(ofSize: 11, weight: .semibold)
-        statusField.textColor = .systemGreen
-        statusField.isHidden = true
-
-        scrollView.frame = NSRect(x: 14, y: 44, width: frame.width - 28, height: frame.height - 58)
-        scrollView.hasVerticalScroller = true
-        scrollView.autohidesScrollers = false
-        scrollView.drawsBackground = false
-        stackView.orientation = .vertical
-        stackView.alignment = .leading
-        // Tighter gap than the management tab so the read-only list packs in more
-        // profiles before it needs to scroll.
-        stackView.spacing = 8
-        stackView.edgeInsets = NSEdgeInsets(top: 1, left: 0, bottom: 2, right: 0)
-        scrollView.documentView = stackView
-
-        [titleField, statusField, scrollView].forEach(addSubview)
+        [nativeCard, profilesCard].forEach(addSubview)
         rebuildRows()
     }
 
@@ -757,77 +969,66 @@ final class MappingAppProfilesView: NSView {
         rebuildRows()
     }
 
+    /// Retained for the owner's status calls; the compact Mappings cards intentionally
+    /// show no status line (the two lists are the content), so this is a no-op.
     func setStatus(_ message: String, color: NSColor = .appTextSecondary) {
-        statusField.stringValue = message
-        statusField.textColor = color
+        _ = message
+        _ = color
     }
 
     private func rebuildRows() {
-        stackView.arrangedSubviews.forEach {
-            stackView.removeArrangedSubview($0)
-            $0.removeFromSuperview()
+        // Top card: the installed native apps.
+        let nativeWidth = nativeCard.rowContentWidth
+        let nativeRows: [NSView] = originals.map { original in
+            let row = MappingOriginalAppRowView(
+                target: original.target,
+                name: original.name,
+                path: original.path,
+                mouseButton: original.button,
+                width: nativeWidth
+            )
+            row.onOpen = { [weak self] in self?.onOpenOriginal?($0) }
+            row.onAssign = { [weak self] in self?.onAssignOriginal?($0) }
+            return row
         }
-        let rowWidth = max(320, scrollView.contentSize.width - 4)
+        nativeCard.setRows(
+            nativeRows,
+            rowHeight: MappingOriginalAppRowView.rowHeight,
+            emptyMessage: "No native apps installed"
+        )
+
+        // Bottom card: the generated App Profiles.
+        let profilesWidth = profilesCard.rowContentWidth
         let visible = instances.filter { instance in
             instance.state == .active
                 && (instance.launcherKind == .managed
                 || previewRenderingIsActive
                 || FileManager.default.fileExists(atPath: instance.launcherPath))
         }.sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
-
-        for original in originals {
-            let row = MappingOriginalAppRowView(
-                target: original.target,
-                name: original.name,
-                path: original.path,
-                mouseButton: original.button,
-                width: rowWidth
+        let profileRows: [NSView] = visible.map { instance in
+            let row = MappingAppProfileOpenRowView(
+                instance: instance,
+                health: runtimeHealth[instance.id],
+                width: profilesWidth
             )
-            row.onOpen = { [weak self] in self?.onOpenOriginal?($0) }
-            row.onAssign = { [weak self] in self?.onAssignOriginal?($0) }
-            stackView.addArrangedSubview(row)
-            row.widthAnchor.constraint(equalToConstant: rowWidth).isActive = true
-            row.heightAnchor.constraint(equalToConstant: MappingOriginalAppRowView.rowHeight).isActive = true
+            row.onOpen = { [weak self] in self?.onOpen?($0) }
+            row.onAssign = { [weak self] in self?.onAssign?($0) }
+            return row
         }
-        if visible.isEmpty && originals.isEmpty {
-            let empty = NSTextField(labelWithString: "No App Profiles yet")
-            empty.font = .systemFont(ofSize: 13)
-            empty.textColor = .appTextSecondary
-            empty.alignment = .center
-            stackView.addArrangedSubview(empty)
-            empty.widthAnchor.constraint(equalToConstant: rowWidth).isActive = true
-            empty.heightAnchor.constraint(equalToConstant: 56).isActive = true
-        } else {
-            visible.forEach { instance in
-                let row = MappingAppProfileOpenRowView(
-                    instance: instance,
-                    health: runtimeHealth[instance.id],
-                    width: rowWidth
-                )
-                row.onOpen = { [weak self] in self?.onOpen?($0) }
-                row.onAssign = { [weak self] in self?.onAssign?($0) }
-                stackView.addArrangedSubview(row)
-                row.widthAnchor.constraint(equalToConstant: rowWidth).isActive = true
-                row.heightAnchor.constraint(
-                    equalToConstant: MappingAppProfileOpenRowView.rowHeight
-                ).isActive = true
-            }
-        }
-        stackView.frame = NSRect(
-            x: 0,
-            y: 0,
-            width: rowWidth,
-            height: max(
-                scrollView.contentSize.height,
-                CGFloat(max(1, visible.count + originals.count)) * 100 + 3
-            )
+        profilesCard.setRows(
+            profileRows,
+            rowHeight: MappingAppProfileOpenRowView.rowHeight,
+            emptyMessage: "No App Profiles yet"
         )
     }
 }
 
 final class AppProfilesContentView: NSView {
+    /// Even split between the generator column and the management list.
+    private static let generatorColumnRatio: CGFloat = 0.50
+
     private let explanationField = NSTextField(wrappingLabelWithString:
-        "Generate another icon for the same app, with a separate login and settings. The original app is never copied, cloned or modified."
+        "Generate another icon for the same app, with a separate login and settings. The native app is never copied, cloned or modified."
     )
     private let statusField = NSTextField(labelWithString: "")
     private let chatGPTCard: DualAppGeneratorCard
@@ -841,6 +1042,10 @@ final class AppProfilesContentView: NSView {
     var onGenerate: ((AppProfileCandidate) -> Void)?
     var onOpenOriginal: ((QuickLaunchTarget) -> Void)?
     var onAssignOriginal: ((QuickLaunchTarget) -> Void)?
+    var onCreateOriginalDock: ((QuickLaunchTarget) -> Void)?
+    var onDeleteOriginalDock: ((QuickLaunchTarget) -> Void)?
+    var onRemoveNativeOriginalDock: ((QuickLaunchTarget) -> Void)?
+    var onToggleOriginalMenuBar: ((QuickLaunchTarget) -> Void)?
     var onOpen: ((AppProfileInstance) -> Void)?
     var onAssign: ((AppProfileInstance) -> Void)?
     var onToggleMenuBar: ((AppProfileInstance) -> Void)?
@@ -859,9 +1064,9 @@ final class AppProfilesContentView: NSView {
     override var isFlipped: Bool { true }
 
     init(instances: [AppProfileInstance], width: CGFloat) {
-        let columnWidth = width / 2
-        let generatorWidth = columnWidth - 36
-        let profilesX = columnWidth + 16
+        let generatorColumnWidth = floor(width * Self.generatorColumnRatio)
+        let generatorWidth = generatorColumnWidth - 36
+        let profilesX = generatorColumnWidth + 16
         chatGPTCard = DualAppGeneratorCard(
             bundleIdentifier: "com.openai.codex", fallbackName: "ChatGPT", width: generatorWidth
         )
@@ -908,7 +1113,10 @@ final class AppProfilesContentView: NSView {
         refreshButton.onPress = { [weak self] in self?.onRefreshApps?() }
 
         scrollView.frame = NSRect(
-            x: columnWidth + 12, y: 142, width: width - columnWidth - 28, height: 546
+            x: generatorColumnWidth + 12,
+            y: 142,
+            width: width - generatorColumnWidth - 28,
+            height: 546
         )
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
@@ -925,6 +1133,14 @@ final class AppProfilesContentView: NSView {
         claudeCard.onOpen = { [weak self] _ in self?.onOpenOriginal?(.claude) }
         chatGPTCard.onAssign = { [weak self] in self?.onAssignOriginal?(.chatGPT) }
         claudeCard.onAssign = { [weak self] in self?.onAssignOriginal?(.claude) }
+        chatGPTCard.onCreateDock = { [weak self] in self?.onCreateOriginalDock?(.chatGPT) }
+        claudeCard.onCreateDock = { [weak self] in self?.onCreateOriginalDock?(.claude) }
+        chatGPTCard.onDeleteDock = { [weak self] in self?.onDeleteOriginalDock?(.chatGPT) }
+        claudeCard.onDeleteDock = { [weak self] in self?.onDeleteOriginalDock?(.claude) }
+        chatGPTCard.onRemoveNativeDock = { [weak self] in self?.onRemoveNativeOriginalDock?(.chatGPT) }
+        claudeCard.onRemoveNativeDock = { [weak self] in self?.onRemoveNativeOriginalDock?(.claude) }
+        chatGPTCard.onToggleMenuBar = { [weak self] in self?.onToggleOriginalMenuBar?(.chatGPT) }
+        claudeCard.onToggleMenuBar = { [weak self] in self?.onToggleOriginalMenuBar?(.claude) }
         [explanationField, chatGPTCard, claudeCard, loadingView, statusField, refreshButton, scrollView].forEach(addSubview)
         setAppDiscoveryLoading()
         setInstances(instances)
@@ -937,6 +1153,18 @@ final class AppProfilesContentView: NSView {
         runtimeHealth = runtimeHealth.filter { id, _ in instances.contains { $0.id == id } }
         rebuildRows()
         onInstancesChange?(instances)
+    }
+
+    /// Reflects the live Dock pin state of each original-app launcher on its card.
+    func setOriginalDockPinned(_ states: [QuickLaunchTarget: Bool]) {
+        chatGPTCard.setDockPinned(states[.chatGPT] ?? false)
+        claudeCard.setDockPinned(states[.claude] ?? false)
+    }
+
+    /// Reflects the persisted menu-bar pin state of each original app on its card.
+    func setOriginalMenuBarPinned(_ states: [QuickLaunchTarget: Bool]) {
+        chatGPTCard.setMenuBarPinned(states[.chatGPT] ?? false)
+        claudeCard.setMenuBarPinned(states[.claude] ?? false)
     }
 
     func setSupportedCandidates(_ candidates: [AppProfileCandidate]) {
@@ -989,7 +1217,7 @@ final class AppProfilesContentView: NSView {
         }
         // Leave a right margin so the cards clear the vertical scroller instead of
         // sitting right against it.
-        let rowWidth = max(430, scrollView.contentSize.width - 20)
+        let rowWidth = max(320, scrollView.contentSize.width - 20)
         let visible = instances.filter { instance in
             instance.state == .active
                 && (instance.launcherKind == .managed
@@ -1047,8 +1275,8 @@ final class AppProfilesContentView: NSView {
             .font: NSFont.boldSystemFont(ofSize: 12),
             .foregroundColor: NSColor.appTextSecondary,
         ])
-        let columnWidth = bounds.width / 2
-        let profilesX = columnWidth + 16
+        let generatorColumnWidth = floor(bounds.width * Self.generatorColumnRatio)
+        let profilesX = generatorColumnWidth + 16
         "YOUR APP PROFILES".draw(at: NSPoint(x: profilesX, y: 52), withAttributes: [
             .font: NSFont.boldSystemFont(ofSize: 11),
             .foregroundColor: NSColor.appTextSecondary,
@@ -1062,7 +1290,12 @@ final class AppProfilesContentView: NSView {
         )
         NSColor.separatorColor.setFill()
         NSBezierPath(
-            rect: NSRect(x: columnWidth - 0.5, y: 0, width: 1, height: bounds.height)
+            rect: NSRect(
+                x: generatorColumnWidth - 0.5,
+                y: 0,
+                width: 1,
+                height: bounds.height
+            )
         ).fill()
     }
 }
@@ -1549,7 +1782,7 @@ final class ChangeIconPanelView: NSView, NSTextFieldDelegate {
     private let preview = NSImageView()
     private let hint = NSTextField(wrappingLabelWithString:
         "Tint or badge the app's own icon, or choose your own PNG or ICO. "
-        + "The original app is never modified."
+        + "The native app is never modified."
     )
     private let chooseButton = AppProfileButton(title: "Choose PNG or ICO…", frame: .zero)
     private let chosenLabel = NSTextField(labelWithString: "No image chosen")

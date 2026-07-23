@@ -140,7 +140,7 @@ enum QuickLaunchMouseButton: String, Codable, CaseIterable, Equatable {
     }
 }
 
-enum QuickLaunchTarget: Int, CaseIterable, Hashable {
+enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
     case chatGPT
     case claude
 
@@ -182,6 +182,24 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable {
             return NSString(
                 string: "~/Library/Application Support/Claude Launchers/Claude.app"
             ).expandingTildeInPath
+        }
+    }
+
+    var originalDockLauncherPath: String {
+        let fileName: String
+        switch self {
+        case .chatGPT: fileName = "ChatGPT.app"
+        case .claude: fileName = "Claude.app"
+        }
+        return NSString(
+            string: "~/Applications/Klik PRO Originals/\(fileName)"
+        ).expandingTildeInPath
+    }
+
+    var originalDockLauncherBundleIdentifier: String {
+        switch self {
+        case .chatGPT: return "local.klik-pro.original.chatgpt"
+        case .claude: return "local.klik-pro.original.claude"
         }
     }
 
@@ -534,6 +552,12 @@ struct KlikProConfig: Codable, Equatable {
     // the only safe way to find leftovers in a previously used durable root
     // without broadly searching the user's Documents folder.
     var knownDataRoots: [String]
+    // Original vendor apps (ChatGPT / Claude) the user pinned to the menu bar. These
+    // are not App Profile instances, so their menu-bar visibility is tracked here as a
+    // small set of QuickLaunchTarget cases rather than through
+    // `AppProfileInstance.pinToMenuBar`. Additive and decode-tolerant: an older config
+    // decodes to an empty set (no originals pinned), so this needs no schema bump.
+    var menuBarPinnedOriginals: Set<QuickLaunchTarget>
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, onboardingCompleted, showMenuBarIcon, showQuickLaunchMenuIcons
@@ -541,7 +565,7 @@ struct KlikProConfig: Codable, Equatable {
         case middleButton, gestureButton
         case chatGPTHotkey, claudeHotkey, chatGPTMouseButton, claudeMouseButton
         case forwardButton, backButton, thumbWheel, instances
-        case suppressedLegacyInstanceIDs, dataRoot, knownDataRoots
+        case suppressedLegacyInstanceIDs, dataRoot, knownDataRoots, menuBarPinnedOriginals
     }
 
     /// `showMenuBarIcon` was added in schema 6. Quick Launch side-button defaults were
@@ -615,6 +639,9 @@ struct KlikProConfig: Codable, Equatable {
         knownDataRoots = try container.decodeIfPresent(
             [String].self, forKey: .knownDataRoots
         ) ?? []
+        menuBarPinnedOriginals = try container.decodeIfPresent(
+            Set<QuickLaunchTarget>.self, forKey: .menuBarPinnedOriginals
+        ) ?? []
         // Schema 11 → 12 is also additive. AppProfileInstance defaults missing
         // lifecycle fields to active/nil, so no profile is re-keyed or moved.
         if schemaVersion < 12 {
@@ -644,7 +671,8 @@ struct KlikProConfig: Codable, Equatable {
         instances: [AppProfileInstance] = [],
         suppressedLegacyInstanceIDs: Set<UUID> = [],
         dataRoot: String? = nil,
-        knownDataRoots: [String] = []
+        knownDataRoots: [String] = [],
+        menuBarPinnedOriginals: Set<QuickLaunchTarget> = []
     ) {
         self.schemaVersion = schemaVersion
         self.onboardingCompleted = onboardingCompleted
@@ -665,6 +693,7 @@ struct KlikProConfig: Codable, Equatable {
         self.suppressedLegacyInstanceIDs = suppressedLegacyInstanceIDs
         self.dataRoot = dataRoot
         self.knownDataRoots = knownDataRoots
+        self.menuBarPinnedOriginals = menuBarPinnedOriginals
     }
 }
 

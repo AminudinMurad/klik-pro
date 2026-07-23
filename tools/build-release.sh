@@ -89,6 +89,16 @@ for arch in arm64 x86_64; do
     "${LAUNCHER_RUNTIME_SOURCES[@]}" \
     "$ROOT/Sources/KlikProManagedLauncher.swift" \
     -o "$WORK/klik-pro-managed-launcher-$arch"
+  xcrun swiftc \
+    -sdk "$SDK" \
+    -module-cache-path "$MODULE_CACHE" \
+    -target "$arch-apple-macosx13.0" \
+    -O \
+    -warnings-as-errors \
+    "$ROOT/Sources/KlikProConfig.swift" \
+    "${DUPLICATION_SOURCES[@]}" \
+    "$ROOT/Sources/KlikProOriginalLauncher.swift" \
+    -o "$WORK/klik-pro-original-launcher-$arch"
 done
 
 lipo -create \
@@ -104,6 +114,11 @@ lipo -create \
   "$WORK/klik-pro-managed-launcher-x86_64" \
   -output "$APP/Contents/Resources/KlikProManagedLauncher"
 chmod 755 "$APP/Contents/Resources/KlikProManagedLauncher"
+lipo -create \
+  "$WORK/klik-pro-original-launcher-arm64" \
+  "$WORK/klik-pro-original-launcher-x86_64" \
+  -output "$APP/Contents/Resources/KlikProOriginalLauncher"
+chmod 755 "$APP/Contents/Resources/KlikProOriginalLauncher"
 
 cp "$ROOT/App/Info.plist" "$APP/Contents/Info.plist"
 cp "$ROOT/App/KlikProHelper-Info.plist" "$HELPER/Contents/Info.plist"
@@ -130,6 +145,7 @@ codesign --verify --deep --strict --verbose=4 "$APP"
 for binary in \
   "$APP/Contents/MacOS/Klik PRO" \
   "$APP/Contents/Resources/KlikProManagedLauncher" \
+  "$APP/Contents/Resources/KlikProOriginalLauncher" \
   "$HELPER/Contents/MacOS/klik-pro-input"
 do
   [[ "$(lipo -archs "$binary")" == "x86_64 arm64" || "$(lipo -archs "$binary")" == "arm64 x86_64" ]]

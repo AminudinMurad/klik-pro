@@ -657,12 +657,19 @@ private func compactMenuBarApplicationIcon(
 private final class MenuBarController: NSObject {
     private var statusItemsByInstanceID: [UUID: NSStatusItem] = [:]
     private var instanceIDsByButtonTag: [Int: UUID] = [:]
+    private var statusItemsByTarget: [QuickLaunchTarget: NSStatusItem] = [:]
+    private var targetsByButtonTag: [Int: QuickLaunchTarget] = [:]
 
     override init() {
         super.init()
 
+        // Only generated (managed) profiles pin to the menu bar here. Legacy-external
+        // rows represent the original/native apps; their menu-bar presence is owned by
+        // the App Profiles card toggle (config.menuBarPinnedOriginals) below — otherwise
+        // a legacy row's stale pinToMenuBar draws an icon the UI has no toggle to clear.
         for (index, instance) in config.instances.enumerated()
-            where instance.state == .active && instance.pinToMenuBar {
+            where instance.state == .active && instance.pinToMenuBar
+                && instance.launcherKind == .managed {
             guard activeAppProfileInstanceIDs.contains(instance.id) else { continue }
             let item = NSStatusBar.system.statusItem(withLength: 22)
             let tag = index + 1
@@ -676,11 +683,39 @@ private final class MenuBarController: NSObject {
             instanceIDsByButtonTag[tag] = instance.id
         }
 
+        // Original vendor apps the user pinned via the App Profiles card toggle. These
+        // are not profile instances; clicking one opens the original app. Only shown
+        // for an installed target. Tags use a separate 1000+ range so they never
+        // collide with the profile-instance tags above.
+        for target in QuickLaunchTarget.allCases
+            where config.menuBarPinnedOriginals.contains(target) {
+            guard let applicationURL = quickLaunchTargetApplicationURL(target) else { continue }
+            let item = NSStatusBar.system.statusItem(withLength: 22)
+            let tag = 1000 + target.rawValue
+            let launcherURL = URL(
+                fileURLWithPath: target.originalDockLauncherPath, isDirectory: true
+            ).standardizedFileURL
+            configureOriginal(
+                statusItem: item,
+                applicationURL: applicationURL,
+                launcherURL: launcherURL,
+                tooltip: "Open \(target.title)",
+                tag: tag
+            )
+            statusItemsByTarget[target] = item
+            targetsByButtonTag[tag] = target
+        }
+
         let labels = config.instances.compactMap { instance -> String? in
             guard statusItemsByInstanceID[instance.id] != nil else { return nil }
             return instance.label
         }
-        logMessage("Menu-bar buttons ready (instances=\(labels.joined(separator: ", ")))")
+        let originalLabels = QuickLaunchTarget.allCases.compactMap { target -> String? in
+            statusItemsByTarget[target] != nil ? "\(target.title) (original)" : nil
+        }
+        logMessage(
+            "Menu-bar buttons ready (instances=\((labels + originalLabels).joined(separator: ", ")))"
+        )
     }
 
     private func configure(
@@ -728,6 +763,41 @@ private final class MenuBarController: NSObject {
         button.imageScaling = .scaleNone
     }
 
+    private func configureOriginal(
+        statusItem: NSStatusItem,
+        applicationURL: URL,
+        launcherURL: URL,
+        tooltip: String,
+        tag: Int
+    ) {
+        guard let button = statusItem.button else {
+            logMessage("Unable to create menu-bar button: \(tooltip)")
+            return
+        }
+        button.toolTip = tooltip
+        button.setAccessibilityLabel(tooltip)
+        button.target = self
+        button.action = #selector(openOriginal(_:))
+        button.tag = tag
+        button.sendAction(on: [.leftMouseUp])
+        // Prefer the green-star launcher's badged AppIcon.icns so the menu-bar icon
+        // matches the green-star Dock icon (read directly to bypass NSWorkspace's
+        // per-path cache). Fall back to the launcher bundle icon, then the plain native
+        // app icon only if no green-star launcher has been created yet.
+        let launcherIcns = launcherURL.appendingPathComponent("Contents/Resources/AppIcon.icns")
+        let icon: NSImage
+        if let badged = NSImage(contentsOf: launcherIcns) {
+            icon = badged
+        } else if FileManager.default.fileExists(atPath: launcherURL.path) {
+            icon = NSWorkspace.shared.icon(forFile: launcherURL.path)
+        } else {
+            icon = NSWorkspace.shared.icon(forFile: applicationURL.path)
+        }
+        button.image = compactMenuBarApplicationIcon(icon)
+        button.imagePosition = .imageOnly
+        button.imageScaling = .scaleNone
+    }
+
     @objc private func openInstance(_ sender: NSStatusBarButton) {
         guard let instanceID = instanceIDsByButtonTag[sender.tag] else {
             logMessage("Ignored menu-bar instance with unknown tag \(sender.tag)")
@@ -735,6 +805,15 @@ private final class MenuBarController: NSObject {
         }
         logMessage("UUID-keyed App Profile menu-bar button clicked")
         launch(instanceID: instanceID)
+    }
+
+    @objc private func openOriginal(_ sender: NSStatusBarButton) {
+        guard let target = targetsByButtonTag[sender.tag] else {
+            logMessage("Ignored menu-bar original with unknown tag \(sender.tag)")
+            return
+        }
+        logMessage("Original-app menu-bar button clicked")
+        launch(target)
     }
 }
 

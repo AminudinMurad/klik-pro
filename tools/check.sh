@@ -98,6 +98,31 @@ grep -q 'eligibility.allowsManagedProfile' "$ROOT/Sources/Duplication/AppProfile
 grep -q 'reopenWindow: true' "$ROOT/Sources/Duplication/AppProfileRuntime.swift"
 grep -q 'sendReopenEvent(to: existing.processIdentifier)' \
   "$ROOT/Sources/KlikProManagedLauncher.swift"
+grep -q 'KlikProOriginalLauncher' "$ROOT/Sources/KlikProOriginalLauncher.swift"
+grep -q 'originalDockLauncherPath' "$ROOT/Sources/KlikProConfig.swift"
+# The original-app Dock icon is opt-in and append-only: it reuses the same
+# addLauncherToDock path as profiles and never rewrites the native vendor tile.
+# It is compulsory only at profile generation (forced, locked checkbox), where
+# failure blocks creation, and is otherwise offered via a per-card toggle.
+grep -q 'func ensureOriginalDockIcon' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'func createOriginalDockIcon' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'func deleteOriginalDockIcon' "$ROOT/Sources/KlikProApp.swift"
+# A third gear action removes the NATIVE app's own Dock tile (app stays installed),
+# gated on Klik PRO's own Dock icon already existing and confirmed before it runs.
+grep -q 'func removeNativeOriginalDockTile' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'Remove Native App Dock Icon' "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'forcedOriginalDockVendorName' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'writeBadgedOriginalIcon' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'onCreateOriginalDock' "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'func setOriginalDockPinned' "$ROOT/Sources/AppProfilesUI.swift"
+# The auto-rewrite of the user's native vendor Dock tile must NOT return.
+if grep -q 'rewriteOriginalDockTileIfPresent\|repairOriginalDockLaunchersIfNeeded' \
+  "$ROOT/Sources/KlikProApp.swift"; then
+  echo "Original Dock icon must be opt-in; native-tile auto-rewrite is not allowed" >&2
+  exit 1
+fi
+grep -q 'configuration.createsNewApplicationInstance = true' \
+  "$ROOT/Sources/Duplication/AppProfileRuntime.swift"
 # Reopen Apple events require a purpose string in both the main app and every
 # generated launcher. Existing launchers embed their own runner and metadata, so
 # healing must update both in place without touching profile data.
@@ -601,7 +626,7 @@ grep -q 'appProfilesView.onGenerate' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'APP PROFILE GENERATOR' "$ROOT/Sources/AppProfilesUI.swift"
 grep -q 'Generate another icon for the same app, with a separate login and settings.' \
   "$ROOT/Sources/AppProfilesUI.swift"
-grep -q 'The original app is never copied, cloned or modified.' \
+grep -q 'The native app is never copied, cloned or modified.' \
   "$ROOT/Sources/AppProfilesUI.swift"
 grep -q 'AppProfileButton(title: "+ New Profile"' "$ROOT/Sources/AppProfilesUI.swift"
 if grep -q 'AppProfileButton(title: "Generate"' "$ROOT/Sources/AppProfilesUI.swift"; then
@@ -612,12 +637,18 @@ grep -q 'Assign Button' "$ROOT/Sources/AppProfilesUI.swift"
 grep -q 'case original(QuickLaunchTarget)' "$ROOT/Sources/KlikProConfig.swift"
 grep -q 'case profile(UUID)' "$ROOT/Sources/KlikProConfig.swift"
 grep -q 'func assigningMouseButton(' "$ROOT/Sources/KlikProConfig.swift"
-grep -q 'Original app' "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'Native app' "$ROOT/Sources/AppProfilesUI.swift"
 grep -q 'mappingProfilesView.onAssignOriginal' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'let columnWidth = width / 2' "$ROOT/Sources/AppProfilesUI.swift"
-grep -q 'let profilesX = columnWidth + 16' "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'private static let generatorColumnRatio: CGFloat = 0.50' \
+  "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'let generatorColumnWidth = floor(width \* Self.generatorColumnRatio)' \
+  "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'let profilesX = generatorColumnWidth + 16' "$ROOT/Sources/AppProfilesUI.swift"
 grep -q 'statusField.frame = NSRect(x: profilesX, y: 108' "$ROOT/Sources/AppProfilesUI.swift"
-grep -q 'x: columnWidth + 12, y: 142' "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'x: generatorColumnWidth + 12' "$ROOT/Sources/AppProfilesUI.swift"
+# The generator card's actions stay right-flushed, and the assignment pill sizes to
+# its own label (fit-to-text) instead of stretching or using a fixed width.
+grep -q 'func relayoutActionButtons' "$ROOT/Sources/AppProfilesUI.swift"
 grep -q 'YOUR APP PROFILES' "$ROOT/Sources/AppProfilesUI.swift"
 # The assign control carries the assignment in its own label with a chain-link
 # indicator (linked when assigned, link-plus when not) — no separate green caption.
@@ -636,6 +667,12 @@ fi
 grep -q 'KlikProManagedLauncher' "$ROOT/tools/build-release.sh"
 grep -q 'final class MappingAppProfilesView' "$ROOT/Sources/AppProfilesUI.swift"
 grep -q 'scrollView.autohidesScrollers = false' "$ROOT/Sources/AppProfilesUI.swift"
+# The Mappings right column splits into two stacked, independently-scrolling cards —
+# the installed native apps on top and the generated App Profiles below — instead of
+# one combined list under a "YOUR APP PROFILES" heading.
+grep -q 'final class MappingSectionCardView' "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'title: "NATIVE APPS"' "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'title: "APP PROFILES"' "$ROOT/Sources/AppProfilesUI.swift"
 # Both the full App Profiles rows and compact Mappings rows must use the same
 # direct launcher-icon loader. Loading the source bundle in Mappings would hide
 # every managed profile's custom/tinted/badged icon there.
@@ -934,16 +971,32 @@ for arch in arm64 x86_64; do
     "${LAUNCHER_RUNTIME_SOURCES[@]}" \
     "$ROOT/Sources/KlikProManagedLauncher.swift" \
     -o "$OUT/klik-pro-managed-launcher-$arch"
+  xcrun swiftc \
+    -sdk "$SDK" \
+    -module-cache-path "$MODULE_CACHE" \
+    -target "$arch-apple-macosx13.0" \
+    -warnings-as-errors \
+    "$ROOT/Sources/KlikProConfig.swift" \
+    "${DUPLICATION_SOURCES[@]}" \
+    "$ROOT/Sources/KlikProOriginalLauncher.swift" \
+    -o "$OUT/klik-pro-original-launcher-$arch"
 done
 
 lipo -create \
   "$OUT/klik-pro-managed-launcher-arm64" \
   "$OUT/klik-pro-managed-launcher-x86_64" \
   -output "$OUT/KlikProManagedLauncher"
+lipo -create \
+  "$OUT/klik-pro-original-launcher-arm64" \
+  "$OUT/klik-pro-original-launcher-x86_64" \
+  -output "$OUT/KlikProOriginalLauncher"
 runnerArchs="$(lipo -archs "$OUT/KlikProManagedLauncher")"
 [[ "$runnerArchs" == "x86_64 arm64" || "$runnerArchs" == "arm64 x86_64" ]]
+originalRunnerArchs="$(lipo -archs "$OUT/KlikProOriginalLauncher")"
+[[ "$originalRunnerArchs" == "x86_64 arm64" || "$originalRunnerArchs" == "arm64 x86_64" ]]
 for arch in arm64 x86_64; do
   vtool -show-build -arch "$arch" "$OUT/KlikProManagedLauncher" | grep -q 'minos 13.0'
+  vtool -show-build -arch "$arch" "$OUT/KlikProOriginalLauncher" | grep -q 'minos 13.0'
 done
 
 xcrun swiftc \
