@@ -149,29 +149,29 @@ private func logMessage(_ message: String) {
 }
 
 private func launch(_ target: QuickLaunchTarget) {
-    logMessage("Opening original \(target.title) app")
+    logMessage("Opening native \(target.title) app")
     appProfileRuntime.launchOriginal(target) { result in
         switch result {
         case .success(let pid):
-            logMessage("Original \(target.title) action completed with pid \(pid)")
+            logMessage("Native \(target.title) action completed with pid \(pid)")
         case .failure(let error):
-            logMessage("Original \(target.title) action failed: \(error)")
+            logMessage("Native \(target.title) action failed: \(error)")
         }
     }
 }
 
 @discardableResult
 private func launchAndWait(_ target: QuickLaunchTarget, timeout: TimeInterval = 10) -> Bool {
-    logMessage("Opening original \(target.title) app and waiting for launch result")
+    logMessage("Opening native \(target.title) app and waiting for launch result")
     var completed = false
     var succeeded = false
     appProfileRuntime.launchOriginal(target) { result in
         switch result {
         case .success(let pid):
-            logMessage("Original \(target.title) action completed with pid \(pid)")
+            logMessage("Native \(target.title) action completed with pid \(pid)")
             succeeded = true
         case .failure(let error):
-            logMessage("Original \(target.title) action failed: \(error)")
+            logMessage("Native \(target.title) action failed: \(error)")
             succeeded = false
         }
         completed = true
@@ -182,7 +182,7 @@ private func launchAndWait(_ target: QuickLaunchTarget, timeout: TimeInterval = 
         RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
     }
     if !completed {
-        logMessage("Original \(target.title) action timed out before completion")
+        logMessage("Native \(target.title) action timed out before completion")
     }
     return completed && succeeded
 }
@@ -711,7 +711,7 @@ private final class MenuBarController: NSObject {
             return instance.label
         }
         let originalLabels = QuickLaunchTarget.allCases.compactMap { target -> String? in
-            statusItemsByTarget[target] != nil ? "\(target.title) (original)" : nil
+            statusItemsByTarget[target] != nil ? "\(target.title) (native)" : nil
         }
         logMessage(
             "Menu-bar buttons ready (instances=\((labels + originalLabels).joined(separator: ", ")))"
@@ -809,10 +809,10 @@ private final class MenuBarController: NSObject {
 
     @objc private func openOriginal(_ sender: NSStatusBarButton) {
         guard let target = targetsByButtonTag[sender.tag] else {
-            logMessage("Ignored menu-bar original with unknown tag \(sender.tag)")
+            logMessage("Ignored menu-bar native app with unknown tag \(sender.tag)")
             return
         }
-        logMessage("Original-app menu-bar button clicked")
+        logMessage("Native-app menu-bar button clicked")
         launch(target)
     }
 }

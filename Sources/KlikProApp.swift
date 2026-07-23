@@ -2824,7 +2824,8 @@ final class ToggleView: NSView {
         frame: NSRect(x: 48, y: 854, width: 120, height: 42)
     )
     // Check-for-updates button, top-right of the header (where the status pill used to be).
-    private let updateButtonRect = NSRect(x: 732, y: 30, width: 156, height: 30)
+    // Right edge stays at x=888; the compact "⟳ Updates…" label lets it be narrower.
+    private let updateButtonRect = NSRect(x: 768, y: 30, width: 120, height: 30)
     private var updateButtonTrackingArea: NSTrackingArea?
     private var updateButtonHovered = false
     private let closeButtonRect = NSRect(x: 808, y: 854, width: 90, height: 42)
@@ -7171,13 +7172,37 @@ final class ToggleView: NSView {
             updateButtonPath.lineWidth = 1.5
             updateButtonPath.stroke()
         }
+        let cfuColor: NSColor = hasUpdate ? .white : .controlAccentColor
         let cfuAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
-            .foregroundColor: hasUpdate ? NSColor.white : NSColor.controlAccentColor
+            .foregroundColor: cfuColor,
         ]
-        let cfu = (hasUpdate ? "Update available" : "Check for Updates") as NSString
-        let cfuSize = cfu.size(withAttributes: cfuAttrs)
-        cfu.draw(at: NSPoint(x: updateButtonRect.midX - cfuSize.width / 2, y: updateButtonRect.midY - cfuSize.height / 2), withAttributes: cfuAttrs)
+        // Default state is a compact clockwise-arrow glyph + "Updates…"; the
+        // update-available state stays text-only so it reads as a distinct alert.
+        let cfuTitle = (hasUpdate ? "Update available" : "Updates…") as NSString
+        let cfuTextSize = cfuTitle.size(withAttributes: cfuAttrs)
+        let cfuGlyph: NSImage? = hasUpdate ? nil : NSImage(
+            systemSymbolName: "arrow.clockwise", accessibilityDescription: nil
+        )?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+                .applying(.init(paletteColors: [cfuColor]))
+        )
+        let cfuGlyphGap: CGFloat = 5
+        let cfuGlyphW = cfuGlyph?.size.width ?? 0
+        let cfuGlyphH = cfuGlyph?.size.height ?? 0
+        let cfuTotalW = cfuTextSize.width + (cfuGlyph != nil ? cfuGlyphW + cfuGlyphGap : 0)
+        var cfuX = updateButtonRect.midX - cfuTotalW / 2
+        if let cfuGlyph {
+            cfuGlyph.draw(in: NSRect(
+                x: cfuX, y: updateButtonRect.midY - cfuGlyphH / 2,
+                width: cfuGlyphW, height: cfuGlyphH
+            ))
+            cfuX += cfuGlyphW + cfuGlyphGap
+        }
+        cfuTitle.draw(
+            at: NSPoint(x: cfuX, y: updateButtonRect.midY - cfuTextSize.height / 2),
+            withAttributes: cfuAttrs
+        )
 
         // Pill tab bar: a rounded track holds the four tabs (visual order Mappings,
         // App Profiles, Settings, Advanced) with even padding; the active tab is a
@@ -7186,7 +7211,9 @@ final class ToggleView: NSView {
         let tabFont = NSFont.systemFont(ofSize: 13, weight: .semibold)
         let tabHPad: CGFloat = 18
         let tabTrackPad: CGFloat = 4
-        let tabTrackY: CGFloat = 42
+        // Centered on the header's ~44pt centerline so the tab bar lines up with the
+        // logo (y 14–74, center 44) and the Updates button (y 30–60, center 45).
+        let tabTrackY: CGFloat = 28
         let tabTrackHeight: CGFloat = 32
         let tabLockGap: CGFloat = 5
         let tabLockWidth: CGFloat = 13
@@ -7200,11 +7227,16 @@ final class ToggleView: NSView {
         }
         let tabTrackWidth = tabWidths.reduce(0, +) + tabTrackPad * 2
         let tabTrackX = ((bounds.width - tabTrackWidth) / 2).rounded()
-        NSColor.appTextPrimary.withAlphaComponent(0.06).setFill()
-        NSBezierPath(
-            roundedRect: NSRect(x: tabTrackX, y: tabTrackY, width: tabTrackWidth, height: tabTrackHeight),
+        let tabTrackPath = NSBezierPath(
+            roundedRect: NSRect(x: tabTrackX, y: tabTrackY, width: tabTrackWidth, height: tabTrackHeight)
+                .insetBy(dx: 0.5, dy: 0.5),
             xRadius: tabTrackHeight / 2, yRadius: tabTrackHeight / 2
-        ).fill()
+        )
+        NSColor.appTextPrimary.withAlphaComponent(0.06).setFill()
+        tabTrackPath.fill()
+        NSColor.appTextPrimary.withAlphaComponent(0.16).setStroke()
+        tabTrackPath.lineWidth = 1
+        tabTrackPath.stroke()
         var tabX = tabTrackX + tabTrackPad
         let tabPillY = tabTrackY + tabTrackPad
         let tabPillHeight = tabTrackHeight - tabTrackPad * 2
@@ -7229,10 +7261,14 @@ final class ToggleView: NSView {
                 .font: tabFont,
                 .foregroundColor: active ? NSColor.white : NSColor.appTextSecondary,
             ]
-            let labelWidth = (tab.label as NSString).size(withAttributes: tAttrs).width
+            let labelSize = (tab.label as NSString).size(withAttributes: tAttrs)
+            let labelWidth = labelSize.width
             let glyphWidth: CGFloat = (tab.idx == 3 && advancedView.locked) ? tabLockGap + tabLockWidth : 0
             let labelX = tabX + (segWidth - labelWidth - glyphWidth) / 2
-            (tab.label as NSString).draw(at: NSPoint(x: labelX, y: tabTrackY + 8), withAttributes: tAttrs)
+            // Vertically centered in the track from measured metrics (no magic offset)
+            // so every tab sits on the same centerline.
+            let labelY = tabTrackY + (tabTrackHeight - labelSize.height) / 2
+            (tab.label as NSString).draw(at: NSPoint(x: labelX, y: labelY), withAttributes: tAttrs)
             // A small lock glyph marks the Advanced tab while its options are locked.
             if tab.idx == 3, advancedView.locked,
                let lockGlyph = NSImage(
@@ -7245,7 +7281,7 @@ final class ToggleView: NSView {
                 let gh = lockGlyph.size.height
                 lockGlyph.draw(in: NSRect(
                     x: labelX + labelWidth + tabLockGap,
-                    y: tabTrackY + 8 + (13 - gh) / 2 + 1,
+                    y: labelY + (labelSize.height - gh) / 2,
                     width: lockGlyph.size.width,
                     height: gh
                 ))
