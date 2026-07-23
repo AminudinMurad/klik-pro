@@ -435,7 +435,7 @@ struct AppProfileManager {
     enum IconEdit {
         case image(URL)
         case tint(AppProfileMenuColor)
-        case badge(AppProfileMenuColor)
+        case badge(AppProfileMenuColor, String)
         case reset
     }
 
@@ -464,10 +464,10 @@ struct AppProfileManager {
                 resolvedIconPath = try generator.setTintedIcon(
                     color: color.iconColor, for: instance, sourceBundleURL: sourceURL
                 ).path
-            case .badge(let color):
+            case .badge(let color, let character):
                 resolvedIconPath = try generator.setBadgedIcon(
                     color: color.iconColor,
-                    letter: instance.label,
+                    letter: character,
                     for: instance,
                     sourceBundleURL: sourceURL
                 ).path
@@ -484,6 +484,12 @@ struct AppProfileManager {
 
         var updated = config
         updated.instances[index].iconPath = resolvedIconPath
+        switch edit {
+        case .badge(_, let character):
+            updated.instances[index].badgeCharacter = String(character.prefix(1))
+        case .image, .tint, .reset:
+            updated.instances[index].badgeCharacter = nil
+        }
         guard persist(updated) else {
             throw AppProfileManagerError.persistenceFailed
         }

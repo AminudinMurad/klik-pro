@@ -148,41 +148,43 @@ private func logMessage(_ message: String) {
     }
 }
 
-private func launchPrimaryChatGPT() {
-    logMessage("Opening original ChatGPT app")
-    let task = Process()
-    task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-    task.arguments = [QuickLaunchTarget.chatGPT.standardApplicationPath]
-
-    do {
-        try task.run()
-        logMessage("Open command started with pid \(task.processIdentifier)")
-    } catch {
-        logMessage("Unable to open primary ChatGPT launcher: \(error)")
-        fputs("Unable to open ChatGPT primary launcher: \(error)\n", stderr)
-    }
-}
-
-private func launchPrimaryClaude() {
-    logMessage("Opening original Claude app")
-    let task = Process()
-    task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-    task.arguments = [QuickLaunchTarget.claude.standardApplicationPath]
-
-    do {
-        try task.run()
-        logMessage("Claude open command started with pid \(task.processIdentifier)")
-    } catch {
-        logMessage("Unable to open primary Claude launcher: \(error)")
-        fputs("Unable to open Claude primary launcher: \(error)\n", stderr)
-    }
-}
-
 private func launch(_ target: QuickLaunchTarget) {
-    switch target {
-    case .chatGPT: launchPrimaryChatGPT()
-    case .claude: launchPrimaryClaude()
+    logMessage("Opening original \(target.title) app")
+    appProfileRuntime.launchOriginal(target) { result in
+        switch result {
+        case .success(let pid):
+            logMessage("Original \(target.title) action completed with pid \(pid)")
+        case .failure(let error):
+            logMessage("Original \(target.title) action failed: \(error)")
+        }
     }
+}
+
+@discardableResult
+private func launchAndWait(_ target: QuickLaunchTarget, timeout: TimeInterval = 10) -> Bool {
+    logMessage("Opening original \(target.title) app and waiting for launch result")
+    var completed = false
+    var succeeded = false
+    appProfileRuntime.launchOriginal(target) { result in
+        switch result {
+        case .success(let pid):
+            logMessage("Original \(target.title) action completed with pid \(pid)")
+            succeeded = true
+        case .failure(let error):
+            logMessage("Original \(target.title) action failed: \(error)")
+            succeeded = false
+        }
+        completed = true
+    }
+
+    let deadline = Date().addingTimeInterval(timeout)
+    while !completed && Date() < deadline {
+        RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
+    }
+    if !completed {
+        logMessage("Original \(target.title) action timed out before completion")
+    }
+    return completed && succeeded
 }
 
 private func launch(instanceID: UUID) {
@@ -546,6 +548,9 @@ private func appProfileNSColor(_ color: AppProfileMenuColor?) -> NSColor? {
     case .purple: return .systemPurple
     case .pink: return .systemPink
     case .gray: return .systemGray
+    case .yellow: return .systemYellow
+    case .white: return .white
+    case .black: return .black
     case nil: return nil
     }
 }
@@ -1402,14 +1407,12 @@ private struct KlikProInputMain {
 
         if CommandLine.arguments.contains("--trigger") {
             logMessage("Manual trigger requested")
-            launchPrimaryChatGPT()
-            exit(0)
+            exit(launchAndWait(.chatGPT) ? 0 : 1)
         }
 
         if CommandLine.arguments.contains("--trigger-claude") {
             logMessage("Manual Claude trigger requested")
-            launchPrimaryClaude()
-            exit(0)
+            exit(launchAndWait(.claude) ? 0 : 1)
         }
 
         if CommandLine.arguments.contains("--clear-gesture-map") {

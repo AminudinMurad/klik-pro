@@ -23,6 +23,9 @@ enum AppProfileMenuColor: String, Codable, CaseIterable, Equatable {
     case purple
     case pink
     case gray
+    case yellow
+    case white
+    case black
 
     var title: String {
         switch self {
@@ -32,6 +35,9 @@ enum AppProfileMenuColor: String, Codable, CaseIterable, Equatable {
         case .purple: return "Purple"
         case .pink: return "Pink"
         case .gray: return "Gray"
+        case .yellow: return "Yellow"
+        case .white: return "White"
+        case .black: return "Black"
         }
     }
 
@@ -47,6 +53,9 @@ enum AppProfileMenuColor: String, Codable, CaseIterable, Equatable {
         case .purple: return .init(red: 0.498, green: 0.467, blue: 0.867)
         case .pink: return .init(red: 0.831, green: 0.325, blue: 0.494)
         case .gray: return .init(red: 0.533, green: 0.529, blue: 0.502)
+        case .yellow: return .init(red: 1.000, green: 0.800, blue: 0.000)
+        case .white: return .init(red: 1.000, green: 1.000, blue: 1.000)
+        case .black: return .init(red: 0.000, green: 0.000, blue: 0.000)
         }
     }
 }
@@ -83,6 +92,9 @@ struct AppProfileInstance: Identifiable, Codable, Equatable {
     var storage: AppProfileStorage
     var environmentOverrides: [String: String]
     var iconPath: String?
+    /// The one-character badge chosen for the current generated icon. Optional
+    /// so configurations written before v1.3.2 decode without migration.
+    var badgeCharacter: String?
     var menuColor: AppProfileMenuColor?
     var pinToMenuBar: Bool
     var hotkey: ShortcutMapping
@@ -97,7 +109,7 @@ struct AppProfileInstance: Identifiable, Codable, Equatable {
         case profileDirectory = "profileDir"
         case storage
         case environmentOverrides = "envOverrides"
-        case iconPath, menuColor, pinToMenuBar, hotkey, mouseButton
+        case iconPath, badgeCharacter, menuColor, pinToMenuBar, hotkey, mouseButton
         case lastDetectedEngine, lastVerifiedAppVersion
         case lastVerifiedTeamIdentifier, compatibilityRuleID
     }
@@ -126,6 +138,7 @@ struct AppProfileInstance: Identifiable, Codable, Equatable {
             forKey: .environmentOverrides
         )
         iconPath = try container.decodeIfPresent(String.self, forKey: .iconPath)
+        badgeCharacter = try container.decodeIfPresent(String.self, forKey: .badgeCharacter)
         menuColor = try container.decodeIfPresent(AppProfileMenuColor.self, forKey: .menuColor)
         pinToMenuBar = try container.decode(Bool.self, forKey: .pinToMenuBar)
         hotkey = try container.decode(ShortcutMapping.self, forKey: .hotkey)
@@ -164,6 +177,7 @@ struct AppProfileInstance: Identifiable, Codable, Equatable {
         storage: AppProfileStorage = .applicationSupport,
         environmentOverrides: [String: String] = [:],
         iconPath: String? = nil,
+        badgeCharacter: String? = nil,
         menuColor: AppProfileMenuColor? = nil,
         pinToMenuBar: Bool,
         hotkey: ShortcutMapping,
@@ -185,6 +199,7 @@ struct AppProfileInstance: Identifiable, Codable, Equatable {
         self.storage = storage
         self.environmentOverrides = environmentOverrides
         self.iconPath = iconPath
+        self.badgeCharacter = badgeCharacter
         self.menuColor = menuColor
         self.pinToMenuBar = pinToMenuBar
         self.hotkey = hotkey

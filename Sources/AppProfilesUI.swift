@@ -252,12 +252,14 @@ private final class DualAppGeneratorCard: NSView {
     private let iconView = NSImageView()
     private let nameField = NSTextField(labelWithString: "")
     private let statusField = NSTextField(labelWithString: "")
+    private let openButton = AppProfileButton(title: "Open", frame: .zero)
     private let generateButton = AppProfileButton(title: "+ New Profile", frame: .zero)
     private let assignButton = AppProfileButton(title: "Assign Button", frame: .zero)
     private(set) var candidate: AppProfileCandidate?
     let bundleIdentifier: String
     let fallbackName: String
     var onGenerate: ((AppProfileCandidate) -> Void)?
+    var onOpen: ((AppProfileCandidate) -> Void)?
     var onAssign: (() -> Void)?
 
     override var isFlipped: Bool { true }
@@ -278,14 +280,30 @@ private final class DualAppGeneratorCard: NSView {
         nameField.font = .systemFont(ofSize: 15, weight: .semibold)
         statusField.frame = NSRect(x: 76, y: 40, width: width - 90, height: 20)
         statusField.font = .systemFont(ofSize: 11, weight: .medium)
-        generateButton.frame = NSRect(x: 14, y: 70, width: width / 2 - 18, height: 28)
-        assignButton.frame = NSRect(x: width / 2 + 4, y: 70, width: width / 2 - 18, height: 28)
+        let actionY: CGFloat = 70
+        let actionH: CGFloat = 28
+        let gap: CGFloat = 8
+        let openW: CGFloat = 52
+        let generateW: CGFloat = 96
+        let assignX = 14 + openW + gap + generateW + gap
+        openButton.frame = NSRect(x: 14, y: actionY, width: openW, height: actionH)
+        generateButton.frame = NSRect(
+            x: openButton.frame.maxX + gap, y: actionY, width: generateW, height: actionH
+        )
+        assignButton.frame = NSRect(
+            x: assignX, y: actionY, width: width - assignX - 14, height: actionH
+        )
+        openButton.onPress = { [weak self] in
+            guard let self, let candidate = self.candidate else { return }
+            self.onOpen?(candidate)
+        }
         generateButton.onPress = { [weak self] in
             guard let self, let candidate = self.candidate else { return }
             self.onGenerate?(candidate)
         }
         assignButton.onPress = { [weak self] in self?.onAssign?() }
-        [iconView, nameField, statusField, generateButton, assignButton].forEach(addSubview)
+        [iconView, nameField, statusField, openButton, generateButton, assignButton]
+            .forEach(addSubview)
         showLoading()
     }
 
@@ -299,6 +317,7 @@ private final class DualAppGeneratorCard: NSView {
         statusField.stringValue = "Loading apps…"
         statusField.textColor = .appTextSecondary
         generateButton.isEnabled = false
+        openButton.isEnabled = false
         assignButton.isEnabled = false
         updateAssignment(nil)
     }
@@ -311,11 +330,13 @@ private final class DualAppGeneratorCard: NSView {
             statusField.stringValue = "Installed"
             statusField.textColor = .systemGreen
             generateButton.isEnabled = true
+            openButton.isEnabled = true
         } else {
             iconView.image = NSImage(systemSymbolName: "app.dashed", accessibilityDescription: nil)
             statusField.stringValue = "Not installed"
             statusField.textColor = .appTextSecondary
             generateButton.isEnabled = false
+            openButton.isEnabled = false
         }
         assignButton.isEnabled = candidate != nil
         _ = alternativesAvailable
@@ -394,27 +415,26 @@ final class AppProfileInstanceRowView: NSView {
         let gearSize: CGFloat = 26
         let rightEdge = width - 18   // right padding so controls clear the card border
 
-        // Row 1 (top): only the gear (managed rows), pinned to the top-right corner.
-        // The name owns the rest of the row, so long labels get far more room.
+        // Row 1 (top): the menu-bar control sits immediately left of the gear.
         gearButton.isHidden = !managed
         gearButton.frame = NSRect(
             x: rightEdge - gearSize, y: vpad - 2, width: gearSize, height: gearSize
         )
 
-        // Row 2 (bottom): one right-flushed group — Open · Assign · Menu Bar Icon
-        // label + toggle, with the toggle on the card edge.
-        let buttonY = rowHeight - vpad - buttonH
-        let toggleX = rightEdge - toggleW
-        menuBarToggle.frame = NSRect(x: toggleX, y: buttonY + 3, width: toggleW, height: 22)
+        let toggleX = gearButton.frame.minX - gap - toggleW
+        menuBarToggle.frame = NSRect(x: toggleX, y: vpad, width: toggleW, height: 22)
         menuBarToggle.setAccessibilityLabel(
             instance.pinToMenuBar ? "Hide from menu bar" : "Show in menu bar"
         )
         let menuLabelX = toggleX - 6 - menuCaptionW
-        menuBarLabel.frame = NSRect(x: menuLabelX, y: buttonY + 6, width: menuCaptionW, height: 16)
+        menuBarLabel.frame = NSRect(x: menuLabelX, y: vpad + 3, width: menuCaptionW, height: 16)
         menuBarLabel.font = .systemFont(ofSize: 11, weight: .medium)
         menuBarLabel.textColor = .appTextSecondary
         menuBarLabel.alignment = .right
-        let assignX = menuLabelX - gap - assignW
+
+        // Row 2 (bottom): Open and Assign remain right-flushed.
+        let buttonY = rowHeight - vpad - buttonH
+        let assignX = rightEdge - assignW
         let openX = assignX - gap - openW
         openButton.frame = NSRect(x: openX, y: buttonY, width: openW, height: buttonH)
         assignButton.frame = NSRect(x: assignX, y: buttonY, width: assignW, height: buttonH)
@@ -441,7 +461,7 @@ final class AppProfileInstanceRowView: NSView {
         // card edge on external rows that have no gear), so long labels get far
         // more room than when they shared the row with the toggle.
         let nameX = iconView.frame.maxX + 14
-        let nameRightLimit = managed ? gearButton.frame.minX : rightEdge
+        let nameRightLimit = managed ? menuBarLabel.frame.minX : rightEdge
         titleField.frame = NSRect(
             x: nameX, y: vpad,
             width: max(80, nameRightLimit - nameX - gap), height: 22
@@ -819,6 +839,7 @@ final class AppProfilesContentView: NSView {
     private let scrollView = NSScrollView()
     private let stackView = FlippedProfileStackView()
     var onGenerate: ((AppProfileCandidate) -> Void)?
+    var onOpenOriginal: ((QuickLaunchTarget) -> Void)?
     var onAssignOriginal: ((QuickLaunchTarget) -> Void)?
     var onOpen: ((AppProfileInstance) -> Void)?
     var onAssign: ((AppProfileInstance) -> Void)?
@@ -838,7 +859,9 @@ final class AppProfilesContentView: NSView {
     override var isFlipped: Bool { true }
 
     init(instances: [AppProfileInstance], width: CGFloat) {
-        let generatorWidth: CGFloat = 292
+        let columnWidth = width / 2
+        let generatorWidth = columnWidth - 36
+        let profilesX = columnWidth + 16
         chatGPTCard = DualAppGeneratorCard(
             bundleIdentifier: "com.openai.codex", fallbackName: "ChatGPT", width: generatorWidth
         )
@@ -875,7 +898,7 @@ final class AppProfilesContentView: NSView {
         // intentionally hidden: the list itself shows the profiles, and failures
         // already surface as an alert. The field is kept (off-screen text sink)
         // so the many setStatus call sites stay valid.
-        statusField.frame = NSRect(x: 344, y: 108, width: width - 362, height: 20)
+        statusField.frame = NSRect(x: profilesX, y: 108, width: width - profilesX - 18, height: 20)
         statusField.font = .systemFont(ofSize: 11)
         statusField.textColor = .appTextSecondary
         statusField.isHidden = true
@@ -884,7 +907,9 @@ final class AppProfilesContentView: NSView {
         refreshButton.frame = NSRect(x: width - 174, y: 12, width: 160, height: 28)
         refreshButton.onPress = { [weak self] in self?.onRefreshApps?() }
 
-        scrollView.frame = NSRect(x: 340, y: 142, width: width - 356, height: 546)
+        scrollView.frame = NSRect(
+            x: columnWidth + 12, y: 142, width: width - columnWidth - 28, height: 546
+        )
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
@@ -896,6 +921,8 @@ final class AppProfilesContentView: NSView {
 
         chatGPTCard.onGenerate = { [weak self] in self?.onGenerate?($0) }
         claudeCard.onGenerate = { [weak self] in self?.onGenerate?($0) }
+        chatGPTCard.onOpen = { [weak self] _ in self?.onOpenOriginal?(.chatGPT) }
+        claudeCard.onOpen = { [weak self] _ in self?.onOpenOriginal?(.claude) }
         chatGPTCard.onAssign = { [weak self] in self?.onAssignOriginal?(.chatGPT) }
         claudeCard.onAssign = { [weak self] in self?.onAssignOriginal?(.claude) }
         [explanationField, chatGPTCard, claudeCard, loadingView, statusField, refreshButton, scrollView].forEach(addSubview)
@@ -1020,19 +1047,23 @@ final class AppProfilesContentView: NSView {
             .font: NSFont.boldSystemFont(ofSize: 12),
             .foregroundColor: NSColor.appTextSecondary,
         ])
-        "YOUR APP PROFILES".draw(at: NSPoint(x: 344, y: 52), withAttributes: [
+        let columnWidth = bounds.width / 2
+        let profilesX = columnWidth + 16
+        "YOUR APP PROFILES".draw(at: NSPoint(x: profilesX, y: 52), withAttributes: [
             .font: NSFont.boldSystemFont(ofSize: 11),
             .foregroundColor: NSColor.appTextSecondary,
         ])
         ("Open, assign, or manage each separate profile." as NSString).draw(
-            at: NSPoint(x: 344, y: 79),
+            at: NSPoint(x: profilesX, y: 79),
             withAttributes: [
                 .font: NSFont.systemFont(ofSize: 12),
                 .foregroundColor: NSColor.appTextPrimary,
             ]
         )
         NSColor.separatorColor.setFill()
-        NSBezierPath(rect: NSRect(x: 327.5, y: 0, width: 1, height: bounds.height)).fill()
+        NSBezierPath(
+            rect: NSRect(x: columnWidth - 0.5, y: 0, width: 1, height: bounds.height)
+        ).fill()
     }
 }
 
@@ -1486,6 +1517,12 @@ private final class IconColorSwatch: NSView {
         let circle = bounds.insetBy(dx: inset, dy: inset)
         color.iconColor.nsColor.setFill()
         NSBezierPath(ovalIn: circle).fill()
+        if color == .white {
+            NSColor.separatorColor.setStroke()
+            let outline = NSBezierPath(ovalIn: circle)
+            outline.lineWidth = 1
+            outline.stroke()
+        }
         if isSelected {
             KlikProBrand.green.setStroke()
             let ring = NSBezierPath(ovalIn: bounds.insetBy(dx: 1, dy: 1))
@@ -1500,12 +1537,11 @@ private final class IconColorSwatch: NSView {
 
 /// The Change Icon dialog body (used as an NSAlert accessory). Offers three
 /// modes — replace with a PNG/ICO, tint the source icon, or badge it with the
-/// profile's initial — over the shared six-colour palette, with a live preview.
-final class ChangeIconPanelView: NSView {
+/// user-selected character — over the shared nine-colour palette, with a live preview.
+final class ChangeIconPanelView: NSView, NSTextFieldDelegate {
     enum Mode: Int { case image, tint, badge }
 
     private let sourceBundleURL: URL
-    private let badgeLetter: String
     private let sourceImage: CGImage?
     private let fallbackImage: NSImage
 
@@ -1517,7 +1553,10 @@ final class ChangeIconPanelView: NSView {
     )
     private let chooseButton = AppProfileButton(title: "Choose PNG or ICO…", frame: .zero)
     private let chosenLabel = NSTextField(labelWithString: "No image chosen")
+    private let imageRequirementLabel = NSTextField(labelWithString: "")
     private let colorLabel = NSTextField(labelWithString: "Colour")
+    private let badgeCharacterLabel = NSTextField(labelWithString: "Character")
+    private let badgeCharacterField = NSTextField(string: "")
     private var swatches: [IconColorSwatch] = []
 
     private var mode: Mode = .tint
@@ -1526,9 +1565,9 @@ final class ChangeIconPanelView: NSView {
 
     override var isFlipped: Bool { true }
 
-    init(instance: AppProfileInstance) {
+    init(instance: AppProfileInstance, defaultBadgeCharacter: String) {
         sourceBundleURL = URL(fileURLWithPath: instance.source.bundleURL, isDirectory: true)
-        badgeLetter = instance.label
+        badgeCharacterField.stringValue = String(defaultBadgeCharacter.uppercased().prefix(1))
         sourceImage = LauncherGenerator().sourceIconImage(sourceBundleURL: sourceBundleURL)
         fallbackImage = NSWorkspace.shared.icon(forFile: instance.launcherPath)
         segmented = NSSegmentedControl(
@@ -1564,10 +1603,25 @@ final class ChangeIconPanelView: NSView {
         chosenLabel.font = .systemFont(ofSize: 11)
         chosenLabel.textColor = .appTextSecondary
         chosenLabel.lineBreakMode = .byTruncatingMiddle
+        let minimum = LauncherGenerator.customIconMinimumPixelSize
+        imageRequirementLabel.stringValue =
+            "Minimum: \(minimum) × \(minimum) px (shortest side at least \(minimum) px)"
+        imageRequirementLabel.frame = NSRect(x: 0, y: 188, width: 420, height: 18)
+        imageRequirementLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        imageRequirementLabel.textColor = .appTextSecondary
 
         colorLabel.frame = NSRect(x: 0, y: 150, width: 420, height: 16)
         colorLabel.font = .systemFont(ofSize: 11, weight: .medium)
         colorLabel.textColor = .appTextSecondary
+
+        badgeCharacterLabel.frame = NSRect(x: 280, y: 150, width: 64, height: 18)
+        badgeCharacterLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        badgeCharacterLabel.textColor = .appTextSecondary
+        badgeCharacterField.frame = NSRect(x: 350, y: 146, width: 44, height: 24)
+        badgeCharacterField.alignment = .center
+        badgeCharacterField.font = .systemFont(ofSize: 14, weight: .semibold)
+        badgeCharacterField.delegate = self
+        badgeCharacterField.setAccessibilityLabel("Badge character")
 
         var x: CGFloat = 0
         for color in AppProfileMenuColor.allCases {
@@ -1580,7 +1634,10 @@ final class ChangeIconPanelView: NSView {
             x += 42
         }
 
-        [segmented, preview, hint, chooseButton, chosenLabel, colorLabel].forEach(addSubview)
+        [
+            segmented, preview, hint, chooseButton, chosenLabel, imageRequirementLabel, colorLabel,
+            badgeCharacterLabel, badgeCharacterField,
+        ].forEach(addSubview)
         updateModeControls()
         updatePreview()
     }
@@ -1596,7 +1653,8 @@ final class ChangeIconPanelView: NSView {
         case .tint:
             return .tint(selectedColor)
         case .badge:
-            return .badge(selectedColor)
+            guard let character = normalizedBadgeCharacter else { return nil }
+            return .badge(selectedColor, character)
         }
     }
 
@@ -1612,6 +1670,21 @@ final class ChangeIconPanelView: NSView {
         updatePreview()
     }
 
+    func controlTextDidChange(_ notification: Notification) {
+        let normalized = String(badgeCharacterField.stringValue.uppercased().prefix(1))
+        if badgeCharacterField.stringValue != normalized {
+            badgeCharacterField.stringValue = normalized
+        }
+        updatePreview()
+    }
+
+    private var normalizedBadgeCharacter: String? {
+        let trimmed = badgeCharacterField.stringValue
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return String(trimmed.uppercased().prefix(1))
+    }
+
     private func chooseImageFile() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
@@ -1619,7 +1692,9 @@ final class ChangeIconPanelView: NSView {
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [.png, .ico]
         panel.prompt = "Choose"
-        panel.message = "Choose a square PNG or ICO image, at least 256×256 pixels."
+        let minimum = LauncherGenerator.customIconMinimumPixelSize
+        panel.message = "Minimum: \(minimum) × \(minimum) pixels. "
+            + "The shortest side must be at least \(minimum) pixels."
         guard panel.runModal() == .OK, let url = panel.url else { return }
         chosenImageURL = url
         chosenLabel.stringValue = url.lastPathComponent
@@ -1630,8 +1705,11 @@ final class ChangeIconPanelView: NSView {
         let imageMode = mode == .image
         chooseButton.isHidden = !imageMode
         chosenLabel.isHidden = !imageMode
+        imageRequirementLabel.isHidden = !imageMode
         colorLabel.isHidden = imageMode
         swatches.forEach { $0.isHidden = imageMode }
+        badgeCharacterLabel.isHidden = mode != .badge
+        badgeCharacterField.isHidden = mode != .badge
     }
 
     private func updatePreview() {
@@ -1654,9 +1732,9 @@ final class ChangeIconPanelView: NSView {
                 preview.image = fallbackImage
             }
         case .badge:
-            if let sourceImage,
+            if let sourceImage, let character = normalizedBadgeCharacter,
                let badged = LauncherGenerator.badgedIcon(
-                sourceImage, color: selectedColor.iconColor, letter: badgeLetter
+                sourceImage, color: selectedColor.iconColor, letter: character
                ) {
                 preview.image = NSImage(cgImage: badged, size: size)
             } else {

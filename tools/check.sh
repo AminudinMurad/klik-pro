@@ -614,8 +614,10 @@ grep -q 'case profile(UUID)' "$ROOT/Sources/KlikProConfig.swift"
 grep -q 'func assigningMouseButton(' "$ROOT/Sources/KlikProConfig.swift"
 grep -q 'Original app' "$ROOT/Sources/AppProfilesUI.swift"
 grep -q 'mappingProfilesView.onAssignOriginal' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'statusField.frame = NSRect(x: 344, y: 108' "$ROOT/Sources/AppProfilesUI.swift"
-grep -q 'scrollView.frame = NSRect(x: 340, y: 142' "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'let columnWidth = width / 2' "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'let profilesX = columnWidth + 16' "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'statusField.frame = NSRect(x: profilesX, y: 108' "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'x: columnWidth + 12, y: 142' "$ROOT/Sources/AppProfilesUI.swift"
 grep -q 'YOUR APP PROFILES' "$ROOT/Sources/AppProfilesUI.swift"
 # The assign control carries the assignment in its own label with a chain-link
 # indicator (linked when assigned, link-plus when not) — no separate green caption.

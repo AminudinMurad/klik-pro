@@ -2,6 +2,38 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.3.2
+
+A focused original-app relaunch fix and App Profiles layout update.
+
+- **Original apps reopen independently** — when a ChatGPT or Claude App Profile is
+  still running, Klik PRO now identifies the true original process instead of letting
+  macOS redirect the Open action to the profile. If the original is closed, Klik PRO
+  starts a new original instance; if it is already running, Klik PRO reopens that
+  exact process.
+- **App Profile duplicate protection remains intact** — forced original-app launches
+  are isolated from managed-profile routing. Existing profiles are still matched by
+  their exact data directory and reopened by verified PID rather than duplicated.
+- **Open from the generator** — installed ChatGPT and Claude cards now provide an
+  **Open** action immediately before **+ New Profile**.
+- **Balanced App Profiles layout** — the generator and profile-list columns now use
+  equal widths, and each profile's **Menu Bar Icon** toggle sits directly left of its
+  settings gear.
+- **Numbered, customisable badges** — Badge mode defaults to the first unused number
+  for that app (`1`, then `2`, and so on), remembers applied badge characters, and
+  still lets the user replace the default with any single character in the live preview.
+- **Full-size badged Dock and Launchpad icons** — badge composition stays inside the
+  source app icon's native safe area, preventing macOS from shrinking the whole icon
+  into a second inset squircle while retaining the badge's displayed size.
+- **Full-size PNG Dock and Launchpad icons** — chosen PNG/ICO artwork now uses the
+  native macOS app-icon footprint instead of touching the ICNS canvas edges and
+  triggering an additional system scale-down.
+- **Expanded Tint and Badge palette** — Yellow, White (`#FFFFFF`), and Black
+  (`#000000`) join the existing six colours. Light badges automatically use dark
+  lettering and rings so their character remains legible.
+- **Visible image requirements** — Image mode now states its minimum accepted PNG/ICO
+  resolution before selection: the shortest side must be at least 256 pixels.
+
 ## 1.3.1
 
 A focused assignment-linking fix for original apps and generated App Profiles.

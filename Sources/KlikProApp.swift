@@ -3238,6 +3238,9 @@ final class ToggleView: NSView {
         appProfilesView.onGenerate = { [weak self] candidate in
             self?.createManagedAppProfile(from: candidate)
         }
+        appProfilesView.onOpenOriginal = { [weak self] target in
+            self?.launchOriginalApp(target)
+        }
         appProfilesView.onAssignOriginal = { [weak self] target in
             self?.assignMouseButton(to: .original(target), label: target.title)
         }
@@ -3317,9 +3320,8 @@ final class ToggleView: NSView {
         contentView.mappingProfilesView.onAssign = { [weak self] instance in
             self?.assignMouseButton(to: instance)
         }
-        contentView.mappingProfilesView.onOpenOriginal = { target in
-            guard let url = quickLaunchTargetApplicationURL(target) else { return }
-            NSWorkspace.shared.openApplication(at: url, configuration: .init())
+        contentView.mappingProfilesView.onOpenOriginal = { [weak self] target in
+            self?.launchOriginalApp(target)
         }
         contentView.mappingProfilesView.onAssignOriginal = { [weak self] target in
             self?.assignMouseButton(to: .original(target), label: target.title)
@@ -4990,7 +4992,10 @@ final class ToggleView: NSView {
             )
             return
         }
-        let panel = ChangeIconPanelView(instance: instance)
+        let panel = ChangeIconPanelView(
+            instance: instance,
+            defaultBadgeCharacter: defaultBadgeCharacter(for: instance)
+        )
         let alert = NSAlert()
         alert.messageText = "Change icon for \(instance.label)"
         alert.informativeText = "The original app is never modified."
@@ -5419,6 +5424,27 @@ final class ToggleView: NSView {
         }
     }
 
+    /// Reopening Badge mode keeps this profile's saved choice. A profile without
+    /// one receives the first unused single-digit badge among profiles for the
+    /// same source app: 1, 2, … 9, then 0.
+    private func defaultBadgeCharacter(for instance: AppProfileInstance) -> String {
+        if let saved = instance.badgeCharacter?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !saved.isEmpty {
+            return String(saved.prefix(1))
+        }
+        let used = Set(persistedConfig.instances.compactMap { candidate -> String? in
+            guard candidate.id != instance.id,
+                  candidate.source.bundleIdentifier == instance.source.bundleIdentifier,
+                  let character = candidate.badgeCharacter?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !character.isEmpty else { return nil }
+            return String(character.uppercased().prefix(1))
+        })
+        return ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
+            .first(where: { !used.contains($0) }) ?? "1"
+    }
+
     private func launchAppProfile(_ instance: AppProfileInstance) {
         if instance.launcherKind == .managed {
             do {
@@ -5452,6 +5478,18 @@ final class ToggleView: NSView {
                     title: "App Profile action was blocked",
                     message: self?.appProfileRuntimeErrorMessage(error)
                         ?? "Klik PRO could not safely launch or focus this instance."
+                )
+            }
+        }
+    }
+
+    private func launchOriginalApp(_ target: QuickLaunchTarget) {
+        appProfileRuntime.launchOriginal(target) { [weak self] result in
+            guard case .failure = result else { return }
+            DispatchQueue.main.async {
+                self?.showAppProfileAlert(
+                    title: "Original app could not be opened",
+                    message: "Klik PRO could not safely open the original \(target.title) app."
                 )
             }
         }

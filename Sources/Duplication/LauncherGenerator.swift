@@ -1351,7 +1351,17 @@ struct LauncherGenerator {
         guard let context = squareContext(size) else { return nil }
         let artwork = alphaCropped(source) ?? source
         let s = CGFloat(size)
-        let tile = CGRect(x: 0, y: 0, width: s, height: s)
+        // Modern macOS app artwork occupies roughly 85% of its transparent icon
+        // canvas. Drawing a pre-shaped squircle all the way to the ICNS edges
+        // makes Dock/Launchpad normalize it down again, producing the visible
+        // second inset tile. Use the native safe footprint up front so the
+        // displayed squircle matches system and source-app icons.
+        let safeScale: CGFloat = 0.85
+        let safeInset = s * (1 - safeScale) / 2
+        let tile = CGRect(
+            x: safeInset, y: safeInset,
+            width: s * safeScale, height: s * safeScale
+        )
         let radius = tile.width * 0.2237   // macOS icon-grid corner ratio
         context.addPath(CGPath(
             roundedRect: tile, cornerWidth: radius, cornerHeight: radius, transform: nil
@@ -1397,16 +1407,38 @@ struct LauncherGenerator {
     static func badgedIcon(_ source: CGImage, color: IconColor, letter: String) -> CGImage? {
         let size = renderCanvasSize
         guard let context = squareContext(size) else { return nil }
-        let artwork = alphaCropped(source) ?? source
-        context.draw(artwork, in: aspectFitRect(artwork, in: size))
+        // Preserve the source app icon's native transparent safe area. Extending
+        // badge pixels to the ICNS canvas edge makes Dock/Launchpad normalize the
+        // entire icon down into a second, smaller squircle. The menu-bar renderer
+        // does not apply that normalization, which is why the defect appeared
+        // only in Dock and Launchpad.
+        let fitted = aspectFitRect(source, in: size)
+        context.draw(source, in: fitted)
         let s = CGFloat(size)
-        let diameter = s * 0.44
-        let margin = s * 0.03
+        let diameter = s * 0.34
+        let ring = s * 0.022
+        let sourceBounds = alphaBounds(source).map { bounds -> CGRect in
+            let scaleX = fitted.width / CGFloat(source.width)
+            let scaleY = fitted.height / CGFloat(source.height)
+            return CGRect(
+                x: fitted.minX + bounds.minX * scaleX,
+                y: fitted.minY + bounds.minY * scaleY,
+                width: bounds.width * scaleX,
+                height: bounds.height * scaleY
+            )
+        } ?? fitted
+        let inset = s * 0.008
+        let outerRadius = diameter / 2 + ring
         // Origin is bottom-left, so this centre sits in the bottom-right corner.
-        let center = CGPoint(x: s - diameter / 2 - margin, y: diameter / 2 + margin)
-        let ring = s * 0.028
+        let center = CGPoint(
+            x: sourceBounds.maxX - outerRadius - inset,
+            y: sourceBounds.minY + outerRadius + inset
+        )
         let white = CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)
-        context.setFillColor(white)
+        let black = CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)
+        let luminance = color.red * 0.2126 + color.green * 0.7152 + color.blue * 0.0722
+        let foreground = luminance > 0.68 ? black : white
+        context.setFillColor(foreground)
         context.fillEllipse(in: CGRect(
             x: center.x - diameter / 2 - ring, y: center.y - diameter / 2 - ring,
             width: diameter + 2 * ring, height: diameter + 2 * ring
@@ -1421,7 +1453,7 @@ struct LauncherGenerator {
             let font = CTFontCreateWithName("HelveticaNeue-Bold" as CFString, diameter * 0.56, nil)
             let attributes: [CFString: Any] = [
                 kCTFontAttributeName: font,
-                kCTForegroundColorAttributeName: white,
+                kCTForegroundColorAttributeName: foreground,
             ]
             guard let attributed = CFAttributedStringCreate(
                 nil, String(first) as CFString, attributes as CFDictionary
@@ -1455,6 +1487,14 @@ struct LauncherGenerator {
     /// canvas; treating that canvas as artwork reintroduces a second inset even
     /// when our destination tile itself has no inset.
     private static func alphaCropped(_ image: CGImage) -> CGImage? {
+        guard let bounds = alphaBounds(image) else { return nil }
+        return image.cropping(to: bounds)
+    }
+
+    /// Returns the non-transparent pixel bounds without changing the image's
+    /// native app-icon canvas. Badge composition uses this to stay inside the
+    /// source icon's safe area so macOS does not apply a second normalization.
+    private static func alphaBounds(_ image: CGImage) -> CGRect? {
         let width = image.width
         let height = image.height
         guard width > 0, height > 0,
@@ -1481,10 +1521,10 @@ struct LauncherGenerator {
             }
         }
         guard maxX >= minX, maxY >= minY else { return nil }
-        return image.cropping(to: CGRect(
+        return CGRect(
             x: minX, y: minY,
             width: maxX - minX + 1, height: maxY - minY + 1
-        ))
+        )
     }
 
     private static func aspectFitRect(_ image: CGImage, in size: Int) -> CGRect {

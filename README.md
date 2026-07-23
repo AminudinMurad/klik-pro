@@ -53,11 +53,11 @@ checks:
 
 **App Profiles** — generate isolated extra instances of ChatGPT or Claude, each with
 its own login; open or assign each profile, and give it a custom PNG/ICO, colour tint,
-or initial badge so every account is recognisable at a glance:
+or one-character badge so every account is recognisable at a glance:
 
-<img src="assets/screenshot-app-profiles.png?v=1.3.1-b15" width="940" alt="Klik PRO App Profiles tab showing original-app New Profile and Assign Button actions plus individually styled generated profiles">
+<img src="assets/screenshot-app-profiles.png?v=1.3.1-b15" width="940" alt="Klik PRO App Profiles tab showing original-app Open, New Profile, and Assign Button actions plus individually styled generated profiles">
 
-**Icon customisation** — distinguish profiles with colour tints or initial badges,
+**Icon customisation** — distinguish profiles with colour tints or custom badges,
 manage them from the per-profile gear menu, and see the same identity immediately in
 Mappings:
 
@@ -110,7 +110,7 @@ Once unlocked, point new App Profiles at a durable data folder so their logins s
   can still be cleared with **None**.
 - **App Profiles** — generate a second icon for ChatGPT or Claude with its own separate
   login and settings. The original app is never copied, cloned, or modified. Each
-  generated launcher can be renamed; styled with a custom PNG/ICO, one of six colour
+  generated launcher can be renamed; styled with a custom PNG/ICO, one of nine colour
   tints, or an initial badge; pinned to the Dock or menu bar; assigned to a mouse
   button; or removed at any time. Its identity stays consistent across App Profiles,
   Mappings, the menu bar, Launchpad, and Finder. See [App Profiles](#app-profiles).
@@ -131,10 +131,10 @@ Once unlocked, point new App Profiles at a durable data folder so their logins s
 
 ## Install (pre-built release)
 
-The current release is **Klik PRO v1.3.1 (build 15)**, provided as one universal
+The current release is **Klik PRO v1.3.2 (build 16)**, provided as one universal
 macOS app for Apple Silicon and Intel Macs. The DMG is the recommended download;
 the ZIP contains the same app as an alternative.
-**[Download Klik PRO v1.3.1](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.3.1).**
+**[Download Klik PRO v1.3.2](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.3.2).**
 
 > [!IMPORTANT]
 > **Update if you use a durable Data Folder.** Version 1.2.9 remembers previously
@@ -318,14 +318,15 @@ model both executables read, persisted to:
 
 ## App Profiles
 
-The dedicated **App Profiles** tab fills the window height and places the ChatGPT and
-Claude generators in the left column and the scrollable profile-management list in
-the right. Click **+ New Profile**, accept or edit the suggested name, and Klik PRO
+The dedicated **App Profiles** tab fills the window height and places equal-width
+ChatGPT and Claude generators on the left and the scrollable profile-management list
+on the right. Click **+ New Profile**, accept or edit the suggested name, and Klik PRO
 creates a small launcher with a separate login and settings, then opens it. The
 original app in `/Applications` is never copied, cloned, renamed, or modified.
 
-Each installed original-app card also has **Assign Button**. This opens the original
-installed app; it does not create profile data. Original apps never receive Rename,
+Each installed original-app card also has **Open** and **Assign Button**. **Open**
+reopens the true original app even while a generated profile remains running, and
+neither action creates profile data. Original apps never receive Rename,
 Repair, Archive, Change Icon, Delete Data, or other managed-profile actions.
 
 The **Mappings** tab uses the same two-column structure: mouse-button shortcuts and
@@ -336,9 +337,13 @@ same current profile icon immediately after a change. The remaining management
 actions and the **Menu Bar Icon** toggle stay on the App Profiles tab.
 
 For generated profiles, the gear menu groups **Rename**, **Change Icon**, and
-**Remove from Klik PRO**. **Change Icon** accepts PNG or ICO artwork, offers six
-colour tints of the original app icon, and can add a coloured corner badge using the
-profile's initial; the live preview shows the result before it is applied. **Reset to
+**Remove from Klik PRO**. **Change Icon** accepts PNG or ICO artwork whose shortest
+side is at least 256 pixels, offers nine
+colour tints of the original app icon, and can add a coloured corner badge that starts
+with the first unused number and accepts any custom single character; the live preview
+shows the result before it is applied. Badge composition preserves the source icon's
+full native size in Dock and Launchpad, and chosen PNG/ICO artwork uses the same native
+macOS icon footprint without a second inset squircle. **Reset to
 App Icon** restores the source app artwork. Custom icon data is kept with the profile
 and survives durable-folder recovery; the original ChatGPT or Claude app remains
 untouched.
@@ -526,7 +531,7 @@ setups Klik PRO has been tested against:
 | | |
 |---|---|
 | macOS | 26.5.2 (build 25F84) |
-| Klik PRO | v1.3.1 (build 15), universal Apple Silicon + Intel build |
+| Klik PRO | v1.3.2 (build 16), universal Apple Silicon + Intel build |
 | Primary mouse | Logitech MX Master 3 (Mac edition), firmware `MPM19.01_0015`, connected over Bluetooth (BLE) |
 | Additional tested mouse | Logi M650, firmware `RBM16.10_0014` |
 | Vendor software / driver | None — no mouse driver or manufacturer software installed |

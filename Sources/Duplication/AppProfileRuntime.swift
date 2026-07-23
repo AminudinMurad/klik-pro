@@ -89,6 +89,24 @@ struct ManagedProcessInspector {
         return .complete(matches.sorted())
     }
 
+    /// Finds roots for the vendor app's original/default profile. Managed App
+    /// Profiles execute the same binary, so bundle identity and executable path
+    /// alone are insufficient; an original root is one without Klik PRO's
+    /// explicit `--user-data-dir` argument.
+    func verifiedOriginalRoots(executableURL: URL) -> ManagedProcessScan {
+        guard let pids = listProcesses() else { return .incomplete }
+        let expectedExecutable = executableURL.standardizedFileURL.path
+        var matches: [pid_t] = []
+        for pid in pids where pid > 0 && pid != getpid() {
+            guard executablePath(pid) == expectedExecutable else { continue }
+            guard let arguments = processArguments(pid) else { return .incomplete }
+            if !arguments.contains(where: { $0.hasPrefix("--user-data-dir=") }) {
+                matches.append(pid)
+            }
+        }
+        return .complete(matches.sorted())
+    }
+
     /// Scans only processes executing from the exact source bundle. Any candidate
     /// whose argv cannot be read blocks deletion because it may reference the profile.
     func profileReferences(
@@ -415,6 +433,57 @@ struct AppProfileRuntime {
                     operationLock: operationLock,
                     completion: completion
                 )
+            }
+        }
+    }
+
+    /// Opens the installed vendor app's original/default profile without letting
+    /// LaunchServices mistake a running managed profile for the original app.
+    func launchOriginal(
+        _ target: QuickLaunchTarget,
+        completion: @escaping (Result<pid_t, AppProfileRuntimeError>) -> Void
+    ) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async {
+                self.launchOriginal(target, completion: completion)
+            }
+            return
+        }
+        guard let applicationURL = quickLaunchTargetApplicationURL(target),
+              let executableURL = Bundle(url: applicationURL)?.executableURL else {
+            completion(.failure(.unavailable(.externalUnavailable)))
+            return
+        }
+        switch processInspector.verifiedOriginalRoots(executableURL: executableURL) {
+        case .incomplete:
+            completion(.failure(.processScanIncomplete))
+        case .complete(let pids) where pids.count > 1:
+            completion(.failure(.ambiguousProcesses))
+        case .complete(let pids) where pids.count == 1:
+            let pid = pids[0]
+            guard let application = NSRunningApplication(processIdentifier: pid) else {
+                completion(.failure(.processVerificationFailed))
+                return
+            }
+            Self.sendReopenEvent(to: pid)
+            guard application.activate(options: []) else {
+                completion(.failure(.activationFailed))
+                return
+            }
+            completion(.success(pid))
+        case .complete:
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.createsNewApplicationInstance = true
+            configuration.activates = true
+            NSWorkspace.shared.openApplication(
+                at: applicationURL,
+                configuration: configuration
+            ) { application, error in
+                guard error == nil, let application else {
+                    completion(.failure(.launchFailed))
+                    return
+                }
+                completion(.success(application.processIdentifier))
             }
         }
     }

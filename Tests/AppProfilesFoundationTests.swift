@@ -1035,6 +1035,23 @@ private struct AppProfilesFoundationTests {
                 == .complete([41]),
             "runtime discovery must match exact executable and exact profile argument"
         )
+        expect(
+            inspector.verifiedOriginalRoots(executableURL: executable) == .complete([]),
+            "managed profile roots must never be mistaken for the original app"
+        )
+        let mixedInspector = ManagedProcessInspector(
+            listProcesses: { [40, 41] },
+            executablePath: { _ in executable.path },
+            processArguments: { pid in
+                pid == 40
+                    ? ["Fixture"]
+                    : ["Fixture", "--user-data-dir=/tmp/profile"]
+            }
+        )
+        expect(
+            mixedInspector.verifiedOriginalRoots(executableURL: executable) == .complete([40]),
+            "original discovery must exclude a running managed profile sharing its executable"
+        )
         let incomplete = ManagedProcessInspector(
             listProcesses: { [43] },
             executablePath: { _ in executable.path },
@@ -2071,29 +2088,39 @@ private struct AppProfilesFoundationTests {
         let size = shaped.width
         expect(size == LauncherGenerator.renderCanvasSize && shaped.height == size,
                "custom icon shaping must render to the canonical square canvas")
-        expect(alphaByte(shaped, x: 1, y: size / 2) > 0,
-               "custom icon artwork must reach the left middle edge, not sit inside an inset tile")
-        expect(alphaByte(shaped, x: size - 2, y: size / 2) > 0,
-               "custom icon artwork must reach the right middle edge, not sit inside an inset tile")
-        expect(alphaByte(shaped, x: size / 2, y: 1) > 0,
-               "custom icon artwork must reach the bottom middle edge, not sit inside an inset tile")
-        expect(alphaByte(shaped, x: size / 2, y: size - 2) > 0,
-               "custom icon artwork must reach the top middle edge, not sit inside an inset tile")
+        expect(alphaByte(shaped, x: 1, y: size / 2) == 0,
+               "custom icon must preserve the macOS transparent safe canvas")
+        expect(alphaByte(shaped, x: 40, y: size / 2) > 0,
+               "custom icon artwork must fill the native app-icon footprint")
+        expect(alphaByte(shaped, x: size - 41, y: size / 2) > 0,
+               "custom icon artwork must fill the native footprint symmetrically")
+        expect(alphaByte(shaped, x: size / 2, y: 40) > 0,
+               "custom icon artwork must fill the native footprint vertically")
+        expect(alphaByte(shaped, x: size / 2, y: size - 41) > 0,
+               "custom icon artwork must fill the native footprint vertically")
         expect(alphaByte(shaped, x: 1, y: 1) == 0,
                "custom icon shaping must still keep rounded transparent corners")
 
         let badged = LauncherGenerator.badgedIcon(
             source, color: AppProfileMenuColor.pink.iconColor, letter: "P")!
-        expect(alphaByte(badged, x: 1, y: size / 2) > 0,
-               "badged source artwork must discard embedded transparent padding")
-        expect(alphaByte(badged, x: size / 2, y: size - 2) > 0,
-               "badged source artwork must fill the icon canvas vertically")
+        expect(alphaByte(badged, x: 1, y: size / 2) == 0,
+               "badged artwork must preserve the source icon's native safe area")
+        expect(alphaByte(badged, x: 80, y: size / 2) > 0,
+               "badged source artwork must remain full-size inside its native safe area")
     }
 
     /// Tint and badge compositions always emit onto the square render canvas,
     /// independent of source aspect, and a whitespace-only badge letter must not
     /// crash or fail to render.
     private static func testCustomIconTintAndBadgeGeometry() {
+        expect(AppProfileMenuColor.allCases.count == 9,
+               "Tint and Badge must expose the complete nine-colour palette")
+        expect(AppProfileMenuColor.white.iconColor
+               == .init(red: 1, green: 1, blue: 1),
+               "white must be exact #FFFFFF")
+        expect(AppProfileMenuColor.black.iconColor
+               == .init(red: 0, green: 0, blue: 0),
+               "black must be exact #000000")
         let source = makeTestBitmap(width: 400, height: 400)
         let tinted = LauncherGenerator.tintedIcon(source, color: AppProfileMenuColor.green.iconColor)
         expect(tinted != nil, "tint must produce an image")
