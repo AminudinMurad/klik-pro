@@ -267,6 +267,8 @@ private final class DualAppGeneratorCard: NSView {
     var onOpen: ((AppProfileCandidate) -> Void)?
     var onAssign: (() -> Void)?
     var onCreateDock: (() -> Void)?
+    var onRenameDock: (() -> Void)?
+    var onChangeIconDock: (() -> Void)?
     var onDeleteDock: (() -> Void)?
     var onRemoveNativeDock: (() -> Void)?
     var onToggleMenuBar: (() -> Void)?
@@ -403,6 +405,22 @@ private final class DualAppGeneratorCard: NSView {
         create.target = self
         create.image = NSImage(systemSymbolName: "star", accessibilityDescription: nil)
         menu.addItem(create)
+        // Rename and Change Icon act on an existing Klik PRO Dock icon, so they are
+        // grouped with Create/Delete and enabled only once that icon is pinned.
+        let rename = NSMenuItem(
+            title: "Rename Dock Icon…", action: #selector(menuRenameDock), keyEquivalent: ""
+        )
+        rename.target = self
+        rename.isEnabled = candidate != nil && dockPinned
+        rename.image = NSImage(systemSymbolName: "pencil", accessibilityDescription: nil)
+        menu.addItem(rename)
+        let changeIcon = NSMenuItem(
+            title: "Change Icon…", action: #selector(menuChangeIconDock), keyEquivalent: ""
+        )
+        changeIcon.target = self
+        changeIcon.isEnabled = candidate != nil && dockPinned
+        changeIcon.image = NSImage(systemSymbolName: "photo", accessibilityDescription: nil)
+        menu.addItem(changeIcon)
         let delete = NSMenuItem(
             title: "Delete Dock Icon", action: #selector(menuDeleteDock), keyEquivalent: ""
         )
@@ -434,6 +452,8 @@ private final class DualAppGeneratorCard: NSView {
     }
 
     @objc private func menuCreateDock() { onCreateDock?() }
+    @objc private func menuRenameDock() { onRenameDock?() }
+    @objc private func menuChangeIconDock() { onChangeIconDock?() }
     @objc private func menuDeleteDock() { onDeleteDock?() }
     @objc private func menuRemoveNativeDock() { onRemoveNativeDock?() }
 
@@ -1097,6 +1117,8 @@ final class AppProfilesContentView: NSView {
     var onOpenOriginal: ((QuickLaunchTarget) -> Void)?
     var onAssignOriginal: ((QuickLaunchTarget) -> Void)?
     var onCreateOriginalDock: ((QuickLaunchTarget) -> Void)?
+    var onRenameOriginalDock: ((QuickLaunchTarget) -> Void)?
+    var onChangeOriginalDockIcon: ((QuickLaunchTarget) -> Void)?
     var onDeleteOriginalDock: ((QuickLaunchTarget) -> Void)?
     var onRemoveNativeOriginalDock: ((QuickLaunchTarget) -> Void)?
     var onToggleOriginalMenuBar: ((QuickLaunchTarget) -> Void)?
@@ -1189,6 +1211,10 @@ final class AppProfilesContentView: NSView {
         claudeCard.onAssign = { [weak self] in self?.onAssignOriginal?(.claude) }
         chatGPTCard.onCreateDock = { [weak self] in self?.onCreateOriginalDock?(.chatGPT) }
         claudeCard.onCreateDock = { [weak self] in self?.onCreateOriginalDock?(.claude) }
+        chatGPTCard.onRenameDock = { [weak self] in self?.onRenameOriginalDock?(.chatGPT) }
+        claudeCard.onRenameDock = { [weak self] in self?.onRenameOriginalDock?(.claude) }
+        chatGPTCard.onChangeIconDock = { [weak self] in self?.onChangeOriginalDockIcon?(.chatGPT) }
+        claudeCard.onChangeIconDock = { [weak self] in self?.onChangeOriginalDockIcon?(.claude) }
         chatGPTCard.onDeleteDock = { [weak self] in self?.onDeleteOriginalDock?(.chatGPT) }
         claudeCard.onDeleteDock = { [weak self] in self?.onDeleteOriginalDock?(.claude) }
         chatGPTCard.onRemoveNativeDock = { [weak self] in self?.onRemoveNativeOriginalDock?(.chatGPT) }
@@ -1852,11 +1878,15 @@ final class ChangeIconPanelView: NSView, NSTextFieldDelegate {
 
     override var isFlipped: Bool { true }
 
-    init(instance: AppProfileInstance, defaultBadgeCharacter: String) {
-        sourceBundleURL = URL(fileURLWithPath: instance.source.bundleURL, isDirectory: true)
+    /// `sourceBundleURL` is the vendor app the tint/badge modes derive from;
+    /// `fallbackImage` is shown when the source icon can't be read or Image mode
+    /// has no file yet. Managed profiles pass instance-derived values; the original
+    /// app's Dock launcher passes the vendor bundle and its current launcher icon.
+    init(sourceBundleURL: URL, fallbackImage: NSImage, defaultBadgeCharacter: String) {
+        self.sourceBundleURL = sourceBundleURL
         badgeCharacterField.stringValue = String(defaultBadgeCharacter.uppercased().prefix(1))
         sourceImage = LauncherGenerator().sourceIconImage(sourceBundleURL: sourceBundleURL)
-        fallbackImage = NSWorkspace.shared.icon(forFile: instance.launcherPath)
+        self.fallbackImage = fallbackImage
         segmented = NSSegmentedControl(
             labels: ["Image", "Tint", "Badge"],
             trackingMode: .selectOne, target: nil, action: nil

@@ -1323,6 +1323,21 @@ struct LauncherGenerator {
         return try makeICNSData(from: image)
     }
 
+    /// Shapes and validates a user-chosen PNG/ICO into macOS-app-icon .icns data,
+    /// matching `setCustomIcon`'s rendering for callers that have no managed
+    /// instance (e.g. the original-app Dock launcher). Rejects images whose shortest
+    /// side is below `customIconMinimumPixelSize`.
+    static func makeShapedICNSData(fromImageAt imageURL: URL) throws -> Data {
+        guard let image = largestImage(atFileURL: imageURL),
+              min(image.width, image.height) >= customIconMinimumPixelSize else {
+            throw LauncherGeneratorError.iconImageInvalid
+        }
+        guard let shaped = macOSIconShaped(image) else {
+            throw LauncherGeneratorError.iconImageInvalid
+        }
+        return try makeICNSData(from: shaped)
+    }
+
     /// Loads the source app's own icon as a CGImage (largest frame), for tint
     /// and badge composition and for the Change Icon preview.
     func sourceIconImage(sourceBundleURL: URL) -> CGImage? {

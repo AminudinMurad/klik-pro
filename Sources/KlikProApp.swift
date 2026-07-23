@@ -3254,6 +3254,12 @@ final class ToggleView: NSView {
         appProfilesView.onCreateOriginalDock = { [weak self] target in
             self?.createOriginalDockIcon(for: target)
         }
+        appProfilesView.onRenameOriginalDock = { [weak self] target in
+            self?.renameOriginalDockIcon(for: target)
+        }
+        appProfilesView.onChangeOriginalDockIcon = { [weak self] target in
+            self?.changeOriginalDockIcon(for: target)
+        }
         appProfilesView.onDeleteOriginalDock = { [weak self] target in
             self?.deleteOriginalDockIcon(for: target)
         }
@@ -4511,11 +4517,19 @@ final class ToggleView: NSView {
                 // no longer hard-blocks profile creation.
                 let outcome = self.ensureOriginalDockIcon(
                     for: vendor,
-                    preferredSourceURL: candidate.app.bundleURL
+                    preferredSourceURL: candidate.app.bundleURL,
+                    displayNameOverride: currentConfig.originalDockCustomNames[vendor]
                 )
                 switch outcome {
                 case .some(.added), .some(.alreadyPresent):
                     originalDockOutcome = outcome
+                    // Keep the Dock tile label in sync with a persisted custom name
+                    // (addLauncherToDock derives file-label from the fixed filename).
+                    if let customName = currentConfig.originalDockCustomNames[vendor] {
+                        _ = Self.setOriginalDockTileLabel(
+                            at: vendor.originalDockLauncherPath, label: customName
+                        )
+                    }
                 default:
                     DispatchQueue.main.async {
                         self.finishAppProfileLifecycle()
@@ -4651,15 +4665,31 @@ final class ToggleView: NSView {
     @discardableResult
     private func ensureOriginalDockIcon(
         for target: QuickLaunchTarget,
-        preferredSourceURL: URL? = nil
+        preferredSourceURL: URL? = nil,
+        displayNameOverride: String? = nil
     ) -> DockPinResult? {
         guard let launcherURL = Self.ensureOriginalDockLauncher(
             for: target,
-            preferredSourceURL: preferredSourceURL
+            preferredSourceURL: preferredSourceURL,
+            displayNameOverride: displayNameOverride
         ) else {
             return nil
         }
         return Self.addLauncherToDock(launcherURL)
+    }
+
+    /// Durable per-target custom icon for the original launcher. Existence of the
+    /// file IS the "custom icon" intent (mirrors the profile `customIconURL`
+    /// design): `ensureOriginalDockLauncher` prefers it over the default badged
+    /// vendor icon, so a rebuild — gear Replace, a heal, or a fresh recreate during
+    /// profile generation — re-materializes the launcher with the chosen icon.
+    static func originalDockCustomIconURL(for target: QuickLaunchTarget) -> URL {
+        URL(
+            fileURLWithPath: NSHomeDirectory() + "/Library/Application Support/Klik PRO",
+            isDirectory: true
+        )
+        .appendingPathComponent("OriginalCustomIcons", isDirectory: true)
+        .appendingPathComponent(target.originalDockLauncherBundleIdentifier + ".icns", isDirectory: false)
     }
 
     /// Removes Klik PRO's badged original-app launcher: it unpins the tile (if the
@@ -4704,6 +4734,8 @@ final class ToggleView: NSView {
     private func createOriginalDockIcon(for target: QuickLaunchTarget) {
         let vendorName = originalVendorName(target)
         let preferredSourceURL = candidateBundleURL(for: target)
+        // Re-apply any persisted custom name so a Replace keeps the user's rename.
+        let customName = persistedConfig.originalDockCustomNames[target]
         // Confirm a replace on the main thread (NSAlert must run there) before the
         // slow work is dispatched off the UI thread.
         let replaceExisting: Bool
@@ -4731,8 +4763,17 @@ final class ToggleView: NSView {
             }
             let outcome = self.ensureOriginalDockIcon(
                 for: target,
-                preferredSourceURL: preferredSourceURL
+                preferredSourceURL: preferredSourceURL,
+                displayNameOverride: customName
             )
+            // addLauncherToDock labels the tile from the fixed filename, so restore
+            // the custom name on the freshly pinned tile.
+            if let customName,
+               outcome == .some(.added) || outcome == .some(.alreadyPresent) {
+                _ = Self.setOriginalDockTileLabel(
+                    at: target.originalDockLauncherPath, label: customName
+                )
+            }
             DispatchQueue.main.async {
                 switch outcome {
                 case .some(.added), .some(.alreadyPresent):
@@ -4812,6 +4853,263 @@ final class ToggleView: NSView {
                 self.appProfilesView.setOriginalMenuBarPinned(self.originalMenuBarPinStates())
                 self.needsDisplay = true
             }
+        }
+    }
+
+    /// Single-field rename prompt for an original app's Dock tile. Unlike
+    /// `requestDualAppNameOptions`, it does not dedupe against App Profile labels
+    /// (the original launcher is not an instance) and accepts any non-empty name.
+    private func requestOriginalDockName(vendorName: String, initialValue: String) -> String? {
+        let field = NSTextField(string: initialValue)
+        field.frame = NSRect(x: 0, y: 0, width: 320, height: 26)
+        field.selectText(nil)
+        let alert = NSAlert()
+        alert.messageText = "Rename \(vendorName)'s Dock icon"
+        alert.informativeText = "Only the Dock tile name changes. The native \(vendorName) "
+            + "app is never modified."
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            showAppProfileAlert(
+                title: "Enter a name",
+                message: "The Dock icon name cannot be empty."
+            )
+            return nil
+        }
+        return name
+    }
+
+    /// Gear → "Rename Dock Icon…" on a generator card. Renames the original app's
+    /// Klik PRO Dock tile (its visible label and the launcher bundle's name) and
+    /// persists the choice so a later Replace, heal, or recreate keeps it. Choosing
+    /// the vendor name again clears the override. The native vendor app and its own
+    /// Dock tile are never touched.
+    private func renameOriginalDockIcon(for target: QuickLaunchTarget) {
+        let vendorName = originalVendorName(target)
+        guard originalDockIconIsPinned(for: target) else {
+            showAppProfileAlert(
+                title: "Create the Dock icon first",
+                message: "Add Klik PRO's Dock icon for \(vendorName) before renaming it."
+            )
+            return
+        }
+        let currentName = persistedConfig.originalDockCustomNames[target] ?? vendorName
+        guard let newName = requestOriginalDockName(
+            vendorName: vendorName, initialValue: currentName
+        ) else { return }
+        // Persists config, so it takes the same guards as the menu-bar toggle / delete.
+        guard !saveInProgress, !appProfileLifecycleInProgress else {
+            showAppProfileAlert(
+                title: "Please wait",
+                message: "Finish the current Save or App Profile change before renaming this Dock icon."
+            )
+            return
+        }
+        guard !hasUnsavedConfigurationChanges else {
+            showAppProfileAlert(
+                title: "Save current changes first",
+                message: "Save or restore the current mapping changes before renaming this Dock icon."
+            )
+            return
+        }
+        appProfileLifecycleInProgress = true
+        saveButton.isEnabled = false
+        var updated = persistedConfig
+        if newName == vendorName {
+            updated.originalDockCustomNames[target] = nil
+        } else {
+            updated.originalDockCustomNames[target] = newName
+        }
+        let previous = persistedConfig
+        let preferredSourceURL = candidateBundleURL(for: target)
+        // Rebuild the bundle (delete + recreate) so its CFBundleName picks up the new
+        // name via the builder's override, then relabel the pinned tile — the launcher
+        // path is fixed, so only the label needs the same-path rewrite.
+        appProfileQueue.async { [weak self] in
+            guard let self else { return }
+            let configSaved = KlikProConfigStore.save(updated)
+            self.removeOriginalDockIcon(for: target)
+            let outcome = self.ensureOriginalDockIcon(
+                for: target,
+                preferredSourceURL: preferredSourceURL,
+                displayNameOverride: newName
+            )
+            let labelResult = Self.setOriginalDockTileLabel(
+                at: target.originalDockLauncherPath, label: newName
+            )
+            let pinned = outcome == .some(.added) || outcome == .some(.alreadyPresent)
+            DispatchQueue.main.async {
+                self.appProfileLifecycleInProgress = false
+                self.saveButton.isEnabled = !self.saveInProgress
+                if configSaved {
+                    self.config = updated
+                    self.persistedConfig = updated
+                } else {
+                    self.config = previous
+                    self.persistedConfig = previous
+                }
+                self.saveStatusMessage = (pinned && configSaved && labelResult != .failed)
+                    ? "Renamed \(vendorName)'s Dock icon to \(newName)."
+                    : "Could not fully rename \(vendorName)'s Dock icon."
+                self.appProfilesView.setOriginalDockPinned(self.originalDockPinStates())
+                self.needsDisplay = true
+            }
+        }
+    }
+
+    /// Gear → "Change Icon…" on a generator card. Reuses the profile Change Icon
+    /// picker (tint / badge / custom PNG-ICO / reset) against the original app's own
+    /// icon, persists the chosen `.icns` so a later Replace/heal/recreate keeps it,
+    /// then re-materializes the launcher. The native vendor app is never modified.
+    private func changeOriginalDockIcon(for target: QuickLaunchTarget) {
+        let vendorName = originalVendorName(target)
+        guard originalDockIconIsPinned(for: target) else {
+            showAppProfileAlert(
+                title: "Create the Dock icon first",
+                message: "Add Klik PRO's Dock icon for \(vendorName) before changing its icon."
+            )
+            return
+        }
+        guard !saveInProgress, !appProfileLifecycleInProgress else {
+            showAppProfileAlert(
+                title: "Please wait",
+                message: "Finish the current Save or App Profile change before changing this icon."
+            )
+            return
+        }
+        let sourceBundleURL = candidateBundleURL(for: target)
+            ?? URL(fileURLWithPath: target.standardApplicationPath, isDirectory: true)
+        let panel = ChangeIconPanelView(
+            sourceBundleURL: sourceBundleURL,
+            fallbackImage: NSWorkspace.shared.icon(forFile: target.originalDockLauncherPath),
+            defaultBadgeCharacter: String(vendorName.prefix(1))
+        )
+        let alert = NSAlert()
+        alert.messageText = "Change \(vendorName)'s Dock icon"
+        alert.informativeText = "The native \(vendorName) app is never modified."
+        alert.accessoryView = panel
+        alert.addButton(withTitle: "Apply")
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Reset to App Icon")
+        let response = alert.runModal()
+        let edit: AppProfileManager.IconEdit
+        switch response {
+        case .alertFirstButtonReturn:
+            guard let chosen = panel.currentEdit else {
+                showAppProfileAlert(
+                    title: "No image chosen",
+                    message: "Choose a PNG or ICO file, or pick Tint or Badge, before applying."
+                )
+                return
+            }
+            edit = chosen
+        case .alertThirdButtonReturn:
+            edit = .reset
+        default:
+            return
+        }
+
+        appProfileLifecycleInProgress = true
+        saveButton.isEnabled = false
+        let customName = persistedConfig.originalDockCustomNames[target]
+        let preferredSourceURL = candidateBundleURL(for: target)
+        let customIconURL = Self.originalDockCustomIconURL(for: target)
+        appProfileQueue.async { [weak self] in
+            guard let self else { return }
+            var applyError: String?
+            do {
+                switch edit {
+                case .reset:
+                    // Drop the persisted custom icon so the rebuild falls back to the
+                    // default badged vendor icon.
+                    if FileManager.default.fileExists(atPath: customIconURL.path) {
+                        try FileManager.default.removeItem(at: customIconURL)
+                    }
+                default:
+                    let icnsData = try Self.renderOriginalIcon(
+                        edit: edit, sourceBundleURL: sourceBundleURL
+                    )
+                    try FileManager.default.createDirectory(
+                        at: customIconURL.deletingLastPathComponent(),
+                        withIntermediateDirectories: true,
+                        attributes: [.posixPermissions: 0o700]
+                    )
+                    try icnsData.write(to: customIconURL, options: .atomic)
+                }
+            } catch LauncherGeneratorError.iconImageInvalid {
+                applyError = "That image is too small. Choose a PNG or ICO at least "
+                    + "\(LauncherGenerator.customIconMinimumPixelSize) px on its shortest side."
+            } catch {
+                applyError = "Klik PRO could not update \(vendorName)'s Dock icon."
+            }
+            if let applyError {
+                DispatchQueue.main.async {
+                    self.appProfileLifecycleInProgress = false
+                    self.saveButton.isEnabled = !self.saveInProgress
+                    self.showAppProfileAlert(title: "Icon was not changed", message: applyError)
+                }
+                return
+            }
+            // Rebuild so the launcher picks up the new (or reset) icon, then restore
+            // any custom-name label the fresh pin would have reset to the filename.
+            self.removeOriginalDockIcon(for: target)
+            let outcome = self.ensureOriginalDockIcon(
+                for: target,
+                preferredSourceURL: preferredSourceURL,
+                displayNameOverride: customName
+            )
+            let pinned = outcome == .some(.added) || outcome == .some(.alreadyPresent)
+            if let customName, pinned {
+                _ = Self.setOriginalDockTileLabel(
+                    at: target.originalDockLauncherPath, label: customName
+                )
+            }
+            let isReset: Bool
+            if case .reset = edit { isReset = true } else { isReset = false }
+            DispatchQueue.main.async {
+                self.appProfileLifecycleInProgress = false
+                self.saveButton.isEnabled = !self.saveInProgress
+                self.saveStatusMessage = pinned
+                    ? (isReset
+                        ? "\(vendorName)'s Dock icon reset to the app icon."
+                        : "Updated \(vendorName)'s Dock icon.")
+                    : "Could not update \(vendorName)'s Dock icon."
+                self.appProfilesView.setOriginalDockPinned(self.originalDockPinStates())
+                self.needsDisplay = true
+            }
+        }
+    }
+
+    /// Renders one icon edit into `.icns` data for the original launcher, reusing the
+    /// shared composition helpers so an original tinted/badged/custom icon looks
+    /// identical to the same edit on a managed profile. `.reset` is handled by the
+    /// caller (which deletes the persisted icon), so it never reaches here.
+    private static func renderOriginalIcon(
+        edit: AppProfileManager.IconEdit,
+        sourceBundleURL: URL
+    ) throws -> Data {
+        switch edit {
+        case .image(let imageURL):
+            return try LauncherGenerator.makeShapedICNSData(fromImageAt: imageURL)
+        case .tint(let color):
+            guard let source = LauncherGenerator().sourceIconImage(sourceBundleURL: sourceBundleURL),
+                  let tinted = LauncherGenerator.tintedIcon(source, color: color.iconColor) else {
+                throw LauncherGeneratorError.iconImageInvalid
+            }
+            return try LauncherGenerator.makeICNSData(from: tinted)
+        case .badge(let color, let character):
+            guard let source = LauncherGenerator().sourceIconImage(sourceBundleURL: sourceBundleURL),
+                  let badged = LauncherGenerator.badgedIcon(
+                    source, color: color.iconColor, letter: character
+                  ) else {
+                throw LauncherGeneratorError.iconImageInvalid
+            }
+            return try LauncherGenerator.makeICNSData(from: badged)
+        case .reset:
+            throw LauncherGeneratorError.iconImageInvalid
         }
     }
 
@@ -5114,7 +5412,8 @@ final class ToggleView: NSView {
 
     private static func ensureOriginalDockLauncher(
         for target: QuickLaunchTarget,
-        preferredSourceURL: URL?
+        preferredSourceURL: URL?,
+        displayNameOverride: String? = nil
     ) -> URL? {
         guard let sourceURL = originalDockIconSourceURL(for: target, preferred: preferredSourceURL),
               let runnerURL = Bundle.main.url(
@@ -5184,19 +5483,30 @@ final class ToggleView: NSView {
             let iconDestination = resourcesURL.appendingPathComponent(
                 "AppIcon.icns", isDirectory: false
             )
-            // Badge the vendor icon (green disc + white star, top-left) so the
-            // original-app Dock tile is distinguishable from the native vendor tile
-            // and from profile tiles. Fall back to the plain vendor icon if the
-            // badge pipeline fails, so the tile never ends up generic.
-            let copiedIcon = writeBadgedOriginalIcon(from: sourceURL, to: iconDestination)
-                || copyDeclaredBundleIcon(from: sourceURL, to: iconDestination)
+            // A persisted custom icon (user-chosen via gear → "Change Icon…") wins
+            // over the default, so Replace/heal/recreate keep the chosen look.
+            // Otherwise badge the vendor icon (green disc + white star, top-left) so
+            // the original-app Dock tile is distinguishable from the native vendor
+            // tile and profile tiles, falling back to the plain vendor icon if the
+            // badge pipeline fails so the tile never ends up generic.
+            var copiedIcon = false
+            let customIconURL = originalDockCustomIconURL(for: target)
+            if fileManager.fileExists(atPath: customIconURL.path) {
+                copiedIcon = (try? fileManager.copyItem(at: customIconURL, to: iconDestination)) != nil
+            }
+            if !copiedIcon {
+                copiedIcon = writeBadgedOriginalIcon(from: sourceURL, to: iconDestination)
+                    || copyDeclaredBundleIcon(from: sourceURL, to: iconDestination)
+            }
+            let displayName = displayNameOverride
+                ?? sourceURL.deletingPathExtension().lastPathComponent
             var info: [String: Any] = [
                 "CFBundleDevelopmentRegion": "en",
-                "CFBundleDisplayName": sourceURL.deletingPathExtension().lastPathComponent,
+                "CFBundleDisplayName": displayName,
                 "CFBundleExecutable": "KlikProOriginalLauncher",
                 "CFBundleIdentifier": target.originalDockLauncherBundleIdentifier,
                 "CFBundleInfoDictionaryVersion": "6.0",
-                "CFBundleName": sourceURL.deletingPathExtension().lastPathComponent,
+                "CFBundleName": displayName,
                 "CFBundlePackageType": "APPL",
                 "CFBundleShortVersionString": "1.0",
                 "CFBundleVersion": "1",
@@ -5639,6 +5949,50 @@ final class ToggleView: NSView {
         return dockPersistentAppsContain(path: updatedPath) ? .updated : .failed
     }
 
+    /// Rewrites ONLY the `file-label` of the pinned Dock tile at `path`, matching
+    /// by the fixed bundle path. The original-app launcher's path never changes
+    /// (unlike a renamed managed profile), so `renameDockLauncherIfPresent` — which
+    /// early-returns on an unchanged path and rewrites `_CFURLString` — is the wrong
+    /// tool; this sets the visible name without moving the bundle. `addLauncherToDock`
+    /// derives the label from the filename, so this is what makes a custom original
+    /// name show in the Dock. No-op (returns `.notPresent`) when the tile is absent.
+    @discardableResult
+    private static func setOriginalDockTileLabel(
+        at path: String,
+        label: String
+    ) -> DockRenameResult {
+        let targetPath = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL.path
+        let appID = "com.apple.dock" as CFString
+        guard let rawEntries = CFPreferencesCopyAppValue(
+            "persistent-apps" as CFString,
+            appID
+        ) as? [[String: Any]] else {
+            return .notPresent
+        }
+        var entries = rawEntries
+        var found = false
+        for index in entries.indices {
+            guard var tileData = entries[index]["tile-data"] as? [String: Any],
+                  let fileData = tileData["file-data"] as? [String: Any],
+                  let storedPath = fileData["_CFURLString"] as? String,
+                  dockEntryFilePath(storedPath) == targetPath else {
+                continue
+            }
+            tileData["file-label"] = label
+            entries[index]["tile-data"] = tileData
+            found = true
+        }
+        guard found else { return .notPresent }
+        CFPreferencesSetAppValue(
+            "persistent-apps" as CFString,
+            entries as CFArray,
+            appID
+        )
+        guard CFPreferencesAppSynchronize(appID) else { return .failed }
+        _ = runProcess("/usr/bin/killall", ["Dock"])
+        return .updated
+    }
+
     /// Removes a removed managed launcher's pinned Dock tile, if the user pinned
     /// one, so a deleted profile does not leave a stale/broken Dock icon. Matches
     /// the same percent-encoded path logic as the rename rewrite. No-op when no
@@ -5846,7 +6200,8 @@ final class ToggleView: NSView {
             return
         }
         let panel = ChangeIconPanelView(
-            instance: instance,
+            sourceBundleURL: URL(fileURLWithPath: instance.source.bundleURL, isDirectory: true),
+            fallbackImage: NSWorkspace.shared.icon(forFile: instance.launcherPath),
             defaultBadgeCharacter: defaultBadgeCharacter(for: instance)
         )
         let alert = NSAlert()

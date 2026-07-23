@@ -558,6 +558,13 @@ struct KlikProConfig: Codable, Equatable {
     // `AppProfileInstance.pinToMenuBar`. Additive and decode-tolerant: an older config
     // decodes to an empty set (no originals pinned), so this needs no schema bump.
     var menuBarPinnedOriginals: Set<QuickLaunchTarget>
+    // Custom Dock-tile names for the original vendor apps (gear → "Rename Dock
+    // Icon…"), keyed by target. Additive and decode-tolerant like
+    // `menuBarPinnedOriginals`: an older config decodes to an empty map (each
+    // original keeps its vendor name), so this needs no schema bump. The matching
+    // custom icon is persisted as a file under Application Support, so only the
+    // name lives in the config.
+    var originalDockCustomNames: [QuickLaunchTarget: String]
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, onboardingCompleted, showMenuBarIcon, showQuickLaunchMenuIcons
@@ -566,6 +573,7 @@ struct KlikProConfig: Codable, Equatable {
         case chatGPTHotkey, claudeHotkey, chatGPTMouseButton, claudeMouseButton
         case forwardButton, backButton, thumbWheel, instances
         case suppressedLegacyInstanceIDs, dataRoot, knownDataRoots, menuBarPinnedOriginals
+        case originalDockCustomNames
     }
 
     /// `showMenuBarIcon` was added in schema 6. Quick Launch side-button defaults were
@@ -642,6 +650,9 @@ struct KlikProConfig: Codable, Equatable {
         menuBarPinnedOriginals = try container.decodeIfPresent(
             Set<QuickLaunchTarget>.self, forKey: .menuBarPinnedOriginals
         ) ?? []
+        originalDockCustomNames = try container.decodeIfPresent(
+            [QuickLaunchTarget: String].self, forKey: .originalDockCustomNames
+        ) ?? [:]
         // Schema 11 → 12 is also additive. AppProfileInstance defaults missing
         // lifecycle fields to active/nil, so no profile is re-keyed or moved.
         if schemaVersion < 12 {
@@ -672,7 +683,8 @@ struct KlikProConfig: Codable, Equatable {
         suppressedLegacyInstanceIDs: Set<UUID> = [],
         dataRoot: String? = nil,
         knownDataRoots: [String] = [],
-        menuBarPinnedOriginals: Set<QuickLaunchTarget> = []
+        menuBarPinnedOriginals: Set<QuickLaunchTarget> = [],
+        originalDockCustomNames: [QuickLaunchTarget: String] = [:]
     ) {
         self.schemaVersion = schemaVersion
         self.onboardingCompleted = onboardingCompleted
@@ -694,6 +706,7 @@ struct KlikProConfig: Codable, Equatable {
         self.dataRoot = dataRoot
         self.knownDataRoots = knownDataRoots
         self.menuBarPinnedOriginals = menuBarPinnedOriginals
+        self.originalDockCustomNames = originalDockCustomNames
     }
 }
 
