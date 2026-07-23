@@ -3266,6 +3266,9 @@ final class ToggleView: NSView {
         appProfilesView.onDeleteOriginalDock = { [weak self] target in
             self?.deleteOriginalDockIcon(for: target)
         }
+        appProfilesView.onAddNativeOriginalDock = { [weak self] target in
+            self?.addNativeOriginalDockTile(for: target)
+        }
         appProfilesView.onRemoveNativeOriginalDock = { [weak self] target in
             self?.removeNativeOriginalDockTile(for: target)
         }
@@ -3303,6 +3306,7 @@ final class ToggleView: NSView {
             self.refreshSupportedAppCandidates(showLoading: true, force: true)
             self.appProfilesView.setInstances(self.persistedConfig.instances)
             self.appProfilesView.setOriginalDockPinned(self.originalDockPinStates())
+            self.appProfilesView.setOriginalDockCustomization(self.originalDockCustomizations())
             self.appProfilesView.setOriginalMenuBarPinned(self.originalMenuBarPinStates())
             self.refreshAppProfileHealth()
         }
@@ -3310,6 +3314,7 @@ final class ToggleView: NSView {
         // cards at startup. Skipped in preview renders, which must not read the Dock.
         if !previewRenderingIsActive {
             appProfilesView.setOriginalDockPinned(originalDockPinStates())
+            appProfilesView.setOriginalDockCustomization(originalDockCustomizations())
         }
         // Menu-bar pin state is persisted in config (not read from the Dock), so it is
         // safe to reflect on the cards even while rendering deterministic previews.
@@ -4488,13 +4493,24 @@ final class ToggleView: NSView {
             URL(fileURLWithPath: $0.standardApplicationPath)
                 .deletingPathExtension().lastPathComponent
         }
+        // Only force Klik PRO's Dock launcher when the user has NO working Dock entry
+        // to the native app — neither the native vendor tile nor Klik PRO's own
+        // launcher is present. If either is already in the Dock, skip the compulsory
+        // step and don't show the "always on" row at all.
+        let willForceOriginalDock: Bool = {
+            guard let vendor = vendorTarget else { return false }
+            let nativeTilePresent = Self.dockPersistentAppsContain(
+                path: candidate.app.bundleURL.standardizedFileURL.path
+            )
+            return !nativeTilePresent && !originalDockIconIsPinned(for: vendor)
+        }()
         guard let request = requestDualAppNameOptions(
             title: "Name your App Profile",
             informativeText: "This name appears under the generated icon. You can rename it later.",
             initialValue: proposedName,
             actionTitle: "Generate",
             allowDockOption: true,
-            forcedOriginalDockVendorName: vendorName
+            forcedOriginalDockVendorName: willForceOriginalDock ? vendorName : nil
         ) else { return }
         let requestedName = request.name
         guard beginAppProfileLifecycle() else {
@@ -4514,7 +4530,7 @@ final class ToggleView: NSView {
             // generation also backfills users who already have profiles but no
             // original icon yet.
             var originalDockOutcome: DockPinResult?
-            if let vendor = vendorTarget {
+            if willForceOriginalDock, let vendor = vendorTarget {
                 // Source the required Dock icon from the exact app this profile is
                 // built from, so an install outside /Applications (e.g. ~/Applications)
                 // no longer hard-blocks profile creation.
@@ -4963,6 +4979,7 @@ final class ToggleView: NSView {
                 var states = self.originalDockPinStates()
                 states[target] = pinned
                 self.appProfilesView.setOriginalDockPinned(states)
+                self.appProfilesView.setOriginalDockCustomization(self.originalDockCustomizations())
                 self.needsDisplay = true
             }
         }
@@ -5103,6 +5120,7 @@ final class ToggleView: NSView {
                 var states = self.originalDockPinStates()
                 states[target] = pinned
                 self.appProfilesView.setOriginalDockPinned(states)
+                self.appProfilesView.setOriginalDockCustomization(self.originalDockCustomizations())
                 self.needsDisplay = true
             }
         }
@@ -5165,6 +5183,38 @@ final class ToggleView: NSView {
     /// Offered only once Klik PRO's own Dock icon exists (so a working Dock launcher
     /// remains) and confirmed first because it changes the user's Dock — it is
     /// reversible by dragging the app back from Launchpad/Finder.
+    /// Gear → "Add Native App Dock Icon" on a generator card. Restores the native
+    /// vendor app's own Dock tile (the counterpart to Remove Native App Dock Icon).
+    /// A no-op with feedback if it's already present. The native app is never modified.
+    private func addNativeOriginalDockTile(for target: QuickLaunchTarget) {
+        let vendorName = originalVendorName(target)
+        let nativeURL = candidateBundleURL(for: target)
+            ?? URL(fileURLWithPath: target.standardApplicationPath, isDirectory: true)
+        guard FileManager.default.fileExists(atPath: nativeURL.path) else {
+            showAppProfileAlert(
+                title: "\(vendorName) isn't installed",
+                message: "Install \(vendorName) before adding its native Dock icon."
+            )
+            return
+        }
+        // Touches the Dock plist and runs `killall Dock`; keep it off the UI thread.
+        appProfileQueue.async { [weak self] in
+            guard let self else { return }
+            let result = Self.addLauncherToDock(nativeURL)
+            DispatchQueue.main.async {
+                switch result {
+                case .added:
+                    self.saveStatusMessage = "Added \(vendorName)'s native Dock icon."
+                case .alreadyPresent:
+                    self.saveStatusMessage = "\(vendorName)'s native Dock icon is already in the Dock."
+                default:
+                    self.saveStatusMessage = "Could not add \(vendorName)'s native Dock icon."
+                }
+                self.needsDisplay = true
+            }
+        }
+    }
+
     private func removeNativeOriginalDockTile(for target: QuickLaunchTarget) {
         let vendorName = originalVendorName(target)
         guard originalDockIconIsPinned(for: target) else {
@@ -5201,6 +5251,23 @@ final class ToggleView: NSView {
         var states: [QuickLaunchTarget: Bool] = [:]
         for target in QuickLaunchTarget.allCases {
             states[target] = originalDockIconIsPinned(for: target)
+        }
+        return states
+    }
+
+    /// Persisted custom name/icon for each native Dock launcher, so the generator card
+    /// tile reflects a Rename / Change Icon. The custom icon is shown only when the user
+    /// actually set one (the persisted `.icns` exists); otherwise nil → vendor icon.
+    private func originalDockCustomizations() -> [QuickLaunchTarget: AppProfilesContentView.DockCustomization] {
+        var states: [QuickLaunchTarget: AppProfilesContentView.DockCustomization] = [:]
+        for target in QuickLaunchTarget.allCases {
+            let name = persistedConfig.originalDockCustomNames[target]
+            var icon: NSImage?
+            let customIconURL = Self.originalDockCustomIconURL(for: target)
+            if FileManager.default.fileExists(atPath: customIconURL.path) {
+                icon = NSImage(contentsOf: customIconURL)
+            }
+            states[target] = AppProfilesContentView.DockCustomization(name: name, icon: icon)
         }
         return states
     }

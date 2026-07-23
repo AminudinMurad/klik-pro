@@ -261,6 +261,11 @@ private final class DualAppGeneratorCard: NSView {
     private(set) var candidate: AppProfileCandidate?
     private var dockPinned = false
     private var menuBarPinned = false
+    // Persisted custom name/icon for the native Dock launcher (set via the gear's
+    // Rename / Change Icon). When present, the card tile reflects them so it matches
+    // the Dock; nil falls back to the vendor app's own name/icon.
+    private var customDockName: String?
+    private var customDockIcon: NSImage?
     let bundleIdentifier: String
     let fallbackName: String
     var onGenerate: ((AppProfileCandidate) -> Void)?
@@ -271,6 +276,7 @@ private final class DualAppGeneratorCard: NSView {
     var onChangeIconDock: (() -> Void)?
     var onResetIconDock: (() -> Void)?
     var onDeleteDock: (() -> Void)?
+    var onAddNativeDock: (() -> Void)?
     var onRemoveNativeDock: (() -> Void)?
     var onToggleMenuBar: (() -> Void)?
 
@@ -443,6 +449,19 @@ private final class DualAppGeneratorCard: NSView {
         delete.image = NSImage(systemSymbolName: "star.slash", accessibilityDescription: nil)
         menu.addItem(delete)
         menu.addItem(.separator())
+        // Adds the NATIVE app's own Dock tile back. Since forced creation on profile
+        // generation is now skipped when a Dock entry already exists, this is the
+        // manual way to restore the native tile. Enabled whenever the app is present;
+        // a no-op with feedback if the tile is already in the Dock.
+        let addNative = NSMenuItem(
+            title: "Add Native App Dock Icon",
+            action: #selector(menuAddNativeDock), keyEquivalent: ""
+        )
+        addNative.target = self
+        addNative.isEnabled = candidate != nil
+        addNative.image = NSImage(systemSymbolName: "dock.rectangle", accessibilityDescription: nil)
+        addNative.toolTip = "Adds the native app's own Dock tile back."
+        menu.addItem(addNative)
         // Removes the NATIVE app's own Dock tile — not the app, which stays installed
         // and launchable from Launchpad/Finder. Enabled only once Klik PRO's own Dock
         // icon exists (dockPinned), so a working Dock launcher remains afterward.
@@ -466,6 +485,7 @@ private final class DualAppGeneratorCard: NSView {
     @objc private func menuChangeIconDock() { onChangeIconDock?() }
     @objc private func menuResetIconDock() { onResetIconDock?() }
     @objc private func menuDeleteDock() { onDeleteDock?() }
+    @objc private func menuAddNativeDock() { onAddNativeDock?() }
     @objc private func menuRemoveNativeDock() { onRemoveNativeDock?() }
 
     func update(candidate: AppProfileCandidate?, alternativesAvailable: Bool) {
@@ -485,8 +505,31 @@ private final class DualAppGeneratorCard: NSView {
             openButton.isEnabled = false
         }
         assignButton.isEnabled = candidate != nil
+        applyDockCustomizationOverlay()
         updateDockGear()
         _ = alternativesAvailable
+    }
+
+    /// Reflects the native Dock launcher's persisted custom name/icon on the card tile,
+    /// or falls back to the vendor app's own name/icon when none is set. Only meaningful
+    /// once the app is installed.
+    private func applyDockCustomizationOverlay() {
+        guard let candidate else { return }
+        if let customDockName, !customDockName.isEmpty {
+            nameField.stringValue = customDockName
+        } else {
+            nameField.stringValue = candidate.app.displayName
+        }
+        iconView.image = customDockIcon
+            ?? NSWorkspace.shared.icon(forFile: candidate.app.bundleURL.path)
+    }
+
+    /// Pushed from the controller whenever the native launcher's persisted custom
+    /// name/icon may have changed (rename, change icon, reset, refresh, startup).
+    func setDockCustomization(name: String?, icon: NSImage?) {
+        customDockName = name
+        customDockIcon = icon
+        applyDockCustomizationOverlay()
     }
 
     func updateAssignment(_ button: QuickLaunchMouseButton?) {
@@ -1132,6 +1175,7 @@ final class AppProfilesContentView: NSView {
     var onChangeOriginalDockIcon: ((QuickLaunchTarget) -> Void)?
     var onResetOriginalDockIcon: ((QuickLaunchTarget) -> Void)?
     var onDeleteOriginalDock: ((QuickLaunchTarget) -> Void)?
+    var onAddNativeOriginalDock: ((QuickLaunchTarget) -> Void)?
     var onRemoveNativeOriginalDock: ((QuickLaunchTarget) -> Void)?
     var onToggleOriginalMenuBar: ((QuickLaunchTarget) -> Void)?
     var onOpen: ((AppProfileInstance) -> Void)?
@@ -1231,6 +1275,8 @@ final class AppProfilesContentView: NSView {
         claudeCard.onResetIconDock = { [weak self] in self?.onResetOriginalDockIcon?(.claude) }
         chatGPTCard.onDeleteDock = { [weak self] in self?.onDeleteOriginalDock?(.chatGPT) }
         claudeCard.onDeleteDock = { [weak self] in self?.onDeleteOriginalDock?(.claude) }
+        chatGPTCard.onAddNativeDock = { [weak self] in self?.onAddNativeOriginalDock?(.chatGPT) }
+        claudeCard.onAddNativeDock = { [weak self] in self?.onAddNativeOriginalDock?(.claude) }
         chatGPTCard.onRemoveNativeDock = { [weak self] in self?.onRemoveNativeOriginalDock?(.chatGPT) }
         claudeCard.onRemoveNativeDock = { [weak self] in self?.onRemoveNativeOriginalDock?(.claude) }
         chatGPTCard.onToggleMenuBar = { [weak self] in self?.onToggleOriginalMenuBar?(.chatGPT) }
@@ -1253,6 +1299,22 @@ final class AppProfilesContentView: NSView {
     func setOriginalDockPinned(_ states: [QuickLaunchTarget: Bool]) {
         chatGPTCard.setDockPinned(states[.chatGPT] ?? false)
         claudeCard.setDockPinned(states[.claude] ?? false)
+    }
+
+    /// A native Dock launcher's persisted custom name/icon, for the generator card tile.
+    struct DockCustomization {
+        let name: String?
+        let icon: NSImage?
+    }
+
+    /// Reflects each native launcher's persisted custom name/icon on its card.
+    func setOriginalDockCustomization(_ states: [QuickLaunchTarget: DockCustomization]) {
+        chatGPTCard.setDockCustomization(
+            name: states[.chatGPT]?.name, icon: states[.chatGPT]?.icon
+        )
+        claudeCard.setDockCustomization(
+            name: states[.claude]?.name, icon: states[.claude]?.icon
+        )
     }
 
     /// Reflects the persisted menu-bar pin state of each original app on its card.
