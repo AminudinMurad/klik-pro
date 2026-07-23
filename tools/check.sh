@@ -617,7 +617,8 @@ grep -q 'showCloseButtonHoverPreview()' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'if closeButtonHovered' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'let settingsButton = IconActionButton(' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'private let appProfilesView: AppProfilesContentView' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'private let appProfilesTabRect' "$ROOT/Sources/KlikProApp.swift"
+# Tab rects are recomputed each draw for the centered pill bar, so they are vars.
+grep -q 'private var appProfilesTabRect' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'refreshSupportedAppCandidates()' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'appProfileManager.supportedCandidates()' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'func supportedCandidates(searchRoots:' \
