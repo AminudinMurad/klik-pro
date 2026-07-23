@@ -3293,6 +3293,9 @@ final class ToggleView: NSView {
         appProfilesView.onChangeIcon = { [weak self] instance in
             self?.changeAppProfileIcon(instance)
         }
+        appProfilesView.onAddToDock = { [weak self] instance in
+            self?.addAppProfileDockIcon(instance)
+        }
         appProfilesView.onChangeApp = { [weak self] _ in
             self?.showAppProfileAlert(
                 title: "No other supported app installed",
@@ -4531,24 +4534,28 @@ final class ToggleView: NSView {
             // original icon yet.
             var originalDockOutcome: DockPinResult?
             if willForceOriginalDock, let vendor = vendorTarget {
-                // Source the required Dock icon from the exact app this profile is
-                // built from, so an install outside /Applications (e.g. ~/Applications)
-                // no longer hard-blocks profile creation.
-                let outcome = self.ensureOriginalDockIcon(
+                // Build the required launcher bundle first (hard gate). Source it from
+                // the exact app this profile is built from, so an install outside
+                // /Applications (e.g. ~/Applications) no longer hard-blocks creation.
+                let launcherURL = Self.ensureOriginalDockLauncher(
                     for: vendor,
                     preferredSourceURL: candidate.app.bundleURL,
                     displayNameOverride: currentConfig.originalDockCustomNames[vendor]
                 )
-                switch outcome {
-                case .some(.added), .some(.alreadyPresent):
-                    originalDockOutcome = outcome
-                    // Keep the Dock tile label in sync with a persisted custom name
-                    // (addLauncherToDock derives file-label from the fixed filename).
-                    if let customName = currentConfig.originalDockCustomNames[vendor] {
-                        _ = Self.setOriginalDockTileLabel(
-                            at: vendor.originalDockLauncherPath, label: customName
-                        )
-                    }
+                // Append the tile carrying its custom-name label up front, but do NOT
+                // relaunch the Dock yet — the profile tile is appended below and both
+                // are committed with a single `killall Dock`, so the relaunch from an
+                // earlier add can't clobber the later `-array-add` (the Case-2 bug).
+                let nativeAppend = launcherURL.map {
+                    Self.appendLauncherToDockPrefs(
+                        $0, label: currentConfig.originalDockCustomNames[vendor]
+                    )
+                }
+                switch nativeAppend {
+                case .some(.wrote):
+                    originalDockOutcome = .added
+                case .some(.alreadyPresent):
+                    originalDockOutcome = .alreadyPresent
                 default:
                     DispatchQueue.main.async {
                         self.finishAppProfileLifecycle()
@@ -4574,9 +4581,23 @@ final class ToggleView: NSView {
                     label: requestedName,
                     config: currentConfig
                 )
-                let dockResult = request.addLauncherToDock
-                    ? Self.addLauncherToDock(URL(fileURLWithPath: result.instance.launcherPath, isDirectory: true))
-                    : DockPinResult.notRequested
+                // Append the profile's own tile too (still no relaunch), then commit ALL
+                // Dock additions from this generation with a single `killall Dock`. Two
+                // separate relaunches race: the first would re-serialize its pre-add
+                // snapshot over the second `-array-add` and drop the profile tile.
+                var dockResult: DockPinResult = .notRequested
+                if request.addLauncherToDock {
+                    switch Self.appendLauncherToDockPrefs(
+                        URL(fileURLWithPath: result.instance.launcherPath, isDirectory: true)
+                    ) {
+                    case .wrote: dockResult = .added
+                    case .alreadyPresent: dockResult = .alreadyPresent
+                    case .failed: dockResult = .failed
+                    }
+                }
+                if originalDockOutcome == .added || dockResult == .added {
+                    _ = Self.runProcess("/usr/bin/killall", ["Dock"])
+                }
                 let applied = applySavedConfig()
                 DispatchQueue.main.async {
                     self.finishAppProfileLifecycle()
@@ -4655,6 +4676,13 @@ final class ToggleView: NSView {
     private enum DockPinResult: Equatable {
         case notRequested
         case added
+        case alreadyPresent
+        case failed
+    }
+
+    /// Result of writing a Dock persistent-apps entry WITHOUT relaunching the Dock.
+    private enum DockAppendResult: Equatable {
+        case wrote
         case alreadyPresent
         case failed
     }
@@ -5460,10 +5488,19 @@ final class ToggleView: NSView {
         )
     }
 
-    private static func addLauncherToDock(_ launcherURL: URL) -> DockPinResult {
+    /// Writes a persistent-apps entry for `launcherURL` into the Dock prefs WITHOUT
+    /// relaunching the Dock. Callers that add a single tile use `addLauncherToDock`
+    /// (which relaunches); callers adding several tiles in one operation append each
+    /// here and issue exactly ONE `killall Dock` afterward — otherwise the relaunch
+    /// from an earlier add re-serializes its pre-add snapshot and clobbers a later
+    /// `-array-add`. `label` overrides the tile's visible name (defaults to filename).
+    private static func appendLauncherToDockPrefs(
+        _ launcherURL: URL, label: String? = nil
+    ) -> DockAppendResult {
         let launcherPath = launcherURL.standardizedFileURL.path
         guard FileManager.default.fileExists(atPath: launcherPath) else { return .failed }
         if dockPersistentAppsContain(path: launcherPath) { return .alreadyPresent }
+        let tileLabel = label ?? launcherURL.deletingPathExtension().lastPathComponent
 
         let dockEntry = """
         <dict>
@@ -5477,7 +5514,7 @@ final class ToggleView: NSView {
               <integer>0</integer>
             </dict>
             <key>file-label</key>
-            <string>\(xmlEscaped(launcherURL.deletingPathExtension().lastPathComponent))</string>
+            <string>\(xmlEscaped(tileLabel))</string>
           </dict>
           <key>tile-type</key>
           <string>file-tile</string>
@@ -5489,8 +5526,20 @@ final class ToggleView: NSView {
         ]) == 0 else {
             return .failed
         }
-        _ = runProcess("/usr/bin/killall", ["Dock"])
-        return dockPersistentAppsContain(path: launcherPath) ? .added : .failed
+        return .wrote
+    }
+
+    private static func addLauncherToDock(_ launcherURL: URL) -> DockPinResult {
+        switch appendLauncherToDockPrefs(launcherURL) {
+        case .alreadyPresent:
+            return .alreadyPresent
+        case .failed:
+            return .failed
+        case .wrote:
+            _ = runProcess("/usr/bin/killall", ["Dock"])
+            return dockPersistentAppsContain(path: launcherURL.standardizedFileURL.path)
+                ? .added : .failed
+        }
     }
 
     /// Resolves the installed vendor `.app` to source the original-app Dock icon
@@ -6299,6 +6348,30 @@ final class ToggleView: NSView {
                 }
             } catch {
                 DispatchQueue.main.async { self.finishAppProfileLifecycle() }
+            }
+        }
+    }
+
+    /// Per-profile gear → "Add to Dock". Adds this profile's own launcher to the Dock
+    /// (e.g. if it wasn't added at generation, or was removed). Dialog-free; a no-op
+    /// with feedback if the tile is already present or the bundle is missing.
+    private func addAppProfileDockIcon(_ instance: AppProfileInstance) {
+        guard instance.launcherKind == .managed else { return }
+        let launcherURL = URL(fileURLWithPath: instance.launcherPath, isDirectory: true)
+        // Touches the Dock plist and runs `killall Dock`; keep it off the UI thread.
+        appProfileQueue.async { [weak self] in
+            guard let self else { return }
+            let result = Self.addLauncherToDock(launcherURL)
+            DispatchQueue.main.async {
+                switch result {
+                case .added:
+                    self.saveStatusMessage = "Added \(instance.label) to the Dock."
+                case .alreadyPresent:
+                    self.saveStatusMessage = "\(instance.label) is already in the Dock."
+                default:
+                    self.saveStatusMessage = "Could not add \(instance.label) to the Dock."
+                }
+                self.needsDisplay = true
             }
         }
     }

@@ -593,6 +593,7 @@ final class AppProfileInstanceRowView: NSView {
     var onRename: ((AppProfileInstance) -> Void)?
     var onRemove: ((AppProfileInstance) -> Void)?
     var onChangeIcon: ((AppProfileInstance) -> Void)?
+    var onAddToDock: ((AppProfileInstance) -> Void)?
 
     override var isFlipped: Bool { true }
 
@@ -725,6 +726,14 @@ final class AppProfileInstanceRowView: NSView {
         changeIcon.target = self
         changeIcon.image = NSImage(systemSymbolName: "photo", accessibilityDescription: nil)
         menu.addItem(changeIcon)
+        // Adds this profile's own launcher to the Dock (e.g. if it wasn't added at
+        // generation). Reuses the shared add path; a no-op with feedback if present.
+        let addToDock = NSMenuItem(
+            title: "Add to Dock", action: #selector(menuAddToDock), keyEquivalent: ""
+        )
+        addToDock.target = self
+        addToDock.image = NSImage(systemSymbolName: "dock.rectangle", accessibilityDescription: nil)
+        menu.addItem(addToDock)
         menu.addItem(.separator())
         let remove = NSMenuItem(
             title: "Remove from Klik PRO…", action: #selector(menuRemove), keyEquivalent: ""
@@ -738,6 +747,7 @@ final class AppProfileInstanceRowView: NSView {
 
     @objc private func menuRename() { onRename?(instance) }
     @objc private func menuChangeIcon() { onChangeIcon?(instance) }
+    @objc private func menuAddToDock() { onAddToDock?(instance) }
     @objc private func menuRemove() { onRemove?(instance) }
 
     required init?(coder: NSCoder) { nil }
@@ -1184,6 +1194,7 @@ final class AppProfilesContentView: NSView {
     var onRename: ((AppProfileInstance) -> Void)?
     var onRemove: ((AppProfileInstance) -> Void)?
     var onChangeIcon: ((AppProfileInstance) -> Void)?
+    var onAddToDock: ((AppProfileInstance) -> Void)?
     var onChangeApp: ((String) -> Void)?
     var onRefreshApps: (() -> Void)?
     var onInstancesChange: (([AppProfileInstance]) -> Void)?
@@ -1399,6 +1410,7 @@ final class AppProfilesContentView: NSView {
                 row.onRename = { [weak self] in self?.onRename?($0) }
                 row.onRemove = { [weak self] in self?.onRemove?($0) }
                 row.onChangeIcon = { [weak self] in self?.onChangeIcon?($0) }
+                row.onAddToDock = { [weak self] in self?.onAddToDock?($0) }
                 stackView.addArrangedSubview(row)
                 row.widthAnchor.constraint(equalToConstant: rowWidth).isActive = true
                 // Must match AppProfileInstanceRowView's rowHeight, or the card is
