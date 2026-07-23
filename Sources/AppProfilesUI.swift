@@ -269,6 +269,7 @@ private final class DualAppGeneratorCard: NSView {
     var onCreateDock: (() -> Void)?
     var onRenameDock: (() -> Void)?
     var onChangeIconDock: (() -> Void)?
+    var onResetIconDock: (() -> Void)?
     var onDeleteDock: (() -> Void)?
     var onRemoveNativeDock: (() -> Void)?
     var onToggleMenuBar: (() -> Void)?
@@ -421,6 +422,15 @@ private final class DualAppGeneratorCard: NSView {
         changeIcon.isEnabled = candidate != nil && dockPinned
         changeIcon.image = NSImage(systemSymbolName: "photo", accessibilityDescription: nil)
         menu.addItem(changeIcon)
+        // Resets the badged/tinted/custom icon straight to the default native icon,
+        // without opening the Change Icon dialog. Same gate as Rename/Change Icon.
+        let resetIcon = NSMenuItem(
+            title: "Reset to Native Icon", action: #selector(menuResetIconDock), keyEquivalent: ""
+        )
+        resetIcon.target = self
+        resetIcon.isEnabled = candidate != nil && dockPinned
+        resetIcon.image = NSImage(systemSymbolName: "arrow.uturn.backward", accessibilityDescription: nil)
+        menu.addItem(resetIcon)
         let delete = NSMenuItem(
             title: "Delete Dock Icon", action: #selector(menuDeleteDock), keyEquivalent: ""
         )
@@ -454,6 +464,7 @@ private final class DualAppGeneratorCard: NSView {
     @objc private func menuCreateDock() { onCreateDock?() }
     @objc private func menuRenameDock() { onRenameDock?() }
     @objc private func menuChangeIconDock() { onChangeIconDock?() }
+    @objc private func menuResetIconDock() { onResetIconDock?() }
     @objc private func menuDeleteDock() { onDeleteDock?() }
     @objc private func menuRemoveNativeDock() { onRemoveNativeDock?() }
 
@@ -1119,6 +1130,7 @@ final class AppProfilesContentView: NSView {
     var onCreateOriginalDock: ((QuickLaunchTarget) -> Void)?
     var onRenameOriginalDock: ((QuickLaunchTarget) -> Void)?
     var onChangeOriginalDockIcon: ((QuickLaunchTarget) -> Void)?
+    var onResetOriginalDockIcon: ((QuickLaunchTarget) -> Void)?
     var onDeleteOriginalDock: ((QuickLaunchTarget) -> Void)?
     var onRemoveNativeOriginalDock: ((QuickLaunchTarget) -> Void)?
     var onToggleOriginalMenuBar: ((QuickLaunchTarget) -> Void)?
@@ -1215,6 +1227,8 @@ final class AppProfilesContentView: NSView {
         claudeCard.onRenameDock = { [weak self] in self?.onRenameOriginalDock?(.claude) }
         chatGPTCard.onChangeIconDock = { [weak self] in self?.onChangeOriginalDockIcon?(.chatGPT) }
         claudeCard.onChangeIconDock = { [weak self] in self?.onChangeOriginalDockIcon?(.claude) }
+        chatGPTCard.onResetIconDock = { [weak self] in self?.onResetOriginalDockIcon?(.chatGPT) }
+        claudeCard.onResetIconDock = { [weak self] in self?.onResetOriginalDockIcon?(.claude) }
         chatGPTCard.onDeleteDock = { [weak self] in self?.onDeleteOriginalDock?(.chatGPT) }
         claudeCard.onDeleteDock = { [weak self] in self?.onDeleteOriginalDock?(.claude) }
         chatGPTCard.onRemoveNativeDock = { [weak self] in self?.onRemoveNativeOriginalDock?(.chatGPT) }

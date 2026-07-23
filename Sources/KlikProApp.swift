@@ -3260,6 +3260,9 @@ final class ToggleView: NSView {
         appProfilesView.onChangeOriginalDockIcon = { [weak self] target in
             self?.changeOriginalDockIcon(for: target)
         }
+        appProfilesView.onResetOriginalDockIcon = { [weak self] target in
+            self?.resetOriginalDockIcon(for: target)
+        }
         appProfilesView.onDeleteOriginalDock = { [weak self] target in
             self?.deleteOriginalDockIcon(for: target)
         }
@@ -4954,7 +4957,12 @@ final class ToggleView: NSView {
                 self.saveStatusMessage = (pinned && configSaved && labelResult != .failed)
                     ? "Renamed \(vendorName)'s Dock icon to \(newName)."
                     : "Could not fully rename \(vendorName)'s Dock icon."
-                self.appProfilesView.setOriginalDockPinned(self.originalDockPinStates())
+                // Trust the just-completed re-pin for the operated target rather than
+                // a `defaults read` taken while the Dock is still relaunching, which
+                // transiently reports the tile as absent and grays out the gear items.
+                var states = self.originalDockPinStates()
+                states[target] = pinned
+                self.appProfilesView.setOriginalDockPinned(states)
                 self.needsDisplay = true
             }
         }
@@ -4993,7 +5001,7 @@ final class ToggleView: NSView {
         alert.accessoryView = panel
         alert.addButton(withTitle: "Apply")
         alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Reset to App Icon")
+        alert.addButton(withTitle: "Reset to Native Icon")
         let response = alert.runModal()
         let edit: AppProfileManager.IconEdit
         switch response {
@@ -5012,6 +5020,19 @@ final class ToggleView: NSView {
             return
         }
 
+        applyOriginalDockIconEdit(edit, for: target)
+    }
+
+    /// Shared tail for original-app Dock icon edits: used by the Change Icon dialog
+    /// (Apply / Reset) and by the gear's dialog-free "Reset to Native Icon". Persists
+    /// or removes the custom `.icns`, rebuilds the launcher so it picks up the new (or
+    /// reset) icon, restores any custom-name label, and refreshes the card.
+    private func applyOriginalDockIconEdit(
+        _ edit: AppProfileManager.IconEdit, for target: QuickLaunchTarget
+    ) {
+        let vendorName = originalVendorName(target)
+        let sourceBundleURL = candidateBundleURL(for: target)
+            ?? URL(fileURLWithPath: target.standardApplicationPath, isDirectory: true)
         appProfileLifecycleInProgress = true
         saveButton.isEnabled = false
         let customName = persistedConfig.originalDockCustomNames[target]
@@ -5074,13 +5095,39 @@ final class ToggleView: NSView {
                 self.saveButton.isEnabled = !self.saveInProgress
                 self.saveStatusMessage = pinned
                     ? (isReset
-                        ? "\(vendorName)'s Dock icon reset to the app icon."
+                        ? "\(vendorName)'s Dock icon reset to the native icon."
                         : "Updated \(vendorName)'s Dock icon.")
                     : "Could not update \(vendorName)'s Dock icon."
-                self.appProfilesView.setOriginalDockPinned(self.originalDockPinStates())
+                // Trust the just-completed re-pin for the operated target rather than
+                // a Dock read taken mid-relaunch, which grays out the gear items.
+                var states = self.originalDockPinStates()
+                states[target] = pinned
+                self.appProfilesView.setOriginalDockPinned(states)
                 self.needsDisplay = true
             }
         }
+    }
+
+    /// Gear → "Reset to Native Icon" on a generator card. Resets the original app's
+    /// Klik PRO Dock icon to the default badged native icon directly, without opening
+    /// the Change Icon dialog. Reversible, so no confirmation is required.
+    private func resetOriginalDockIcon(for target: QuickLaunchTarget) {
+        let vendorName = originalVendorName(target)
+        guard originalDockIconIsPinned(for: target) else {
+            showAppProfileAlert(
+                title: "Create the Dock icon first",
+                message: "Add Klik PRO's Dock icon for \(vendorName) before resetting it."
+            )
+            return
+        }
+        guard !saveInProgress, !appProfileLifecycleInProgress else {
+            showAppProfileAlert(
+                title: "Please wait",
+                message: "Finish the current Save or App Profile change before resetting this icon."
+            )
+            return
+        }
+        applyOriginalDockIconEdit(.reset, for: target)
     }
 
     /// Renders one icon edit into `.icns` data for the original launcher, reusing the
@@ -5866,7 +5913,13 @@ final class ToggleView: NSView {
               ) else {
             return false
         }
-        return output.contains(encoded)
+        // Match the Dock's normalized form (percent-encoded file URL) OR the raw
+        // POSIX path that `addLauncherToDock` writes before the Dock relaunches and
+        // rewrites persistent-apps into its canonical form. Without the raw fallback
+        // a just-created tile reads as absent in the window right after `killall
+        // Dock`, firing a false "Dock icon was not created" alert even though the
+        // tile is present and working.
+        return output.contains(encoded) || output.contains(launcherPath)
     }
 
     /// Returns missing Dock tiles that point into Klik PRO's exact managed
