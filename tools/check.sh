@@ -692,7 +692,7 @@ grep -q 'systemSymbolName: "arrow.counterclockwise"' "$ROOT/Sources/KlikProApp.s
 grep -q 'Reset .* shortcut to default' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'recorder.setCombo(self.defaultCombo)' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'recordableCard     = NSRect(x: leftCardX' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'thumbWheelCard     = NSRect(x: leftCardX' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'thumbWheelCard = NSRect(x: leftX' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'actionPicker.addItems(withTitles: \["Shortcut", "Open App"\])' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'func setDualAppMapping(' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'target: LaunchAssignmentTarget?' "$ROOT/Sources/KlikProApp.swift"

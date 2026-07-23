@@ -1523,12 +1523,6 @@ final class SettingsContentView: NSView {
     let gestureButtonRow: RecordableShortcutRowView
     let forwardRow: RecordableShortcutRowView
     let backRow: RecordableShortcutRowView
-    // Thumb wheel is a single row of one master switch and four browser options.
-    let thumbWheelToggle: ToggleSwitchView
-    let chromeCheck: CheckboxView
-    let braveCheck: CheckboxView
-    let firefoxCheck: CheckboxView
-    let safariCheck: CheckboxView
     // Special Feature card: master on/off toggle (applied by the combined helper) plus
     // the two hotkeys it gates. The hotkey rows have no per-row toggle — the master
     // toggle governs them — and each recorder is editable while its launch side is ready.
@@ -1596,7 +1590,6 @@ final class SettingsContentView: NSView {
     // two-column controls/profile layout underneath.
     static let deviceCard         = NSRect(x: 0, y: 0, width: rightCardX + rightCardW, height: 214)
     static let recordableCard     = NSRect(x: leftCardX, y: 232, width: cardW, height: 370)
-    static let thumbWheelCard     = NSRect(x: leftCardX, y: 618, width: cardW, height: 84)
     static let specialFeatureCard = NSRect(x: rightCardX, y: 232, width: rightCardW, height: 470)
 
     private static func previewAppIcon(for target: QuickLaunchTarget) -> NSImage {
@@ -1696,20 +1689,6 @@ final class SettingsContentView: NSView {
             $0.applyCompactTwoLineLayout()
         }
 
-        // LEFT card — thumb-wheel checkboxes, all in one row below mouse shortcuts.
-        thumbWheelToggle = ToggleSwitchView(isOn: config.thumbWheel.enabled, frame: NSRect(x: ix, y: 663, width: 44, height: 22))
-        thumbWheelToggle.setAccessibilityLabel("Tab Switching")
-        chromeCheck = CheckboxView(label: "Chrome", isOn: config.thumbWheel.chromeEnabled, frame: NSRect(x: ix + 102, y: 660, width: 65, height: 28))
-        braveCheck = CheckboxView(label: "Brave", isOn: config.thumbWheel.braveEnabled, frame: NSRect(x: ix + 179, y: 660, width: 57, height: 28))
-        firefoxCheck = CheckboxView(label: "Firefox", isOn: config.thumbWheel.firefoxEnabled, frame: NSRect(x: ix + 248, y: 660, width: 63, height: 28))
-        safariCheck = CheckboxView(label: "Safari", isOn: config.thumbWheel.safariEnabled, frame: NSRect(x: ix + 323, y: 660, width: 58, height: 28))
-        // Browser options are gated by the master "Tab Switching" toggle — greyed until it's on.
-        let tabSwitchingOn = config.thumbWheel.enabled
-        chromeCheck.isEnabled = tabSwitchingOn
-        braveCheck.isEnabled = tabSwitchingOn
-        firefoxCheck.isEnabled = tabSwitchingOn
-        safariCheck.isEnabled = tabSwitchingOn
-
         // RIGHT card — each launcher owns one clear column for its mouse-button
         // selector, followed by full-width hotkey rows below.
         specialFeatureToggleRow = ToggleOnlyRowView(
@@ -1799,7 +1778,6 @@ final class SettingsContentView: NSView {
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: 702))
 
         [middleButtonRow, gestureButtonRow, forwardRow, backRow,
-         thumbWheelToggle, chromeCheck, braveCheck, firefoxCheck, safariCheck,
          mappingProfilesView].forEach { addSubview($0) }
         setSpecialFeatureAvailability(specialFeatureAvailable, isOn: specialFeatureOn)
         updateQuickLaunchAssignments(config: config, featureActive: self.specialFeatureOn)
@@ -1864,17 +1842,11 @@ final class SettingsContentView: NSView {
 
         // Full-width mouse guide on top; controls and App Profiles list underneath.
         drawDeviceCard(in: SettingsContentView.deviceCard)
-        drawCard(SettingsContentView.thumbWheelCard)
         drawCard(SettingsContentView.recordableCard)
 
         // Section labels, inset into each card (16pt below the card's top edge)
         let ix = SettingsContentView.innerLeftX
         drawSectionLabel("Mouse Button Shortcuts", x: ix, y: SettingsContentView.recordableCard.minY + 16)
-        drawSectionLabel("Thumb Wheel Tab Switching", x: ix, y: SettingsContentView.thumbWheelCard.minY + 16)
-        // The section title already names the feature; keep the master label compact
-        // enough to leave comfortable spacing for all four browser options.
-        ("Enabled" as NSString).draw(at: NSPoint(x: ix + 50, y: 666), withAttributes: [
-            .font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.appTextPrimary])
     }
 
     // The two quick-launch app icons, right-aligned in the Special Feature card header.
@@ -2101,6 +2073,13 @@ final class PreferencesContentView: NSView {
     let autoUpdateRow: ToggleOnlyRowView
     let showMenuBarIconRow: ToggleOnlyRowView
     let caffeinateRow: ToggleOnlyRowView
+    // Thumb wheel tab switching, moved here from the Mappings tab: one master switch
+    // and four browser options.
+    let thumbWheelToggle: ToggleSwitchView
+    let chromeCheck: CheckboxView
+    let braveCheck: CheckboxView
+    let firefoxCheck: CheckboxView
+    let safariCheck: CheckboxView
     let openAccessibilityLink: URLLinkView
     let recheckAccessibilityLink: URLLinkView
     let resetAccessibilityLink: URLLinkView
@@ -2124,6 +2103,7 @@ final class PreferencesContentView: NSView {
     private static let permCard    = NSRect(x: rightX, y: 20, width: cardW, height: 132)
     private static let aboutCard   = NSRect(x: rightX, y: 168, width: cardW, height: 126)
     private static let supportCard = NSRect(x: rightX, y: 310, width: cardW, height: 92)
+    private static let thumbWheelCard = NSRect(x: leftX, y: 330, width: cardW, height: 84)
     private static let headingContentGap: CGFloat = 8
     private static let permissionRecheckXOffset: CGFloat = 168
 
@@ -2133,6 +2113,7 @@ final class PreferencesContentView: NSView {
         autoCheck: Bool,
         showMenuBarIcon: Bool,
         caffeinateMenu: Bool,
+        thumbWheel: ThumbWheelConfig,
         width: CGFloat
     ) {
         self.accessibilityGranted = accessibilityGranted
@@ -2151,6 +2132,19 @@ final class PreferencesContentView: NSView {
         caffeinateRow = ToggleOnlyRowView(title: "Caffeinate",
             detail: "Keep the Mac awake from the menu bar icon",
             isOn: caffeinateMenu, frame: NSRect(x: ix, y: 244, width: iw, height: 46))
+        // Thumb wheel tab switching — master switch plus four browser options, in a card
+        // below General (moved here from the Mappings tab).
+        thumbWheelToggle = ToggleSwitchView(isOn: thumbWheel.enabled, frame: NSRect(x: ix, y: 375, width: 44, height: 22))
+        thumbWheelToggle.setAccessibilityLabel("Tab Switching")
+        chromeCheck = CheckboxView(label: "Chrome", isOn: thumbWheel.chromeEnabled, frame: NSRect(x: ix + 102, y: 372, width: 65, height: 28))
+        braveCheck = CheckboxView(label: "Brave", isOn: thumbWheel.braveEnabled, frame: NSRect(x: ix + 179, y: 372, width: 57, height: 28))
+        firefoxCheck = CheckboxView(label: "Firefox", isOn: thumbWheel.firefoxEnabled, frame: NSRect(x: ix + 248, y: 372, width: 63, height: 28))
+        safariCheck = CheckboxView(label: "Safari", isOn: thumbWheel.safariEnabled, frame: NSRect(x: ix + 323, y: 372, width: 58, height: 28))
+        let tabSwitchingOn = thumbWheel.enabled
+        chromeCheck.isEnabled = tabSwitchingOn
+        braveCheck.isEnabled = tabSwitchingOn
+        firefoxCheck.isEnabled = tabSwitchingOn
+        safariCheck.isEnabled = tabSwitchingOn
         // The Caffeinate menu lives inside the main menu-bar icon's right-click menu, so
         // it stays tappable but prompts to turn the icon on first when it is hidden.
         accessibilityPermissionRow = PermissionStatusRowView(
@@ -2320,6 +2314,11 @@ final class PreferencesContentView: NSView {
             settingsSponsorsLink,
             settingsKofiLink,
             settingsPayPalLink,
+            thumbWheelToggle,
+            chromeCheck,
+            braveCheck,
+            firefoxCheck,
+            safariCheck,
         ].forEach { addSubview($0) }
     }
     required init?(coder: NSCoder) { nil }
@@ -2352,9 +2351,13 @@ final class PreferencesContentView: NSView {
         drawCard(PreferencesContentView.permCard)
         drawCard(PreferencesContentView.aboutCard)
         drawCard(PreferencesContentView.supportCard)
+        drawCard(PreferencesContentView.thumbWheelCard)
         let ix = PreferencesContentView.leftX + PreferencesContentView.pad
         let rxi = PreferencesContentView.rightX + PreferencesContentView.pad
         drawSectionLabel("General", x: ix, y: PreferencesContentView.generalCard.minY + 16)
+        drawSectionLabel("Thumb Wheel Tab Switching", x: ix, y: PreferencesContentView.thumbWheelCard.minY + 16)
+        ("Enabled" as NSString).draw(at: NSPoint(x: ix + 50, y: 378), withAttributes: [
+            .font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.appTextPrimary])
         drawSectionLabel("Permissions", x: rxi, y: PreferencesContentView.permCard.minY + 16)
         drawSectionLabel("About", x: rxi, y: PreferencesContentView.aboutCard.minY + 16)
         drawSectionLabel(
@@ -2912,6 +2915,7 @@ final class ToggleView: NSView {
             autoCheck: autoCheckEnabled,
             showMenuBarIcon: loadedConfig.showMenuBarIcon,
             caffeinateMenu: loadedConfig.caffeinateMenuEnabled,
+            thumbWheel: loadedConfig.thumbWheel,
             width: 872)
         appProfilesView = AppProfilesContentView(instances: loadedConfig.instances, width: 872)
         advancedView = AdvancedSettingsContentView(dataRoot: loadedConfig.dataRoot, width: 872)
@@ -3459,33 +3463,33 @@ final class ToggleView: NSView {
             self.configurationDidChange()
         }
 
-        contentView.thumbWheelToggle.onChange = { [weak self] on in
+        preferencesView.thumbWheelToggle.onChange = { [weak self] on in
             guard let self = self else { return }
             self.config.thumbWheel.enabled = on
             // Grey out / re-enable the per-browser options with the master toggle.
-            self.contentView.chromeCheck.isEnabled = on
-            self.contentView.braveCheck.isEnabled = on
-            self.contentView.firefoxCheck.isEnabled = on
-            self.contentView.safariCheck.isEnabled = on
-            self.window?.invalidateCursorRects(for: self.contentView.chromeCheck)
-            self.window?.invalidateCursorRects(for: self.contentView.braveCheck)
-            self.window?.invalidateCursorRects(for: self.contentView.firefoxCheck)
-            self.window?.invalidateCursorRects(for: self.contentView.safariCheck)
+            self.preferencesView.chromeCheck.isEnabled = on
+            self.preferencesView.braveCheck.isEnabled = on
+            self.preferencesView.firefoxCheck.isEnabled = on
+            self.preferencesView.safariCheck.isEnabled = on
+            self.window?.invalidateCursorRects(for: self.preferencesView.chromeCheck)
+            self.window?.invalidateCursorRects(for: self.preferencesView.braveCheck)
+            self.window?.invalidateCursorRects(for: self.preferencesView.firefoxCheck)
+            self.window?.invalidateCursorRects(for: self.preferencesView.safariCheck)
             self.configurationDidChange()
         }
-        contentView.chromeCheck.onChange = { [weak self] on in
+        preferencesView.chromeCheck.onChange = { [weak self] on in
             self?.config.thumbWheel.chromeEnabled = on
             self?.configurationDidChange()
         }
-        contentView.braveCheck.onChange = { [weak self] on in
+        preferencesView.braveCheck.onChange = { [weak self] on in
             self?.config.thumbWheel.braveEnabled = on
             self?.configurationDidChange()
         }
-        contentView.firefoxCheck.onChange = { [weak self] on in
+        preferencesView.firefoxCheck.onChange = { [weak self] on in
             self?.config.thumbWheel.firefoxEnabled = on
             self?.configurationDidChange()
         }
-        contentView.safariCheck.onChange = { [weak self] on in
+        preferencesView.safariCheck.onChange = { [weak self] on in
             self?.config.thumbWheel.safariEnabled = on
             self?.configurationDidChange()
         }
