@@ -123,6 +123,14 @@ if grep -q 'rewriteOriginalDockTileIfPresent\|repairOriginalDockLaunchersIfNeede
 fi
 grep -q 'configuration.createsNewApplicationInstance = true' \
   "$ROOT/Sources/Duplication/AppProfileRuntime.swift"
+# A mouse button / hotkey assigned to a NATIVE app resolves to its legacy mirror
+# row; launchOrFocus must route a recognized native target through launchOriginal
+# (which excludes managed --user-data-dir processes and forces a fresh original),
+# NOT plain launchExternal — otherwise the native "Open App" is hijacked onto an
+# already-running managed profile of the same vendor app.
+grep -A1 'if let target = instance.legacyQuickLaunchTarget {' \
+  "$ROOT/Sources/Duplication/AppProfileRuntime.swift" \
+  | grep -q 'launchOriginal(target, completion: completion)'
 # Reopen Apple events require a purpose string in both the main app and every
 # generated launcher. Existing launchers embed their own runner and metadata, so
 # healing must update both in place without touching profile data.
@@ -689,10 +697,21 @@ grep -q 'mappingProfilesView.onOpen' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'mappingProfilesView.setInstances' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'mappingProfilesView.setRuntimeHealth' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'mappingProfilesView.setStatus' "$ROOT/Sources/KlikProApp.swift"
+# Renaming / removing / creating a profile must refresh the Mappings "Open App"
+# callout pickers immediately, not just the compact list — the onInstancesChange
+# fan-out rebuilds both, so a new label or a deleted profile never lingers in the
+# dropdown until relaunch.
+grep -A12 'onInstancesChange = { \[weak self\] instances in' \
+  "$ROOT/Sources/KlikProApp.swift" | grep -q 'refreshQuickLaunchAssignments'
 grep -q 'systemSymbolName: "arrow.counterclockwise"' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'Reset .* shortcut to default' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'recorder.setCombo(self.defaultCombo)' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'recordableCard     = NSRect(x: leftCardX' "$ROOT/Sources/KlikProApp.swift"
+# The Mappings tab groups the mouse and all its button callouts in one bordered
+# "Mouse Profile" device card (drawDeviceCard), replacing the older stacked
+# recordable-shortcut card.
+grep -Eq 'static let deviceCard +=' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'drawDeviceCard(in: SettingsContentView.deviceCard)' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'drawSectionLabel("Mouse Profile"' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'thumbWheelCard = NSRect(x: leftX' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'actionPicker.addItems(withTitles: \["Shortcut", "Open App"\])' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'func setDualAppMapping(' "$ROOT/Sources/KlikProApp.swift"
