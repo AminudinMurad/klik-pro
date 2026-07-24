@@ -157,6 +157,92 @@ final class CheckboxView: NSView {
     }
 }
 
+// MARK: - ThumbWheelBrowsersButton
+
+/// Compact pull-down standing in for the four inline browser checkboxes: it shows a short
+/// summary ("All browsers", "Chrome, Safari", "No browsers") and drops a checkable list.
+/// Toggling an item flips its checkmark and fires `onToggle`; the owner writes the change to
+/// config and mirrors it onto the Settings-tab checkboxes so the two surfaces stay in sync.
+final class ThumbWheelBrowsersButton: NSPopUpButton {
+    enum Browser: String, CaseIterable {
+        case chrome, brave, firefox, safari
+        var label: String {
+            switch self {
+            case .chrome: return "Chrome"
+            case .brave: return "Brave"
+            case .firefox: return "Firefox"
+            case .safari: return "Safari"
+            }
+        }
+    }
+    var onToggle: ((Browser, Bool) -> Void)?
+    private var states: [Browser: Bool] = [
+        .chrome: false, .brave: false, .firefox: false, .safari: false,
+    ]
+
+    override init(frame: NSRect) {
+        super.init(frame: frame, pullsDown: true)
+        let popMenu = NSMenu()
+        popMenu.autoenablesItems = false
+        // Index 0 is the button's displayed label in pull-down mode; the rest are the
+        // checkable browser options.
+        popMenu.addItem(withTitle: "Browsers", action: nil, keyEquivalent: "")
+        for browser in Browser.allCases {
+            let item = NSMenuItem(
+                title: browser.label,
+                action: #selector(itemToggled(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = browser.rawValue
+            popMenu.addItem(item)
+        }
+        menu = popMenu
+        updateSummary()
+    }
+    required init?(coder: NSCoder) { nil }
+
+    /// Reflects the current config onto the checkmarks and the summary label. Does not fire
+    /// `onToggle`, so the owner can call it freely when syncing from the Settings tab.
+    func setStates(chrome: Bool, brave: Bool, firefox: Bool, safari: Bool) {
+        states = [.chrome: chrome, .brave: brave, .firefox: firefox, .safari: safari]
+        for browser in Browser.allCases {
+            menuItem(for: browser)?.state = (states[browser] ?? false) ? .on : .off
+        }
+        updateSummary()
+    }
+
+    private func menuItem(for browser: Browser) -> NSMenuItem? {
+        menu?.items.first { ($0.representedObject as? String) == browser.rawValue }
+    }
+
+    @objc private func itemToggled(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let browser = Browser(rawValue: raw) else { return }
+        let newValue = !(states[browser] ?? false)
+        states[browser] = newValue
+        sender.state = newValue ? .on : .off
+        updateSummary()
+        onToggle?(browser, newValue)
+    }
+
+    private func updateSummary() {
+        let on = Browser.allCases.filter { states[$0] == true }
+        let text: String
+        if on.isEmpty {
+            text = "No browsers"
+        } else if on.count == Browser.allCases.count {
+            text = "All browsers"
+        } else if on.count <= 2 {
+            text = on.map { $0.label }.joined(separator: ", ")
+        } else {
+            text = "\(on.count) browsers"
+        }
+        menu?.item(at: 0)?.title = text
+        synchronizeTitleAndSelectedItem()
+    }
+}
+
 // MARK: - ConflictBadgeView
 
 final class ConflictBadgeView: NSView {
@@ -632,7 +718,7 @@ final class RecordableShortcutRowView: NSView {
     private var appTargets: [(target: LaunchAssignmentTarget, label: String)] = []
     private var assignedAppTarget: LaunchAssignmentTarget?
     private var updatingActionControls = false
-    private var usesCompactTwoLineLayout = false
+    private var usesCompactStackedLayout = false
 
     init(
         title: String,
@@ -718,16 +804,26 @@ final class RecordableShortcutRowView: NSView {
     required init?(coder: NSCoder) { nil }
     override var isFlipped: Bool { true }
 
-    /// Fits the complete action picker, shortcut/app target, reset, and conflict state
-    /// inside the approved half-width Mappings column without removing behavior.
-    func applyCompactTwoLineLayout() {
-        usesCompactTwoLineLayout = true
+    /// Compact, narrow Mappings callout: title + toggle + conflict badge on line 1, then the
+    /// two dropdowns STACKED — action (Shortcut / Open App) on line 2 and the shortcut
+    /// recorder or app target on line 3. Stacking (instead of side by side) keeps the control
+    /// ~190pt wide so it tucks into a corner with clear margins around the centred mouse.
+    /// Each element sizes to its own content (the badge pill and popups hug their text with
+    /// only their own padding) rather than stretching to the column, without losing behavior.
+    func applyCompactStackedLayout() {
+        usesCompactStackedLayout = true
         toggle.frame = NSRect(x: 0, y: 6, width: 40, height: 22)
-        badge.frame = NSRect(x: 273, y: 6, width: 86, height: 22)
-        actionPicker.frame = NSRect(x: 48, y: 34, width: 120, height: 30)
-        recorder.frame = NSRect(x: 176, y: 33, width: 145, height: 32)
-        resetButton.frame = NSRect(x: 329, y: 34, width: 20, height: 28)
-        appPicker.frame = NSRect(x: 176, y: 34, width: 173, height: 30)
+        // Badge tucks in right after the title (no dead gap); its pill hugs its own text.
+        let titleFont = NSFont.systemFont(ofSize: 12, weight: .medium)
+        let titleWidth = (titleLabel as NSString).size(withAttributes: [.font: titleFont]).width
+        badge.frame = NSRect(x: 48 + titleWidth + 8, y: 6, width: 86, height: 22)
+        // Popups size to their content (keeping the control's built-in padding); the app
+        // picker is sized in setOpenAppOptions once its items exist.
+        actionPicker.sizeToFit()
+        actionPicker.frame = NSRect(x: 48, y: 32, width: min(actionPicker.frame.width, 176), height: 28)
+        recorder.frame = NSRect(x: 48, y: 62, width: 96, height: 30)
+        resetButton.frame = NSRect(x: 150, y: 63, width: 20, height: 28)
+        appPicker.frame = NSRect(x: 48, y: 62, width: 132, height: 28)
         needsDisplay = true
     }
 
@@ -740,6 +836,12 @@ final class RecordableShortcutRowView: NSView {
         assignedAppTarget = assignedTarget
         appPicker.removeAllItems()
         targets.forEach { appPicker.addItem(withTitle: $0.label) }
+        if usesCompactStackedLayout {
+            // Hug the widest app/profile name (with the popup's own padding), clamped so a
+            // very long name can't blow out the narrow callout.
+            appPicker.sizeToFit()
+            appPicker.frame = NSRect(x: 48, y: 62, width: min(max(appPicker.frame.width, 88), 176), height: 28)
+        }
         if let assignedTarget,
            let index = targets.firstIndex(where: { $0.target == assignedTarget }) {
             actionPicker.selectItem(at: 1)
@@ -817,7 +919,7 @@ final class RecordableShortcutRowView: NSView {
             .font: NSFont.systemFont(ofSize: 12, weight: .medium),
             .foregroundColor: NSColor.appTextPrimary
         ]
-        let titleY = usesCompactTwoLineLayout ? 9 : (bounds.height - 15) / 2
+        let titleY = usesCompactStackedLayout ? 9 : (bounds.height - 15) / 2
         titleLabel.draw(at: NSPoint(x: 48, y: titleY), withAttributes: attrs)
         guard linkedTarget != nil,
               let link = NSImage(systemSymbolName: "link", accessibilityDescription: nil) else { return }
@@ -1561,6 +1663,12 @@ final class SettingsContentView: NSView {
         frame: .zero
     )
     let mappingProfilesView: MappingAppProfilesView
+    // Thumb Wheel tab-switching callout (top-centre above the mouse): a master toggle plus a
+    // browsers pull-down that stays in sync with the Settings tab's four browser checkboxes.
+    let thumbWheelToggle: ToggleSwitchView
+    let thumbWheelBrowsers: ThumbWheelBrowsersButton
+    var onThumbWheelToggle: ((Bool) -> Void)?
+    var onThumbWheelBrowserChange: ((ThumbWheelBrowsersButton.Browser, Bool) -> Void)?
     // App icons shown in the Special Feature card, loaded at runtime from the user's
     // installed apps (never bundled — avoids shipping third-party logos). The preview
     // process uses generated letter tiles so fixtures do not depend on the host Mac.
@@ -1588,9 +1696,15 @@ final class SettingsContentView: NSView {
 
     // Mappings starts with a full-width device guide, then switches to the
     // two-column controls/profile layout underneath.
-    static let deviceCard         = NSRect(x: 0, y: 0, width: rightCardX + rightCardW, height: 214)
-    static let recordableCard     = NSRect(x: leftCardX, y: 232, width: cardW, height: 370)
-    static let specialFeatureCard = NSRect(x: rightCardX, y: 232, width: rightCardW, height: 470)
+    // The four mouse-button controls are anchored onto their callouts on the mouse guide
+    // (see deviceCallouts / drawDeviceCallouts), so the guide spans this whole band and the
+    // mouse itself is drawn small and centred, leaving the side margins for the controls.
+    // The mouse-guide + callouts row is prioritised (it's the point of this tab); the
+    // bottom two columns are a quick-access companion — full management lives on the
+    // App Profiles tab — so the guide gets the larger share of the height.
+    static let deviceCard         = NSRect(x: 0, y: 0, width: rightCardX + rightCardW, height: 360)
+    // Native apps + App Profiles, side by side across the full width, below the guide.
+    static let mappingBottomCard  = NSRect(x: 0, y: 376, width: rightCardX + rightCardW, height: 352)
 
     private static func previewAppIcon(for target: QuickLaunchTarget) -> NSImage {
         let label = target == .chatGPT ? "G" : "C"
@@ -1637,27 +1751,40 @@ final class SettingsContentView: NSView {
         claudeIcon = Self.installedAppIcon(.claude)
         self.specialFeatureOn = specialFeatureAvailable && specialFeatureOn
 
-        let ix = SettingsContentView.innerLeftX
         let rxi = SettingsContentView.innerRightX
         let iw = SettingsContentView.innerW
-        let mappingW = iw
 
-        // LEFT card — recordable mouse controls. Gesture is device-isolated through an
-        // MX Master 3-only F20 sentinel, so keyboard Command-Tab remains native for
-        // normal app switching. Four rows are spread evenly down the card.
+        // Mouse-button controls anchored to their callouts around a full-size mouse: the
+        // mouse stays big and centred, and the four controls sit in the card's CORNERS —
+        // Middle top-left / Back top-right / Forward bottom-left / Gesture bottom-right —
+        // each joined to its button by a leader line drawn in drawDeviceCallouts (via
+        // matching controlAnchor points). Each control STACKS its two dropdowns (action +
+        // shortcut/app), each sized to its content, so it stays narrow (~190pt) and is pulled
+        // in toward the centred mouse. Gesture is device-isolated through an MX Master 3-only
+        // F20 sentinel, so keyboard Command-Tab remains native for app switching.
+        let shortcutRowW: CGFloat = 190
+        let shortcutRowH: CGFloat = 96
+        let shortcutLeftX: CGFloat = 92     // top-left (Middle); inner edge ≈ x 282
+        let shortcutRightX: CGFloat = 590   // top-right (Back); symmetric
+        // The bottom pair is pulled in a little further toward the mouse and raised, so it
+        // doesn't sit too low against the app lists below.
+        let shortcutBottomLeftX: CGFloat = 110   // bottom-left (Forward); inner edge ≈ x 300
+        let shortcutBottomRightX: CGFloat = 574  // bottom-right (Gesture); symmetric
+        let shortcutTopY: CGFloat = 40    // leaves a header strip for the "Mouse Profile" title
+        let shortcutBottomY: CGFloat = 216
         middleButtonRow = RecordableShortcutRowView(
             title: "Middle Button",
             mapping: config.middleButton,
             defaultCombo: KlikProConfig.default.middleButton.combo,
             status: statuses[.middleButton] ?? .ok,
-            frame: NSRect(x: ix, y: 272, width: mappingW, height: 66)
+            frame: NSRect(x: shortcutLeftX, y: shortcutTopY, width: shortcutRowW, height: shortcutRowH)
         )
         gestureButtonRow = RecordableShortcutRowView(
             title: "Gesture Button",
             mapping: config.gestureButton,
             defaultCombo: KlikProConfig.default.gestureButton.combo,
             status: statuses[.gestureButton] ?? .ok,
-            frame: NSRect(x: ix, y: 356, width: mappingW, height: 66)
+            frame: NSRect(x: shortcutBottomRightX, y: shortcutBottomY, width: shortcutRowW, height: shortcutRowH)
         )
         let forwardDisplay = browserHistoryDisplayOverride(
             slot: .forwardButton,
@@ -1674,7 +1801,7 @@ final class SettingsContentView: NSView {
             displayOverrideResolver: { combo in
                 browserHistoryDisplayOverride(slot: .forwardButton, combo: combo)
             },
-            frame: NSRect(x: ix, y: 440, width: mappingW, height: 66)
+            frame: NSRect(x: shortcutBottomLeftX, y: shortcutBottomY, width: shortcutRowW, height: shortcutRowH)
         )
         backRow = RecordableShortcutRowView(
             title: "Back Button", mapping: config.backButton,
@@ -1683,10 +1810,10 @@ final class SettingsContentView: NSView {
             displayOverrideResolver: { combo in
                 browserHistoryDisplayOverride(slot: .backButton, combo: combo)
             },
-            frame: NSRect(x: ix, y: 524, width: mappingW, height: 66)
+            frame: NSRect(x: shortcutRightX, y: shortcutTopY, width: shortcutRowW, height: shortcutRowH)
         )
         [middleButtonRow, gestureButtonRow, forwardRow, backRow].forEach {
-            $0.applyCompactTwoLineLayout()
+            $0.applyCompactStackedLayout()
         }
 
         // RIGHT card — each launcher owns one clear column for its mouse-button
@@ -1772,15 +1899,50 @@ final class SettingsContentView: NSView {
 
         mappingProfilesView = MappingAppProfilesView(
             instances: config.instances,
-            frame: SettingsContentView.specialFeatureCard
+            frame: SettingsContentView.mappingBottomCard
+        )
+        // Thumb Wheel tab-switching, surfaced as a 5th callout top-centre above the mouse:
+        // a master toggle and a compact browsers pull-down (line 2). "Horizontal Thumb Wheel"
+        // is drawn as its title in draw(); the leader anchors just below it (see deviceCallouts).
+        thumbWheelToggle = ToggleSwitchView(
+            isOn: config.thumbWheel.enabled,
+            frame: NSRect(x: 332, y: 40, width: 40, height: 22)
+        )
+        thumbWheelBrowsers = ThumbWheelBrowsersButton(
+            frame: NSRect(x: 380, y: 68, width: 150, height: 26)
         )
 
-        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 702))
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 728))
 
         [middleButtonRow, gestureButtonRow, forwardRow, backRow,
-         mappingProfilesView].forEach { addSubview($0) }
+         thumbWheelToggle, thumbWheelBrowsers, mappingProfilesView].forEach { addSubview($0) }
+        thumbWheelBrowsers.setStates(
+            chrome: config.thumbWheel.chromeEnabled,
+            brave: config.thumbWheel.braveEnabled,
+            firefox: config.thumbWheel.firefoxEnabled,
+            safari: config.thumbWheel.safariEnabled
+        )
+        thumbWheelBrowsers.isEnabled = config.thumbWheel.enabled
+        thumbWheelToggle.setAccessibilityLabel("Horizontal Thumb Wheel Tab Switching")
+        thumbWheelToggle.onChange = { [weak self] on in self?.onThumbWheelToggle?(on) }
+        thumbWheelBrowsers.onToggle = { [weak self] browser, on in
+            self?.onThumbWheelBrowserChange?(browser, on)
+        }
         setSpecialFeatureAvailability(specialFeatureAvailable, isOn: specialFeatureOn)
         updateQuickLaunchAssignments(config: config, featureActive: self.specialFeatureOn)
+    }
+
+    /// Reflects the current thumb-wheel config onto this tab's toggle + browsers pull-down.
+    /// Called by the controller when the Settings-tab controls change, so the two stay synced.
+    func setThumbWheel(_ thumbWheel: ThumbWheelConfig) {
+        thumbWheelToggle.isOn = thumbWheel.enabled
+        thumbWheelBrowsers.setStates(
+            chrome: thumbWheel.chromeEnabled,
+            brave: thumbWheel.braveEnabled,
+            firefox: thumbWheel.firefoxEnabled,
+            safari: thumbWheel.safariEnabled
+        )
+        thumbWheelBrowsers.isEnabled = thumbWheel.enabled
     }
 
     required init?(coder: NSCoder) { nil }
@@ -1840,38 +2002,18 @@ final class SettingsContentView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
 
-        // Full-width mouse guide on top; controls and App Profiles list underneath.
+        // Full-width mouse guide on top, with the button + thumb-wheel controls anchored to
+        // their callouts; Native Apps + App Profiles fill two columns underneath.
         drawDeviceCard(in: SettingsContentView.deviceCard)
-        drawCard(SettingsContentView.recordableCard)
 
-        // Section labels, inset into each card (16pt below the card's top edge)
-        let ix = SettingsContentView.innerLeftX
-        drawSectionLabel("Mouse Button Shortcuts", x: ix, y: SettingsContentView.recordableCard.minY + 16)
-    }
-
-    // The two quick-launch app icons, right-aligned in the Special Feature card header.
-    // Full-colour when the feature is ON, faded when OFF. Icons come from the user's own
-    // installed apps at runtime; a missing app shows a neutral placeholder.
-    private func drawSpecialFeatureIcons() {
-        let card = SettingsContentView.specialFeatureCard
-        let iconSize: CGFloat = 26
-        let gap: CGFloat = 10
-        let y = card.minY + 8
-        let rightX = card.maxX - SettingsContentView.pad
-        let icons = [chatGPTIcon, claudeIcon]
-        var x = rightX - CGFloat(icons.count) * iconSize - CGFloat(icons.count - 1) * gap
-        for icon in icons {
-            let rect = NSRect(x: x, y: y, width: iconSize, height: iconSize)
-            if let icon = icon {
-                icon.draw(in: rect, from: .zero, operation: .sourceOver,
-                          fraction: specialFeatureOn ? 1.0 : 0.28,
-                          respectFlipped: true, hints: nil)
-            } else {
-                NSColor.separatorColor.setFill()
-                NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
-            }
-            x += iconSize + gap
-        }
+        // Title for the thumb-wheel callout (its toggle + browsers pull-down are subviews).
+        ("Horizontal Thumb Wheel" as NSString).draw(
+            at: NSPoint(x: 380, y: 43),
+            withAttributes: [
+                .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+                .foregroundColor: NSColor.appTextPrimary,
+            ]
+        )
     }
 
     private func drawCard(_ rect: NSRect) {
@@ -1892,17 +2034,47 @@ final class SettingsContentView: NSView {
     }
 
     private func drawDeviceCard(in card: NSRect) {
+        // One bordered container holding the mouse + all its callouts, so this guide reads as
+        // a distinct card separated from the Native Apps / App Profiles lists below. (It is
+        // also the natural "slide" unit for a future swipeable mouse-profile carousel.)
         NSColor.controlBackgroundColor.setFill()
-        NSBezierPath(rect: card).fill()
+        NSBezierPath(roundedRect: card, xRadius: 12, yRadius: 12).fill()
+        NSColor.separatorColor.setStroke()
+        let cardBorder = NSBezierPath(roundedRect: card.insetBy(dx: 0.5, dy: 0.5), xRadius: 12, yRadius: 12)
+        cardBorder.lineWidth = 1
+        cardBorder.stroke()
+
+        // Group title, parallel to "NATIVE APPS" / "APP PROFILES" on the cards below.
+        drawSectionLabel("Mouse Profile", x: 18, y: 16)
+
+        // Carousel paging scaffold: with a single profile the prev/next chevrons are shown
+        // disabled (greyed) and one active page dot marks slide 1 — the swipe affordance is
+        // in place for when multiple mouse profiles are added. See mouse-profile-carousel.
+        let chevronTint = NSColor.tertiaryLabelColor
+        let chevronBox = NSSize(width: 11, height: 18)
+        NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "Previous mouse profile")?
+            .tinted(chevronTint)
+            .draw(in: NSRect(x: card.minX + 20, y: card.midY - chevronBox.height / 2,
+                             width: chevronBox.width, height: chevronBox.height))
+        NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "Next mouse profile")?
+            .tinted(chevronTint)
+            .draw(in: NSRect(x: card.maxX - 20 - chevronBox.width, y: card.midY - chevronBox.height / 2,
+                             width: chevronBox.width, height: chevronBox.height))
+        let dotRadius: CGFloat = 3.5
+        NSColor.appTextSecondary.setFill()
+        NSBezierPath(ovalIn: NSRect(x: card.midX - dotRadius, y: card.maxY - 24 - dotRadius,
+                                    width: dotRadius * 2, height: dotRadius * 2)).fill()
 
         guard let image = image else { return }
         let imageAspect = image.size.height > 0 ? image.size.width / image.size.height : 1
-        let available = card.insetBy(dx: 190, dy: 8)
+        // Inset chosen so the mouse keeps its v1.4.3 size (267x198) while centred in the
+        // taller guide card; the four button controls sit in the card's corners around it.
+        let available = card.insetBy(dx: 190, dy: 81)
         let drawHeight = min(available.height, available.width / imageAspect)
         let drawWidth = drawHeight * imageAspect
         let rect = NSRect(
             x: card.midX - drawWidth / 2,
-            y: card.midY - drawHeight / 2,
+            y: card.midY - drawHeight / 2 + 16,   // nudged down to clear the header title strip
             width: drawWidth,
             height: drawHeight
         )
@@ -1914,50 +2086,56 @@ final class SettingsContentView: NSView {
         drawDeviceCallouts(in: rect)
     }
 
-    // Callouts mapped to the controls in assets/Klik PRO mouse.png. Target = fraction of
-    // the drawn mouse rect; labels sit in the wide card's left/right margins so they don't
-    // overlap the mouse or grow the card height (keeping the single-page layout).
+    // Callouts mapped to the controls in the mouse artwork. Target = fraction of the drawn
+    // mouse rect. The four button callouts are merged onto their interactive control (in the
+    // left column) and draw only a leader line + dot. The thumb wheel is now a control too
+    // (toggle + browsers pull-down, top-centre above the mouse), so it likewise just draws a
+    // leader; its "Horizontal Thumb Wheel" title is drawn by SettingsContentView.
     private struct DeviceCallout {
         let title: String
-        let fx: CGFloat   // target x as fraction of mouse rect
-        let fy: CGFloat   // target y as fraction of mouse rect
-        let onLeft: Bool  // label sits in the left margin (else right)
-        let labelY: CGFloat
+        let fx: CGFloat            // target x as fraction of mouse rect
+        let fy: CGFloat            // target y as fraction of mouse rect
+        // Inner-edge point of the control this callout is merged into; the leader runs from
+        // here to the button. nil = no control (draw a text label above the mouse instead).
+        let controlAnchor: NSPoint?
     }
 
-    // fx/fy are fractions of the drawn mouse rect (top-left origin). Re-tuned 2026-07-20
-    // for the reframed device artwork — the crop now centers the whole mouse in the
-    // 1000x742 canvas (assets/Klik PRO mouse.png via tools/crop-device.swift), so the
-    // targets are the dark control centroids measured in the regenerated reference.
+    // fx/fy are fractions of the drawn mouse rect (top-left origin), measured on the
+    // 1000x742 device artwork. controlAnchor points match the narrow corner controls set in
+    // init: the top row's inner edges are x 282 (left) / x 590 (right) with centre y 88 (the
+    // top row sits below the "Mouse Profile" header strip); the bottom row is pulled in a
+    // little further — inner edges x 300 (left) / x 574 (right) with centre y 264. Each anchor
+    // is the control edge nearest the mouse, so the leader runs from there to the button.
     private static let deviceCallouts: [DeviceCallout] = [
-        DeviceCallout(title: "Middle Button (Scroll Wheel)", fx: 0.245, fy: 0.413, onLeft: true, labelY: 100),
-        DeviceCallout(title: "Forward Button", fx: 0.584, fy: 0.546, onLeft: true, labelY: 172),
-        DeviceCallout(title: "Horizontal Thumb Wheel", fx: 0.594, fy: 0.422, onLeft: false, labelY: 40),
-        DeviceCallout(title: "Back Button", fx: 0.692, fy: 0.447, onLeft: false, labelY: 110),
-        DeviceCallout(title: "Gesture Button", fx: 0.755, fy: 0.745, onLeft: false, labelY: 180),
+        DeviceCallout(title: "Middle Button (Scroll Wheel)", fx: 0.245, fy: 0.413, controlAnchor: NSPoint(x: 282, y: 88)),
+        DeviceCallout(title: "Forward Button",               fx: 0.584, fy: 0.546, controlAnchor: NSPoint(x: 300, y: 264)),
+        DeviceCallout(title: "Horizontal Thumb Wheel",       fx: 0.594, fy: 0.422, controlAnchor: NSPoint(x: 436, y: 94)),
+        DeviceCallout(title: "Back Button",                  fx: 0.692, fy: 0.447, controlAnchor: NSPoint(x: 590, y: 88)),
+        DeviceCallout(title: "Gesture Button",               fx: 0.755, fy: 0.745, controlAnchor: NSPoint(x: 574, y: 264)),
     ]
 
     private func drawDeviceCallouts(in mouseRect: NSRect) {
         let teal = NSColor(calibratedRed: 0.04, green: 0.70, blue: 0.68, alpha: 1)
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.boldSystemFont(ofSize: 12),
-            .foregroundColor: NSColor.appTextPrimary
+            .font: NSFont.boldSystemFont(ofSize: 11),
+            .foregroundColor: NSColor.appTextSecondary
         ]
-        let leftEdge = mouseRect.minX - 18
-        let rightEdge = mouseRect.maxX + 18
 
         for c in SettingsContentView.deviceCallouts {
             let target = NSPoint(x: mouseRect.minX + c.fx * mouseRect.width,
                                  y: mouseRect.minY + c.fy * mouseRect.height)
-            let size = (c.title as NSString).size(withAttributes: attrs)
-            let labelPoint: NSPoint
             let anchor: NSPoint
-            if c.onLeft {
-                labelPoint = NSPoint(x: leftEdge - size.width, y: c.labelY)
-                anchor = NSPoint(x: leftEdge, y: c.labelY + size.height / 2)
+            if let controlAnchor = c.controlAnchor {
+                // Merged onto its control: the leader starts at the control's inner edge and
+                // the control itself carries the title, so no text is drawn here.
+                anchor = controlAnchor
             } else {
-                labelPoint = NSPoint(x: rightEdge, y: c.labelY)
-                anchor = NSPoint(x: rightEdge, y: c.labelY + size.height / 2)
+                // Thumb wheel: a small centred label above the mouse, with a leader down to
+                // the wheel.
+                let size = (c.title as NSString).size(withAttributes: attrs)
+                let labelPoint = NSPoint(x: mouseRect.midX - size.width / 2, y: mouseRect.minY - 22)
+                (c.title as NSString).draw(at: labelPoint, withAttributes: attrs)
+                anchor = NSPoint(x: mouseRect.midX, y: mouseRect.minY - 6)
             }
 
             let path = NSBezierPath()
@@ -1970,7 +2148,6 @@ final class SettingsContentView: NSView {
 
             teal.setFill()
             NSBezierPath(ovalIn: NSRect(x: target.x - 3.5, y: target.y - 3.5, width: 7, height: 7)).fill()
-            (c.title as NSString).draw(at: labelPoint, withAttributes: attrs)
         }
     }
 }
@@ -2926,7 +3103,7 @@ final class ToggleView: NSView {
         layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
 
         addSubview(headerWordmark)
-        scrollView.frame = NSRect(x: 34, y: 122, width: 872, height: 702)
+        scrollView.frame = NSRect(x: 34, y: 96, width: 872, height: 728)
         scrollView.hasVerticalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
@@ -3372,14 +3549,63 @@ final class ToggleView: NSView {
         contentView.mappingProfilesView.onAssignOriginal = { [weak self] target in
             self?.assignMouseButton(to: .original(target), label: target.title)
         }
+        contentView.mappingProfilesView.onRefreshApps = { [weak self] in
+            guard let self else { return }
+            // Refresh both columns: re-scan installed apps (updates the native list) and
+            // reload the profiles list from disk with fresh runtime health.
+            self.refreshSupportedAppCandidates(showLoading: false, force: true)
+            self.refreshOriginalAssignmentViews()
+            self.contentView.mappingProfilesView.setInstances(self.persistedConfig.instances)
+            self.refreshAppProfileHealth()
+        }
         appProfilesView.onInstancesChange = { [weak self] instances in
-            self?.contentView.mappingProfilesView.setInstances(instances)
+            guard let self else { return }
+            self.contentView.mappingProfilesView.setInstances(instances)
+            // The Mappings tab has two halves that must both track a profile change:
+            // the compact list above, and the mouse-button "Open App" callout pickers.
+            // A rename changes a profile's label and a create/remove changes the set, so
+            // rebuild the pickers here too — otherwise the new label (or a deleted
+            // profile) lingers in the dropdown until relaunch. Every caller sets
+            // `config` before `setInstances`, so this reads the updated instances.
+            self.refreshQuickLaunchAssignments()
         }
         appProfilesView.onRuntimeHealthChange = { [weak self] health in
             self?.contentView.mappingProfilesView.setRuntimeHealth(health)
         }
         appProfilesView.onStatusChange = { [weak self] message, color in
             self?.contentView.mappingProfilesView.setStatus(message, color: color)
+        }
+
+        // Thumb-wheel callout on the Mappings tab ⇄ the four browser checkboxes on the
+        // Settings tab: both edit the same config.thumbWheel fields and mirror each other.
+        contentView.onThumbWheelToggle = { [weak self] on in
+            guard let self = self else { return }
+            self.config.thumbWheel.enabled = on
+            self.preferencesView.thumbWheelToggle.isOn = on
+            self.preferencesView.chromeCheck.isEnabled = on
+            self.preferencesView.braveCheck.isEnabled = on
+            self.preferencesView.firefoxCheck.isEnabled = on
+            self.preferencesView.safariCheck.isEnabled = on
+            self.contentView.setThumbWheel(self.config.thumbWheel)
+            self.configurationDidChange()
+        }
+        contentView.onThumbWheelBrowserChange = { [weak self] browser, on in
+            guard let self = self else { return }
+            switch browser {
+            case .chrome:
+                self.config.thumbWheel.chromeEnabled = on
+                self.preferencesView.chromeCheck.isOn = on
+            case .brave:
+                self.config.thumbWheel.braveEnabled = on
+                self.preferencesView.braveCheck.isOn = on
+            case .firefox:
+                self.config.thumbWheel.firefoxEnabled = on
+                self.preferencesView.firefoxCheck.isOn = on
+            case .safari:
+                self.config.thumbWheel.safariEnabled = on
+                self.preferencesView.safariCheck.isOn = on
+            }
+            self.configurationDidChange()
         }
 
         contentView.middleButtonRow.onToggleChange = { [weak self] on in
@@ -3493,23 +3719,33 @@ final class ToggleView: NSView {
             self.window?.invalidateCursorRects(for: self.preferencesView.braveCheck)
             self.window?.invalidateCursorRects(for: self.preferencesView.firefoxCheck)
             self.window?.invalidateCursorRects(for: self.preferencesView.safariCheck)
+            // Mirror the master switch (and enabled state) onto the Mappings callout.
+            self.contentView.setThumbWheel(self.config.thumbWheel)
             self.configurationDidChange()
         }
         preferencesView.chromeCheck.onChange = { [weak self] on in
-            self?.config.thumbWheel.chromeEnabled = on
-            self?.configurationDidChange()
+            guard let self = self else { return }
+            self.config.thumbWheel.chromeEnabled = on
+            self.contentView.setThumbWheel(self.config.thumbWheel)
+            self.configurationDidChange()
         }
         preferencesView.braveCheck.onChange = { [weak self] on in
-            self?.config.thumbWheel.braveEnabled = on
-            self?.configurationDidChange()
+            guard let self = self else { return }
+            self.config.thumbWheel.braveEnabled = on
+            self.contentView.setThumbWheel(self.config.thumbWheel)
+            self.configurationDidChange()
         }
         preferencesView.firefoxCheck.onChange = { [weak self] on in
-            self?.config.thumbWheel.firefoxEnabled = on
-            self?.configurationDidChange()
+            guard let self = self else { return }
+            self.config.thumbWheel.firefoxEnabled = on
+            self.contentView.setThumbWheel(self.config.thumbWheel)
+            self.configurationDidChange()
         }
         preferencesView.safariCheck.onChange = { [weak self] on in
-            self?.config.thumbWheel.safariEnabled = on
-            self?.configurationDidChange()
+            guard let self = self else { return }
+            self.config.thumbWheel.safariEnabled = on
+            self.contentView.setThumbWheel(self.config.thumbWheel)
+            self.configurationDidChange()
         }
     }
 
