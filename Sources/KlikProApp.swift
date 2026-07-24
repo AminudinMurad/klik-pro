@@ -4527,36 +4527,23 @@ final class ToggleView: NSView {
         let currentConfig = persistedConfig
         appProfileQueue.async { [weak self] in
             guard let self else { return }
-            // Compulsory original-app Dock icon (Decision: block on failure). It runs
-            // before the profile is created, because once a profile is live the native
-            // vendor tile can no longer reopen the original. Running it on every
-            // generation also backfills users who already have profiles but no
-            // original icon yet.
-            var originalDockOutcome: DockPinResult?
+            // Build the required native launcher bundle first (hard gate, Decision:
+            // block on failure) so a failure aborts BEFORE the profile is created —
+            // once a profile is live the native vendor tile can no longer reopen the
+            // original. The bundle is created here if missing, or reused if it already
+            // exists on disk (e.g. present in Launchpad but removed from the Dock). Its
+            // Dock TILE is appended later, after the profile bundle is built, so the
+            // slow codesign/LaunchServices step never sits between a `-array-add` and
+            // the `killall` — that window let the Dock re-serialize its old snapshot
+            // over a fresh entry and drop it (the "star bundle created but never
+            // pinned" / Case-2 dropped-tile bugs).
+            var nativeLauncherURL: URL?
             if willForceOriginalDock, let vendor = vendorTarget {
-                // Build the required launcher bundle first (hard gate). Source it from
-                // the exact app this profile is built from, so an install outside
-                // /Applications (e.g. ~/Applications) no longer hard-blocks creation.
-                let launcherURL = Self.ensureOriginalDockLauncher(
+                guard let launcherURL = Self.ensureOriginalDockLauncher(
                     for: vendor,
                     preferredSourceURL: candidate.app.bundleURL,
                     displayNameOverride: currentConfig.originalDockCustomNames[vendor]
-                )
-                // Append the tile carrying its custom-name label up front, but do NOT
-                // relaunch the Dock yet — the profile tile is appended below and both
-                // are committed with a single `killall Dock`, so the relaunch from an
-                // earlier add can't clobber the later `-array-add` (the Case-2 bug).
-                let nativeAppend = launcherURL.map {
-                    Self.appendLauncherToDockPrefs(
-                        $0, label: currentConfig.originalDockCustomNames[vendor]
-                    )
-                }
-                switch nativeAppend {
-                case .some(.wrote):
-                    originalDockOutcome = .added
-                case .some(.alreadyPresent):
-                    originalDockOutcome = .alreadyPresent
-                default:
+                ) else {
                     DispatchQueue.main.async {
                         self.finishAppProfileLifecycle()
                         self.appProfilesView.setStatus(
@@ -4574,6 +4561,7 @@ final class ToggleView: NSView {
                     }
                     return
                 }
+                nativeLauncherURL = launcherURL
             }
             do {
                 let result = try self.appProfileManager.create(
@@ -4581,10 +4569,23 @@ final class ToggleView: NSView {
                     label: requestedName,
                     config: currentConfig
                 )
-                // Append the profile's own tile too (still no relaunch), then commit ALL
-                // Dock additions from this generation with a single `killall Dock`. Two
-                // separate relaunches race: the first would re-serialize its pre-add
-                // snapshot over the second `-array-add` and drop the profile tile.
+                // Append every Dock tile back-to-back now — native first (carrying its
+                // custom-name label), then the profile's own if requested — and commit
+                // them with exactly ONE `killall Dock`. Contiguous writes + a single
+                // relaunch mean the Dock can't clobber an entry mid-flight, and a tile
+                // that already exists on disk but is missing from the Dock is re-added
+                // rather than skipped.
+                var originalDockOutcome: DockPinResult?
+                if let nativeLauncherURL, let vendor = vendorTarget {
+                    switch Self.appendLauncherToDockPrefs(
+                        nativeLauncherURL,
+                        label: currentConfig.originalDockCustomNames[vendor]
+                    ) {
+                    case .wrote: originalDockOutcome = .added
+                    case .alreadyPresent: originalDockOutcome = .alreadyPresent
+                    case .failed: originalDockOutcome = .failed
+                    }
+                }
                 var dockResult: DockPinResult = .notRequested
                 if request.addLauncherToDock {
                     switch Self.appendLauncherToDockPrefs(
