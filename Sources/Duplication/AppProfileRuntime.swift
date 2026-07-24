@@ -340,7 +340,19 @@ struct AppProfileRuntime {
             return
         }
         if instance.launcherKind == .legacyExternal {
-            launchExternal(instance, completion: completion)
+            // A legacy row that mirrors a recognized native app (ChatGPT / Claude)
+            // must reopen the TRUE original, not plain-open the shared vendor bundle:
+            // managed profiles run the same binary (differing only by --user-data-dir),
+            // so a plain open coalesces onto an already-running profile. launchOriginal
+            // is the v1.3.2 path that discriminates originals from profiles and forces a
+            // fresh instance when none is running; it is what the Dock/menu-bar "open
+            // original" already uses. Only genuine third-party external wrappers (no
+            // recognized target) keep the plain launchExternal path.
+            if let target = instance.legacyQuickLaunchTarget {
+                launchOriginal(target, completion: completion)
+            } else {
+                launchExternal(instance, completion: completion)
+            }
             return
         }
 
