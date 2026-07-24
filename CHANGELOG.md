@@ -2,6 +2,26 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.4.4
+
+A visual redesign of the Mappings tab, plus the Horizontal Thumb Wheel's browser
+control brought into the tab.
+
+- **Mouse Profile card** — the mouse and its four button callouts now sit together
+  in one bordered "Mouse Profile" panel, separated from the app lists, with each
+  callout beside the button it controls.
+- **Compact, stacked button controls** — each mouse button's action picker and its
+  shortcut or app picker are stacked and sized to their content, arranged around
+  the mouse.
+- **Horizontal Thumb Wheel in Mappings** — the thumb wheel appears as its own
+  control with a browser selector, kept two-way in sync with the browser checkboxes
+  in Settings.
+- **Refresh App List** — the rescan control gains a refresh icon and sits above the
+  Native Apps and App Profiles lists.
+
+Existing button assignments and shortcuts are unchanged; this release reorganizes
+how the Mappings tab presents them.
+
 ## 1.4.3
 
 A refinement of how the App Profile generator manages the native app's Dock icon.
