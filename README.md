@@ -64,7 +64,7 @@ manage them from the per-profile gear menu, and see the same identity immediatel
 Mappings:
 
 <p align="center">
-  <img src="assets/app-profiles-icon-showcase.gif?v=1.3.1-b15" width="600" alt="Klik PRO animation showing full-size tinted and initial-badged App Profile icons, profile management controls, and matching icons in the Mappings tab">
+  <img src="assets/app-profiles-icon-showcase.gif?v=1.4.5-b22" width="600" alt="Klik PRO animation showing full-size tinted and initial-badged App Profile icons, profile management controls, and matching icons in the Mappings tab">
 </p>
 
 **Settings** — launch-at-login, menu-icon visibility, update-check, and guided Accessibility setup/reset controls:
