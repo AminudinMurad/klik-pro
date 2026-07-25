@@ -2,6 +2,31 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.4.5
+
+A fix for App Profile data that could not be deleted, and a clearer Advanced tab.
+
+- **Delete Data works again** — deleting an App Profile's login data, or leftover data
+  with no profile, failed for every ChatGPT or Claude profile that had been launched.
+  Chromium writes four links of its own into a profile the first time it runs, and the
+  ownership check refused any profile containing a link. Move to Trash and Delete
+  Permanently both complete now, and Deep Scan for Leftovers can clean the data
+  folders it finds.
+- **A failure message that is true** — a refused removal used to advise quitting the
+  app or restarting macOS, which could never help. It now says whether Klik PRO could
+  not verify the item as its own or the disk refused.
+- **A data folder from the first launch** — onboarding gains a second step offering
+  `~/Klik PRO Vault` as its default action, so a fresh install can store profile logins
+  somewhere that survives an uninstall instead of moving them later. Choose a different
+  folder on the page, or Skip for Now to keep them in Application Support.
+- **Scan & Import** — "Scan & Adopt" is renamed and moves up beside the data-folder
+  controls it belongs with.
+- **Profile Cleanup** — Deep Scan for Leftovers moves into its own section below App
+  Profile Maintenance.
+
+Nothing outside a profile is removed: a link pointing at a folder outside the profile
+still fails closed, and a profile's own links travel to the Trash as links.
+
 ## 1.4.4
 
 A visual redesign of the Mappings tab, plus the Horizontal Thumb Wheel's browser
