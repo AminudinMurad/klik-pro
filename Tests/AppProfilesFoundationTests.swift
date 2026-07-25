@@ -219,6 +219,7 @@ private struct AppProfilesFoundationTests {
         testReclaimDataTrashPermanentAndFailClosed()
         testReclaimDataMultiArtifactPartialAndMarkerless()
         testLauncherLeftoverScanAndTrashAreOwnershipGated()
+        testNativeAppDataIsNeverScannedOrRemovable()
         testDataRootWiringFactorySelectsGenerator()
         testSettledProcessScanResolvesTransientAmbiguity()
         print("App Profiles foundation tests passed")
@@ -1171,6 +1172,42 @@ private struct AppProfilesFoundationTests {
                "rejected profile symlinks must never delete their targets")
         try! FileManager.default.removeItem(at: nestedLink)
 
+        // Every Chromium profile that has launched carries these four symlinks at
+        // its root, and SingletonSocket points outside the profile by design. They
+        // must not block removal — refusing them made Delete Data, Remove, and
+        // Archive impossible for real ChatGPT and Claude profiles. Only a link
+        // resolving to a directory outside the profile still fails closed (above).
+        let profileRoot = URL(fileURLWithPath: instance.profileDirectory!, isDirectory: true)
+        let outsideSocket = root.appendingPathComponent("singleton-socket-target")
+        try! Data("socket".utf8).write(to: outsideSocket)
+        try! FileManager.default.createSymbolicLink(
+            at: profileRoot.appendingPathComponent("SingletonSocket"),
+            withDestinationURL: outsideSocket
+        )
+        try! FileManager.default.createSymbolicLink(
+            atPath: profileRoot.appendingPathComponent("SingletonLock").path,
+            withDestinationPath: "fixture-host.local-4837"
+        )
+        try! FileManager.default.createSymbolicLink(
+            atPath: profileRoot.appendingPathComponent("SingletonCookie").path,
+            withDestinationPath: "13339383281177147826"
+        )
+        try! FileManager.default.createSymbolicLink(
+            atPath: profileRoot.appendingPathComponent("RunningChromeVersion").path,
+            withDestinationPath: "150.0.7871.128:1"
+        )
+        // A link to a directory INSIDE the profile is legitimate too, and pins that
+        // containment survives the /private normalization a temp-dir root goes
+        // through. It points at a sibling directory, never at an ancestor, so the
+        // allowed set stays free of cycles.
+        let nestedDefault = profileRoot.appendingPathComponent("Default", isDirectory: true)
+        let nestedCache = nestedDefault.appendingPathComponent("GPUCache", isDirectory: true)
+        try! FileManager.default.createDirectory(at: nestedCache, withIntermediateDirectories: true)
+        try! FileManager.default.createSymbolicLink(
+            at: nestedDefault.appendingPathComponent("inside-link"),
+            withDestinationURL: nestedCache
+        )
+
         var persisted: KlikProConfig?
         let deletionManager = AppProfileManager(
             generator: generator,
@@ -1190,6 +1227,10 @@ private struct AppProfilesFoundationTests {
                "successful explicit deletion must remove the UUID-owned profile")
         expect(persisted?.instances.contains { $0.id == id } == false,
                "profile deletion must remove the same UUID config row transactionally")
+        expect(FileManager.default.fileExists(atPath: outsideSocket.path),
+               "removing a profile must never follow its Chromium singleton links")
+        expect(FileManager.default.fileExists(atPath: outside.path),
+               "removing a profile must leave every outside target on disk")
     }
 
     private static func testExplicitLegacyConversionLeavesExternalDataUntouched() {
@@ -3411,6 +3452,19 @@ private struct AppProfilesFoundationTests {
         )
         let trashProfile = URL(fileURLWithPath: trashCreated.instance.profileDirectory!)
         try! Data("login-data".utf8).write(to: trashProfile.appendingPathComponent("Login"))
+        // A profile that has actually been launched carries Chromium's singleton
+        // links, one of which points outside the profile on purpose. Delete Data
+        // must still work, and must not touch what they point at.
+        let trashSocketTarget = trashFixture.root.appendingPathComponent("singleton-socket")
+        try! Data("socket".utf8).write(to: trashSocketTarget)
+        try! FileManager.default.createSymbolicLink(
+            at: trashProfile.appendingPathComponent("SingletonSocket"),
+            withDestinationURL: trashSocketTarget
+        )
+        try! FileManager.default.createSymbolicLink(
+            atPath: trashProfile.appendingPathComponent("SingletonLock").path,
+            withDestinationPath: "fixture-host.local-4811"
+        )
         let trashTarget = trashEnv.manager.dataRemovalTarget(
             for: trashCreated.config.instances.first { $0.id == trashID }!
         )
@@ -3424,6 +3478,8 @@ private struct AppProfilesFoundationTests {
                "the original profile path must be empty after Trash")
         expect(trashPersisted?.instances.contains { $0.id == trashID } == false,
                "a record-bearing Trash must drop the config row")
+        expect(FileManager.default.fileExists(atPath: trashSocketTarget.path),
+               "Trash must move the singleton links themselves, never their targets")
 
         // (c) Permanent mode: unrecoverable removeItem; the Trash op is untouched.
         let permSpy = TrashSpy(destination: temporaryDirectory("reclaim-perm-dest"))
@@ -3485,6 +3541,47 @@ private struct AppProfilesFoundationTests {
         }
         expect(FileManager.default.fileExists(atPath: inUseProfile.path),
                "a blocked reclaim must leave all profile data on disk")
+
+        // (e) Fail closed on the shape that still matters: a descendant link
+        // resolving to a directory OUTSIDE the profile. Delete Data must refuse the
+        // profile artifact and leave both the data and the link's target on disk.
+        let escapeFixture = makeVaultFixture("reclaim-escaping-link")
+        defer { try? FileManager.default.removeItem(at: escapeFixture.root) }
+        let escapeSpy = TrashSpy(destination: temporaryDirectory("reclaim-escape-dest"))
+        let escapeEnv = makeVaultManager(
+            escapeFixture, vaultRoot: nil,
+            processInspector: clear, trashItem: { try escapeSpy.trash($0) }
+        )
+        let escapeID = UUID()
+        let escapeCreated = try! escapeEnv.manager.create(
+            from: escapeEnv.manager.candidate(for: escapeFixture.source),
+            label: "Escaping Link", config: KlikProConfig.default, instanceID: escapeID
+        )
+        let escapeProfile = URL(fileURLWithPath: escapeCreated.instance.profileDirectory!)
+        let escapeOutside = escapeFixture.root
+            .appendingPathComponent("outside-tree", isDirectory: true)
+        try! FileManager.default.createDirectory(
+            at: escapeOutside, withIntermediateDirectories: true
+        )
+        try! Data("canary".utf8).write(to: escapeOutside.appendingPathComponent("canary"))
+        try! FileManager.default.createSymbolicLink(
+            at: escapeProfile.appendingPathComponent("escaping-link"),
+            withDestinationURL: escapeOutside
+        )
+        let escapeTarget = escapeEnv.manager.dataRemovalTarget(
+            for: escapeCreated.config.instances.first { $0.id == escapeID }!
+        )
+        let escapeResult = try! escapeEnv.manager.reclaimData(
+            target: escapeTarget, config: escapeCreated.config, mode: .trash
+        )
+        expect(!escapeResult.allRemoved,
+               "a link escaping to an outside directory must still fail closed")
+        expect(FileManager.default.fileExists(atPath: escapeProfile.path),
+               "a refused profile artifact must stay on disk")
+        expect(FileManager.default.fileExists(
+                   atPath: escapeOutside.appendingPathComponent("canary").path
+               ),
+               "a refused reclaim must never touch the link's target")
     }
 
     private static func testReclaimDataMultiArtifactPartialAndMarkerless() {
@@ -3691,6 +3788,115 @@ private struct AppProfilesFoundationTests {
     /// otherwise return a no-vault generator so behavior stays byte-for-byte the
     /// pre-vault app. A no-vault generator must never be able to derive a vault
     /// path (it fails closed), which is what keeps `dataRoot = nil` inert.
+    /// The native apps' own data must be untouchable, whatever it looks like. The
+    /// native ChatGPT/Codex and Claude stores are Chromium/Electron trees in
+    /// Application Support that look exactly like a Klik PRO profile from the inside
+    /// — same `Default/`, same `Local State`, same singleton links — so nothing may
+    /// depend on their contents. Eligibility is position plus the UUID ownership
+    /// marker, and this pins that: a native store beside Klik PRO's own folder, one
+    /// planted inside `Profiles/` under its real name, and one under a UUID name it
+    /// does not own are all neither scanned nor removable.
+    private static func testNativeAppDataIsNeverScannedOrRemovable() {
+        let fixture = makeVaultFixture("native-app-data-untouchable")
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let env = makeVaultManager(fixture, vaultRoot: nil)
+        let config = try! env.manager.create(
+            from: env.manager.candidate(for: fixture.source),
+            label: "Live Profile", config: KlikProConfig.default, instanceID: UUID()
+        ).config
+
+        /// A stand-in for `~/Library/Application Support/Codex` or `…/Claude`:
+        /// Chromium-shaped, singleton links included, and no ownership marker.
+        func makeNativeStore(at url: URL) {
+            let defaultDir = url.appendingPathComponent("Default", isDirectory: true)
+            try! FileManager.default.createDirectory(
+                at: defaultDir, withIntermediateDirectories: true
+            )
+            try! Data("{}".utf8).write(to: url.appendingPathComponent("Local State"))
+            try! Data("logins".utf8).write(to: defaultDir.appendingPathComponent("Cookies"))
+            try! FileManager.default.createSymbolicLink(
+                atPath: url.appendingPathComponent("SingletonLock").path,
+                withDestinationPath: "fixture-host.local-4811"
+            )
+        }
+        func storeIsIntact(_ url: URL) -> Bool {
+            FileManager.default.fileExists(
+                atPath: url.appendingPathComponent("Default/Cookies").path
+            )
+        }
+
+        let profilesRoot = fixture.support.appendingPathComponent("Profiles", isDirectory: true)
+        // 1. Beside Klik PRO's own Application Support folder, where the real ones live.
+        let sibling = fixture.root.appendingPathComponent("Codex", isDirectory: true)
+        // 2. Planted inside Profiles/ under the native app's own name.
+        let insideByName = profilesRoot.appendingPathComponent("Claude", isDirectory: true)
+        // 3. Inside Profiles/ under a UUID name whose marker Klik PRO never wrote.
+        let unownedID = UUID()
+        let insideByUUID = profilesRoot
+            .appendingPathComponent(unownedID.uuidString.uppercased(), isDirectory: true)
+        [sibling, insideByName, insideByUUID].forEach(makeNativeStore)
+
+        let findings = env.manager.scanOrphans(config: config)
+        expect(!findings.contains { $0.dataPaths.contains(sibling.standardizedFileURL) },
+               "native app data outside Klik PRO's roots must never be scanned")
+        expect(!findings.contains { $0.dataPaths.contains(insideByName.standardizedFileURL) },
+               "a non-UUID folder must never be scanned, whatever it contains")
+        // A UUID-named markerless folder is surfaced, but only ever as manual review.
+        expect(findings.contains {
+            $0.instanceID == unownedID && $0.state == .needsManualReview && !$0.markerPresent
+        }, "a markerless UUID folder must be reported for manual review, not as owned data")
+
+        for candidate in [sibling, insideByName, insideByUUID] {
+            for kind in [
+                OwnedArtifactKind.profileRoot,
+                .codexHome,
+                .vaultContainer,
+                .customIcon,
+            ] {
+                for mode in [DataRemovalMode.trash, .permanent] {
+                    do {
+                        _ = try env.generator.removeOwnedArtifact(
+                            at: candidate,
+                            kind: kind,
+                            instanceID: unownedID,
+                            storage: kind == .vaultContainer ? .vault : .applicationSupport,
+                            mode: mode
+                        )
+                        expect(false, "native app data must never be removable: \(kind)")
+                    } catch let error as LauncherGeneratorError {
+                        expect(error == .unsafeRemoval,
+                               "native app data must fail closed as unsafeRemoval: \(kind)")
+                    } catch {
+                        expect(false, "unexpected native-data removal error: \(error)")
+                    }
+                    expect(storeIsIntact(candidate),
+                           "a refused removal must leave native app data on disk")
+                }
+            }
+        }
+
+        // Writing a marker into someone else's folder is not ownership either: the
+        // UUID in the marker still has to match the instance being removed.
+        try! Data(UUID().uuidString.uppercased().utf8).write(
+            to: insideByUUID.appendingPathComponent(
+                LauncherGenerator.profileOwnershipMarkerName
+            )
+        )
+        do {
+            _ = try env.generator.removeOwnedArtifact(
+                at: insideByUUID, kind: .profileRoot,
+                instanceID: unownedID, storage: .applicationSupport, mode: .permanent
+            )
+            expect(false, "a mismatched ownership marker must not authorize removal")
+        } catch let error as LauncherGeneratorError {
+            expect(error == .unsafeRemoval, "a mismatched marker must fail closed")
+        } catch {
+            expect(false, "unexpected mismatched-marker error: \(error)")
+        }
+        expect(storeIsIntact(insideByUUID),
+               "a mismatched marker must leave the folder's contents on disk")
+    }
+
     private static func testDataRootWiringFactorySelectsGenerator() {
         let id = UUID()
 

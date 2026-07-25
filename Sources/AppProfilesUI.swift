@@ -757,8 +757,8 @@ final class AppProfileInstanceRowView: NSView {
 /// Button (assigning a mouse button to launch the profile is natural on the
 /// mouse-mapping tab); full management stays on the App Profiles tab.
 private final class MappingAppProfileOpenRowView: NSView {
-    /// Same card height as the App Profiles tab rows; the list pins each row to it.
-    static let rowHeight: CGFloat = 92
+    /// Compact single-line card so four rows fit the Mappings column before scrolling.
+    static let rowHeight: CGFloat = 60
     private let iconView = NSImageView()
     private let titleField = NSTextField(labelWithString: "")
     private let assignButton = AppProfileButton(title: "Assign Button", frame: .zero)
@@ -771,12 +771,10 @@ private final class MappingAppProfileOpenRowView: NSView {
 
     init(instance: AppProfileInstance, health: AppProfileRuntimeHealth?, width: CGFloat) {
         self.instance = instance
-        // Two-row card matching the App Profiles tab (without the toggle/manage
-        // controls): a large icon on the left, the app name on row 1, and the
-        // Assign + Open buttons right-flushed on row 2. Because the name owns row 1
-        // on its own, even long names fit before truncating.
+        // Single compact line: a small icon, the app name, then Open + Assign right-flushed.
+        // Sized so four rows fit the Mappings column before scrolling; long names truncate
+        // with the full name in a tooltip.
         let rowHeight = Self.rowHeight
-        let vpad: CGFloat = 16
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: rowHeight))
         wantsLayer = true
         layer?.cornerRadius = innerCardCornerRadius
@@ -784,33 +782,31 @@ private final class MappingAppProfileOpenRowView: NSView {
         layer?.borderColor = NSColor.separatorColor.cgColor
         layer?.borderWidth = 1
 
-        let iconSize: CGFloat = 54
-        iconView.frame = NSRect(x: 14, y: (rowHeight - iconSize) / 2, width: iconSize, height: iconSize)
+        let iconSize: CGFloat = 36
+        iconView.frame = NSRect(x: 12, y: (rowHeight - iconSize) / 2, width: iconSize, height: iconSize)
         iconView.imageScaling = .scaleProportionallyUpOrDown
         iconView.image = appProfileDisplayIcon(for: instance)
 
         let gap: CGFloat = 8
-        let buttonH: CGFloat = 28
-        let rightEdge = width - 18
-        let openW: CGFloat = 52
-        let assignW: CGFloat = 132
-
-        // Row 2 (bottom): Open + Assign, right-flushed (Assign on the right edge).
-        let buttonY = rowHeight - vpad - buttonH
+        let buttonH: CGFloat = 26
+        let rightEdge = width - 16
+        let openW: CGFloat = 48
+        let assignW: CGFloat = 118
+        let buttonY = (rowHeight - buttonH) / 2
         let assignX = rightEdge - assignW
         let openX = assignX - gap - openW
         openButton.frame = NSRect(x: openX, y: buttonY, width: openW, height: buttonH)
         assignButton.frame = NSRect(x: assignX, y: buttonY, width: assignW, height: buttonH)
 
-        // Row 1 (top): the app name beside the icon, using the full width.
-        let nameX = iconView.frame.maxX + 14
+        let nameX = iconView.frame.maxX + 12
         titleField.frame = NSRect(
-            x: nameX, y: vpad, width: max(80, rightEdge - nameX), height: 24
+            x: nameX, y: (rowHeight - 22) / 2, width: max(60, openX - gap - nameX), height: 22
         )
-        titleField.font = .systemFont(ofSize: 14, weight: .semibold)
+        titleField.font = .systemFont(ofSize: 13, weight: .semibold)
         titleField.textColor = .appTextPrimary
         titleField.stringValue = instance.label
         titleField.lineBreakMode = .byTruncatingTail
+        titleField.toolTip = instance.label
 
         // Mirror the App Profiles tab: the assignment is the button's own label
         // (normal color) with a chain-link indicator; hovering swaps it to
@@ -848,7 +844,7 @@ private final class MappingAppProfileOpenRowView: NSView {
 /// An installed vendor app shown as an assignment target. It intentionally has
 /// only Open and Assign: originals never receive managed-profile lifecycle actions.
 private final class MappingOriginalAppRowView: NSView {
-    static let rowHeight: CGFloat = 92
+    static let rowHeight: CGFloat = 60
     private let target: QuickLaunchTarget
     var onOpen: ((QuickLaunchTarget) -> Void)?
     var onAssign: ((QuickLaunchTarget) -> Void)?
@@ -870,22 +866,39 @@ private final class MappingOriginalAppRowView: NSView {
         layer?.borderColor = NSColor.separatorColor.cgColor
         layer?.borderWidth = 1
 
-        let icon = NSImageView(frame: NSRect(x: 14, y: 19, width: 54, height: 54))
+        // Single compact line matching MappingAppProfileOpenRowView: icon, the app name over
+        // a "Native app" caption, then Open + Assign right-flushed.
+        let iconSize: CGFloat = 36
+        let icon = NSImageView(frame: NSRect(x: 12, y: (Self.rowHeight - iconSize) / 2, width: iconSize, height: iconSize))
         icon.imageScaling = .scaleProportionallyUpOrDown
         icon.image = NSWorkspace.shared.icon(forFile: path)
+
+        let gap: CGFloat = 8
+        let buttonH: CGFloat = 26
+        let rightEdge = width - 16
+        let openW: CGFloat = 48
+        let assignW: CGFloat = 118
+        let buttonY = (Self.rowHeight - buttonH) / 2
+        let assignX = rightEdge - assignW
+        let openX = assignX - gap - openW
+
+        let nameX = icon.frame.maxX + 12
+        let nameW = max(60, openX - gap - nameX)
         let title = NSTextField(labelWithString: name)
-        title.frame = NSRect(x: 82, y: 16, width: max(80, width - 100), height: 24)
-        title.font = .systemFont(ofSize: 14, weight: .semibold)
+        title.frame = NSRect(x: nameX, y: 11, width: nameW, height: 18)
+        title.font = .systemFont(ofSize: 13, weight: .semibold)
         title.textColor = .appTextPrimary
+        title.lineBreakMode = .byTruncatingTail
+        title.toolTip = name
         let original = NSTextField(labelWithString: "Native app")
-        original.frame = NSRect(x: 82, y: 38, width: 100, height: 16)
+        original.frame = NSRect(x: nameX, y: 31, width: nameW, height: 14)
         original.font = .systemFont(ofSize: 10, weight: .medium)
         original.textColor = .appTextSecondary
 
         let assign = AppProfileButton(title: "Assign Button", frame: .zero)
         let open = AppProfileButton(title: "Open", frame: .zero)
-        assign.frame = NSRect(x: width - 150, y: 48, width: 132, height: 28)
-        open.frame = NSRect(x: width - 210, y: 48, width: 52, height: 28)
+        assign.frame = NSRect(x: assignX, y: buttonY, width: assignW, height: buttonH)
+        open.frame = NSRect(x: openX, y: buttonY, width: openW, height: buttonH)
         if let mouseButton {
             assign.configureAssignment(
                 restTitle: "\(mouseButton.title) Button",
@@ -1035,9 +1048,10 @@ private final class MappingSectionCardView: NSView {
     }
 }
 
-/// The approved Mappings right column: two stacked, independently-scrolling cards —
-/// the installed native apps on top and the generated App Profiles below. Each card
-/// offers quick Open and Assign Button; other management stays on the App Profiles tab.
+/// The Mappings app lists: two side-by-side, independently-scrolling cards — the
+/// installed native apps on the LEFT and the generated App Profiles on the RIGHT.
+/// Each card offers quick Open and Assign Button; other management stays on the
+/// App Profiles tab.
 final class MappingAppProfilesView: NSView {
     private let nativeCard: MappingSectionCardView
     private let profilesCard: MappingSectionCardView
@@ -1051,30 +1065,52 @@ final class MappingAppProfilesView: NSView {
     var onAssign: ((AppProfileInstance) -> Void)?
     var onOpenOriginal: ((QuickLaunchTarget) -> Void)?
     var onAssignOriginal: ((QuickLaunchTarget) -> Void)?
+    // Re-scans installed native apps and reloads the profiles list for both columns,
+    // mirroring the App Profiles tab's "Refresh App List".
+    let refreshButton = AppProfileButton(title: "Refresh App List", frame: .zero)
+    var onRefreshApps: (() -> Void)?
 
     override var isFlipped: Bool { true }
 
     init(instances: [AppProfileInstance], frame: NSRect) {
         self.instances = instances
-        // Two cards stacked with a small gap fill the column; the outer view itself is
-        // a transparent container (no card chrome, no "YOUR APP PROFILES" title). The
-        // native-apps card is sized to show its up-to-two rows; the profiles card takes
-        // the remaining height and scrolls.
-        let gap: CGFloat = 8
-        let nativeHeight: CGFloat = 244
+        // A slim header row holds the Refresh App List button (left-aligned, above the
+        // Native Apps column); the two cards sit below it side by side. The outer view is
+        // itself a transparent container
+        // (no card chrome, no "YOUR APP PROFILES" title). Native apps take the LEFT column,
+        // the generated App Profiles the RIGHT. Each column is its own card with its own
+        // caption and independent vertical scroller.
+        let headerHeight: CGFloat = 34
+        let gap: CGFloat = 16
+        let columnWidth = (frame.width - gap) / 2
+        let cardsHeight = frame.height - headerHeight
         nativeCard = MappingSectionCardView(
             title: "NATIVE APPS",
-            frame: NSRect(x: 0, y: 0, width: frame.width, height: nativeHeight)
+            frame: NSRect(x: 0, y: headerHeight, width: columnWidth, height: cardsHeight)
         )
         profilesCard = MappingSectionCardView(
             title: "APP PROFILES",
             frame: NSRect(
-                x: 0, y: nativeHeight + gap,
-                width: frame.width, height: frame.height - nativeHeight - gap
+                x: columnWidth + gap, y: headerHeight,
+                width: columnWidth, height: cardsHeight
             )
         )
         super.init(frame: frame)
-        [nativeCard, profilesCard].forEach(addSubview)
+        let refreshWidth: CGFloat = 168
+        refreshButton.frame = NSRect(x: 0, y: 2, width: refreshWidth, height: 28)
+        // Leading clockwise-arrow glyph, matching the "Updates…" button's refresh affordance.
+        if let base = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil),
+           let sized = base.withSymbolConfiguration(
+               NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+           ) {
+            sized.isTemplate = true
+            refreshButton.image = sized
+            refreshButton.imagePosition = .imageLeading
+            refreshButton.imageHugsTitle = true
+        }
+        refreshButton.setAccessibilityLabel("Refresh App List")
+        refreshButton.onPress = { [weak self] in self?.onRefreshApps?() }
+        [nativeCard, profilesCard, refreshButton].forEach(addSubview)
         rebuildRows()
     }
 
@@ -1472,8 +1508,9 @@ final class AppProfilesContentView: NSView {
 /// same mould as `AppProfilesContentView`: chrome in `draw(_:)`, everything else
 /// a subview, and all real work driven by the owner through closures + setters.
 /// Locked behind a padlock by default so the data-location controls can't be
-/// changed by accident; unlocking reveals two sections — choose/clear the folder
-/// new profiles are stored in, and scan/adopt an existing Klik PRO data folder.
+/// changed by accident; unlocking reveals three sections — the data folder new
+/// profiles are stored in (choose, clear, or Scan & Import an existing one), the
+/// per-profile maintenance rows, and profile cleanup for leftovers.
 private final class FlippedMaintenanceView: NSView {
     override var isFlipped: Bool { true }
 }
@@ -1491,25 +1528,30 @@ final class AdvancedSettingsContentView: NSView {
     )
     private let lockHint = NSTextField(labelWithString: "Click the lock to unlock")
 
-    // Unlocked-state views — "Data folder for new profiles".
+    // Unlocked-state views — "Data folder for new profiles". Scan & Import lives
+    // here too: it points Klik PRO at an existing data folder, which is the same
+    // decision as choosing one.
     private let dataRootLabel = NSTextField(labelWithString: "DATA FOLDER FOR NEW PROFILES")
     private let dataRootBody = NSTextField(wrappingLabelWithString:
         "New App Profiles are stored here so their logins survive uninstalling Klik PRO. "
-        + "Existing profiles are never moved."
+        + "Existing profiles are never moved. Already have a Klik PRO data folder from a "
+        + "reinstall or another Mac? Scan & Import brings back the App Profiles it holds — "
+        + "pick the folder containing \"vault.json\", not the \".claude\" or \".codex\" "
+        + "links in your Home folder."
     )
     private let dataRootValueField = NSTextField(labelWithString: "")
     private let chooseButton = AppProfileButton(title: "Choose Folder…", frame: .zero)
     private let clearButton = AppProfileButton(title: "Clear", frame: .zero)
+    private let scanButton = AppProfileButton(title: "Scan & Import…", frame: .zero)
 
-    // Unlocked-state views — "Recover from an existing folder".
-    private let recoverLabel = NSTextField(labelWithString: "RECOVER FROM AN EXISTING FOLDER")
-    private let recoverBody = NSTextField(wrappingLabelWithString:
-        "Already have a Klik PRO data folder from a reinstall or another Mac? "
-        + "Scan the folder that contains \"vault.json\" (the one you set as your Data "
-        + "Folder above) to re-adopt the App Profiles it holds — not the \".claude\" or "
-        + "\".codex\" links in your Home folder. Existing profiles are left untouched."
+    // Unlocked-state views — "Profile cleanup". Leftovers outlive the profiles
+    // that made them, so this sits after the maintenance rows.
+    private let cleanupLabel = NSTextField(labelWithString: "PROFILE CLEANUP")
+    private let cleanupBody = NSTextField(wrappingLabelWithString:
+        "Find and remove leftovers from App Profiles you have already removed — Dock, "
+        + "Launchpad, and menu-bar icons, custom-icon copies, lock files, and profile "
+        + "data with no Klik PRO entry. Only Klik PRO-owned locations are scanned."
     )
-    private let scanButton = AppProfileButton(title: "Scan & Adopt…", frame: .zero)
     private let deepScanButton = AppProfileButton(title: "Deep Scan for Leftovers…", frame: .zero)
 
     // Unlocked-state views — lifecycle and repair. Rows are rebuilt from the
@@ -1528,7 +1570,9 @@ final class AdvancedSettingsContentView: NSView {
     var onUnlock: (() -> Void)?
     var onChooseFolder: (() -> Void)?
     var onClearFolder: (() -> Void)?
-    var onScanAndAdopt: (() -> Void)?
+    /// Scan & Import — point Klik PRO at an existing data folder and bring back
+    /// the App Profiles its `vault.json` describes.
+    var onScanAndImport: (() -> Void)?
     /// Deep scan for orphaned launcher/metadata leftovers, with one-click clean.
     var onDeepScan: (() -> Void)?
     var onRepair: ((AppProfileInstance) -> Void)?
@@ -1549,8 +1593,8 @@ final class AdvancedSettingsContentView: NSView {
     private var lockedViews: [NSView] { [lockButton, lockTitle, lockBody, lockHint] }
     private var unlockedViews: [NSView] {
         [dataRootLabel, dataRootBody, dataRootValueField, chooseButton, clearButton,
-         recoverLabel, recoverBody, scanButton, deepScanButton, maintenanceLabel,
-         maintenanceBody, maintenanceScroll, statusField]
+         scanButton, maintenanceLabel, maintenanceBody, maintenanceScroll,
+         cleanupLabel, cleanupBody, deepScanButton, statusField]
     }
 
     override var isFlipped: Bool { true }
@@ -1583,38 +1627,42 @@ final class AdvancedSettingsContentView: NSView {
         lockHint.textColor = .controlAccentColor
         lockHint.alignment = .center
 
-        // Section 1 — Data folder.
+        // Section 1 — Data folder, including Scan & Import for an existing one.
         styleSectionLabel(dataRootLabel, frame: NSRect(x: 28, y: 34, width: width - 56, height: 16))
-        styleBody(dataRootBody, frame: NSRect(x: 28, y: 58, width: width - 56, height: 36))
-        dataRootValueField.frame = NSRect(x: 28, y: 104, width: width - 56, height: 20)
+        styleBody(dataRootBody, frame: NSRect(x: 28, y: 58, width: width - 56, height: 54))
+        dataRootValueField.frame = NSRect(x: 28, y: 118, width: width - 56, height: 20)
         dataRootValueField.font = .systemFont(ofSize: 12, weight: .medium)
         dataRootValueField.textColor = .appTextPrimary
         dataRootValueField.lineBreakMode = .byTruncatingMiddle
-        chooseButton.frame = NSRect(x: 28, y: 134, width: 150, height: 28)
+        chooseButton.frame = NSRect(x: 28, y: 148, width: 150, height: 28)
         chooseButton.onPress = { [weak self] in self?.onChooseFolder?() }
-        clearButton.frame = NSRect(x: 186, y: 134, width: 90, height: 28)
+        clearButton.frame = NSRect(x: 186, y: 148, width: 90, height: 28)
         clearButton.onPress = { [weak self] in self?.onClearFolder?() }
+        scanButton.frame = NSRect(x: 284, y: 148, width: 170, height: 28)
+        scanButton.toolTip =
+            "Point Klik PRO at an existing data folder and bring back the App Profiles "
+            + "its \"vault.json\" describes. Existing profiles are left untouched."
+        scanButton.onPress = { [weak self] in self?.onScanAndImport?() }
 
-        // Section 2 — Recover.
-        styleSectionLabel(recoverLabel, frame: NSRect(x: 28, y: 210, width: width - 56, height: 16))
-        styleBody(recoverBody, frame: NSRect(x: 28, y: 234, width: width - 56, height: 56))
-        scanButton.frame = NSRect(x: 28, y: 300, width: 170, height: 28)
-        scanButton.onPress = { [weak self] in self?.onScanAndAdopt?() }
-        deepScanButton.frame = NSRect(x: 206, y: 300, width: 226, height: 28)
-        deepScanButton.toolTip =
-            "Find and remove leftover Dock, Launchpad, and menu-bar icons, custom-icon "
-            + "copies, lock files, and data folders from profiles you've removed."
-        deepScanButton.onPress = { [weak self] in self?.onDeepScan?() }
-
-        styleSectionLabel(maintenanceLabel, frame: NSRect(x: 28, y: 354, width: width - 56, height: 16))
-        styleBody(maintenanceBody, frame: NSRect(x: 28, y: 378, width: width - 56, height: 36))
-        maintenanceScroll.frame = NSRect(x: 28, y: 424, width: width - 56, height: 190)
+        // Section 2 — Maintenance rows for the profiles Klik PRO still tracks.
+        styleSectionLabel(maintenanceLabel, frame: NSRect(x: 28, y: 210, width: width - 56, height: 16))
+        styleBody(maintenanceBody, frame: NSRect(x: 28, y: 234, width: width - 56, height: 36))
+        maintenanceScroll.frame = NSRect(x: 28, y: 280, width: width - 56, height: 204)
         maintenanceScroll.drawsBackground = false
         maintenanceScroll.hasVerticalScroller = true
         maintenanceScroll.autohidesScrollers = true
         maintenanceScroll.documentView = maintenanceDocument
 
-        statusField.frame = NSRect(x: 28, y: 626, width: width - 56, height: 40)
+        // Section 3 — Profile cleanup for what removed profiles left behind.
+        styleSectionLabel(cleanupLabel, frame: NSRect(x: 28, y: 518, width: width - 56, height: 16))
+        styleBody(cleanupBody, frame: NSRect(x: 28, y: 542, width: width - 56, height: 36))
+        deepScanButton.frame = NSRect(x: 28, y: 588, width: 226, height: 28)
+        deepScanButton.toolTip =
+            "Find and remove leftover Dock, Launchpad, and menu-bar icons, custom-icon "
+            + "copies, lock files, and data folders from profiles you've removed."
+        deepScanButton.onPress = { [weak self] in self?.onDeepScan?() }
+
+        statusField.frame = NSRect(x: 28, y: 634, width: width - 56, height: 40)
         statusField.font = .systemFont(ofSize: 12)
         statusField.textColor = .appTextSecondary
 
@@ -1858,11 +1906,11 @@ final class AdvancedSettingsContentView: NSView {
         NSColor.separatorColor.setStroke()
         let border = NSBezierPath(roundedRect: card, xRadius: 12, yRadius: 12)
         border.lineWidth = 1; border.stroke()
-        // A hairline divider between the two sections, only while unlocked.
+        // A hairline divider between each of the three sections, only while unlocked.
         if !isLocked {
             NSColor.separatorColor.setFill()
-            NSBezierPath(rect: NSRect(x: 28, y: 186, width: bounds.width - 56, height: 1)).fill()
-            NSBezierPath(rect: NSRect(x: 28, y: 342, width: bounds.width - 56, height: 1)).fill()
+            NSBezierPath(rect: NSRect(x: 28, y: 196, width: bounds.width - 56, height: 1)).fill()
+            NSBezierPath(rect: NSRect(x: 28, y: 504, width: bounds.width - 56, height: 1)).fill()
         }
     }
 }

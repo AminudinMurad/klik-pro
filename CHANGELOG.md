@@ -2,6 +2,113 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.4.5
+
+A fix for App Profile data that could not be deleted, and a clearer Advanced tab.
+
+- **Delete Data works again** — deleting an App Profile's login data, or leftover data
+  with no profile, failed for every ChatGPT or Claude profile that had been launched.
+  Chromium writes four links of its own into a profile the first time it runs, and the
+  ownership check refused any profile containing a link. Move to Trash and Delete
+  Permanently both complete now, and Deep Scan for Leftovers can clean the data
+  folders it finds.
+- **A failure message that is true** — a refused removal used to advise quitting the
+  app or restarting macOS, which could never help. It now says whether Klik PRO could
+  not verify the item as its own or the disk refused.
+- **A data folder from the first launch** — onboarding gains a second step offering
+  `~/Klik PRO Vault` as its default action, so a fresh install can store profile logins
+  somewhere that survives an uninstall instead of moving them later. Choose a different
+  folder on the page, or Skip for Now to keep them in Application Support.
+- **Scan & Import** — "Scan & Adopt" is renamed and moves up beside the data-folder
+  controls it belongs with.
+- **Profile Cleanup** — Deep Scan for Leftovers moves into its own section below App
+  Profile Maintenance.
+
+Nothing outside a profile is removed: a link pointing at a folder outside the profile
+still fails closed, and a profile's own links travel to the Trash as links.
+
+## 1.4.4
+
+A visual redesign of the Mappings tab, plus the Horizontal Thumb Wheel's browser
+control brought into the tab.
+
+- **Mouse Profile card** — the mouse and its four button callouts now sit together
+  in one bordered "Mouse Profile" panel, separated from the app lists, with each
+  callout beside the button it controls.
+- **Compact, stacked button controls** — each mouse button's action picker and its
+  shortcut or app picker are stacked and sized to their content, arranged around
+  the mouse.
+- **Horizontal Thumb Wheel in Mappings** — the thumb wheel appears as its own
+  control with a browser selector, kept two-way in sync with the browser checkboxes
+  in Settings.
+- **Refresh App List** — the rescan control gains a refresh icon and sits above the
+  Native Apps and App Profiles lists.
+
+Existing button assignments and shortcuts are unchanged; this release reorganizes
+how the Mappings tab presents them.
+
+## 1.4.3
+
+A refinement of how the App Profile generator manages the native app's Dock icon.
+
+- **Smarter Dock icon on generation** — creating an App Profile no longer forces a
+  Klik PRO Dock launcher when a working Dock entry for the native app already exists.
+  If either the native app's own Dock tile or Klik PRO's launcher is already present,
+  the step is skipped and the "always on" row is no longer shown; the launcher is
+  added only when neither is present, so you always keep a way to reopen the native app.
+- **Add Native App Dock Icon** — the generator card's gear menu gains this counterpart
+  to Remove Native App Dock Icon, so the native app's own Dock tile can be put back
+  at any time.
+- **Generator card reflects your changes** — after Rename Dock Icon or Change Icon,
+  the generator card tile updates to show the new name and custom icon, matching the
+  Dock launcher; Reset returns it to the native app's own name and icon.
+- **Reliable Dock icons when both are added at once** — creating a profile that adds
+  both its own Dock icon and the native launcher in one step now lands both reliably,
+  where the profile's tile could previously be dropped during the Dock relaunch.
+- **Add to Dock for a profile** — each App Profile's gear menu gains **Add to Dock**,
+  so a profile's icon can be pinned to the Dock at any time.
+
+## 1.4.2
+
+Generator-card parity with the per-profile controls for the native Klik PRO Dock launcher.
+
+- **Rename Dock Icon… and Change Icon… on the generator card** — the generator card's
+  gear menu acts on the native app's Klik PRO Dock launcher. Rename updates the Dock
+  tile label; Change Icon supports tint, badge, a custom PNG/ICO image, and reset —
+  the same options already available on each managed profile.
+- **Durable name and icon** — a personalized launcher's custom name and icon survive
+  an App Profile generation and a gear **Replace**, so it keeps its identity across
+  rebuilds.
+
+## 1.4.1
+
+A small front-of-app polish release.
+
+- **Aligned tab bar** — the tab bar gains a subtle border and sits on the header's
+  centerline, aligned with the Klik PRO wordmark and the updates button; labels and
+  the Advanced lock glyph are vertically centered from measured text metrics.
+- **Compact updates control** — the header's Check for Updates button becomes a
+  compact **↻ Updates…** control, still top-right and still reading **Update available**
+  when a newer version is found.
+- **Consistent "native" wording** — the built-in ChatGPT and Claude apps are now
+  labelled "native" throughout (for example, "ChatGPT / Codex (native)").
+
+## 1.4.0
+
+A refresh of the main window navigation and the Mappings screen.
+
+- **Pill-shaped tab bar** — the active tab is a filled-blue pill, tabs are evenly
+  spaced, and the row is centered in the header beside the logo. Tab order is
+  Mappings, App Profiles, Settings, Advanced.
+- **Tightened Check for Updates** button to sit cleanly within the new header layout.
+- **First-scan spinner** — the Mappings **Native Apps** card shows a loading spinner
+  during the first-launch app scan instead of flashing "No native apps installed".
+- **Accurate card sizing** — Mappings cards auto-hide their scrollers and size content
+  accurately, so a fitting group shows no stub handle and an overflowing list gets a
+  proportional one.
+- **Thumb Wheel Tab Switching moved to Settings**, grouping it with the app's other
+  preferences. Tab indices and hit-testing are unchanged.
+
 ## 1.3.2
 
 A focused original-app relaunch fix and App Profiles layout update.

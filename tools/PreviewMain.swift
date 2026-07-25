@@ -66,13 +66,18 @@ private struct PreviewMain {
                     "KLIK_PRO_PREVIEW_ONBOARDING_STEP"
                 ] ?? "1"
                 guard let step = Int(stepRaw).flatMap(OnboardingStep.init(rawValue:)) else {
-                    fputs("KLIK_PRO_PREVIEW_ONBOARDING_STEP must be 1, 2, or 3\n", stderr)
+                    fputs(
+                        "KLIK_PRO_PREVIEW_ONBOARDING_STEP must be 1 through "
+                            + "\(OnboardingStep.count)\n",
+                        stderr
+                    )
                     exit(64)
                 }
                 alert = makeOnboardingAlert(
                     step: step,
                     accessibilityGranted: accessibilityGranted,
-                    checklist: OnboardingChecklistView()
+                    checklist: OnboardingChecklistView(),
+                    dataFolder: OnboardingDataFolderPageView()
                 )
             } else {
                 let previewIcon = Bundle.main.url(

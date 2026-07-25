@@ -159,8 +159,12 @@ Orphaned Data (never auto-adopt without a recipe, §5). config vs manifest disag
 - **I5 — Reconciliation & repair are data-read-only.** Scan, classify, Repair
   Launcher, and Restore never create, move, or modify profile data.
 - **I6 — Ownership proof before destruction.** Destructive data actions require
-  the marker + standardized-path + symlink-rejection checks; markerless candidates
-  are manual-review only.
+  the marker + standardized-path checks, and reject a symlinked root or a
+  descendant link escaping the roots (§6.5); markerless candidates are
+  manual-review only. A profile's own in-tree links — Chromium writes
+  `SingletonLock`, `SingletonCookie`, `SingletonSocket`, and
+  `RunningChromeVersion` into every profile it launches — are not escapes and
+  never block removal (v1.4.5).
 - **I7 — Surgical reference cleanup.** Dock/menu removal touches **only** the
   exact, resolved-path-verified Klik-PRO-owned entry for that UUID's launcher;
   unrelated Dock entries are never rewritten. Unverifiable cleanup → the primary
@@ -493,7 +497,8 @@ vault controls (already behind the padlock, unlocked via
 ## 8. Failure handling (summary)
 
 - Reused primitives: exclusive `ManagedInstanceLock`; two-pass fail-closed process
-  scan; marker gate; stage→commit→rollback; symlink rejection; standardized paths.
+  scan; marker gate; stage→commit→rollback; symlink-escape rejection; standardized
+  paths.
 - Injectable trash op → surfaced no-op on failure; never permanent delete; partial
   results reported per artifact (§6.5).
 - `regenerateLauncher` failure (source missing/unverified) → clear reason, data

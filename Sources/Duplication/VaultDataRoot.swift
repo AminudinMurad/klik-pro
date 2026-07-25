@@ -37,6 +37,16 @@ private func canonicalizedPath(_ path: String, fileManager: FileManager) -> Stri
     return resolved.standardizedFileURL.path
 }
 
+/// The folder first-run onboarding offers as the data folder: a plainly named
+/// home-folder sibling that outlives uninstalling the app. It is only a starting
+/// suggestion — it still has to pass `vaultPathRejectionReason`, and the Advanced
+/// tab can point new profiles anywhere else that passes.
+func defaultVaultDataRootPath(homeDirectory: String = NSHomeDirectory()) -> String {
+    URL(fileURLWithPath: homeDirectory, isDirectory: true)
+        .appendingPathComponent("Klik PRO Vault", isDirectory: true)
+        .standardizedFileURL.path
+}
+
 func vaultPathRejectionReason(
     _ path: String,
     homeDirectory: String = NSHomeDirectory(),
