@@ -659,8 +659,12 @@ struct LauncherGenerator {
     /// The link is only ever created, never written through. Removal paths use
     /// `trashItem`/`removeItem`, which act on the link and never on the user's
     /// real keychains — see `AppCompatibilityRule.requiresLoginKeychainLink`.
-    /// Rooted at `homeSymlinkRootURL` so tests stay inside their sandbox root
-    /// instead of reaching the real home.
+    ///
+    /// This deliberately targets the real home rather than `homeSymlinkRootURL`.
+    /// A login keychain has no sandboxed equivalent: pointed anywhere else the
+    /// link dangles, and a dangling link reproduces exactly the silent
+    /// `can_persist_config=0` failure it exists to prevent. Safe to keep real,
+    /// because the link is never written through and never followed on delete.
     private func provisionIsolatedHome(at home: URL) throws {
         let library = home.appendingPathComponent("Library", isDirectory: true)
         for leaf in ["Application Support", "Caches", "HTTPStorages", "Preferences"] {
@@ -670,7 +674,7 @@ struct LauncherGenerator {
         guard !fileManager.fileExists(atPath: link.path) else { return }
         try fileManager.createSymbolicLink(
             atPath: link.path,
-            withDestinationPath: homeSymlinkRootURL
+            withDestinationPath: FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent("Library/Keychains", isDirectory: true).path
         )
     }

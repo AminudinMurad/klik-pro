@@ -217,8 +217,17 @@ private func inspectApp(at path: String) throws -> (InstalledApp, AppProfileEngi
         throw EvidenceError.unsupportedIdentity("App signature Team ID is unavailable")
     }
     let engine = scanner.engine(for: app)
-    guard engine == .electron || engine == .chromium else {
-        throw EvidenceError.unsupportedIdentity("Evidence harness only covers Electron/Chromium")
+    // Electron and Chromium are attestable on engine alone, because their
+    // isolation recipe is generic. Native apps have no generic recipe, so they
+    // are only attestable once the catalogue carries an explicit rule naming
+    // one — otherwise the harness would happily "attest" an app with no
+    // isolation at all.
+    let isCataloguedNative = engine == .native
+        && AppCompatibilityRegistry.production.matchingRule(for: app, engine: engine) != nil
+    guard engine == .electron || engine == .chromium || isCataloguedNative else {
+        throw EvidenceError.unsupportedIdentity(
+            "Evidence harness covers Electron/Chromium, or a native app with a catalogue rule"
+        )
     }
     guard app.version?.isEmpty == false else {
         throw EvidenceError.unsupportedIdentity("App version is unavailable")
@@ -230,6 +239,14 @@ private func rule(for app: InstalledApp, engine: AppProfileEngine) throws -> App
     guard let teamIdentifier = app.teamIdentifier,
           let version = app.version else {
         throw EvidenceError.unsupportedIdentity("Missing Team ID or version")
+    }
+    // When the catalogue already names this app, attest the real rule. A
+    // synthesized bare rule carries no requiredEnvironment and defaults every
+    // isolation switch, so attesting it would prove nothing about what ships —
+    // the recipe under test must be the one production uses.
+    if let production = AppCompatibilityRegistry.production
+        .matchingRule(for: app, engine: engine) {
+        return production
     }
     let id = app.bundleIdentifier
         .lowercased()
