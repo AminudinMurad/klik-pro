@@ -80,10 +80,16 @@ struct LauncherGenerator {
     // Q7 decision (2026-07-16): a fixed allow-list of variables the proven
     // hand-made wrappers set. Widening further needs a new owner decision;
     // CLAUDE_CONFIG_DIR was added by the 2026-07-19 visible-home decision.
+    // CFFIXED_USER_HOME was added 2026-07-25 for native-engine apps that expose
+    // no profile flag: it is the only knob that redirects a non-sandboxed app's
+    // Application Support / HTTPStorages / Caches. HOME is deliberately NOT
+    // allow-listed — macOS Foundation ignores it, and granting it would let a
+    // rule relocate an app's entire home for no benefit.
     static let allowedEnvironmentKeys: Set<String> = [
         "CODEX_HOME",
         "CODEX_ELECTRON_USER_DATA_PATH",
         "CLAUDE_CONFIG_DIR",
+        "CFFIXED_USER_HOME",
     ]
     static let profileOwnershipMarkerName = ".klik-pro-owned-profile"
     static let payloadResourceName = "LaunchSpec.plist"
@@ -623,6 +629,15 @@ struct LauncherGenerator {
 
         let sourceURL = URL(fileURLWithPath: instance.source.bundleURL, isDirectory: true)
             .standardizedFileURL
+        // Native-engine rules isolate purely through environment and implement no
+        // profile flag, so they suppress `--user-data-dir=`. With no matching rule
+        // the historical argument is kept, which is what every Electron entry wants.
+        let rule = instance.compatibilityRuleID.flatMap {
+            AppCompatibilityRegistry.production.rule(withID: $0)
+        }
+        let arguments = (rule?.passesUserDataDirArgument ?? true)
+            ? ["--user-data-dir=" + expectedProfile.path]
+            : []
         return ManagedLauncherSpecification(
             instanceID: instance.id,
             bundleIdentifier: "local.klik-pro.launcher.i"
@@ -631,9 +646,32 @@ struct LauncherGenerator {
             launcherURL: storedLauncher,
             profileURL: expectedProfile,
             sourceBundleURL: sourceURL,
-            arguments: ["--user-data-dir=" + expectedProfile.path],
+            arguments: arguments,
             environment: instance.environmentOverrides,
             storage: instance.storage
+        )
+    }
+
+    /// Provisions the `Library` skeleton a native app expects inside its
+    /// redirected home, plus the login-keychain link without which the app stops
+    /// persisting credentials silently rather than failing loudly.
+    ///
+    /// The link is only ever created, never written through. Removal paths use
+    /// `trashItem`/`removeItem`, which act on the link and never on the user's
+    /// real keychains — see `AppCompatibilityRule.requiresLoginKeychainLink`.
+    /// Rooted at `homeSymlinkRootURL` so tests stay inside their sandbox root
+    /// instead of reaching the real home.
+    private func provisionIsolatedHome(at home: URL) throws {
+        let library = home.appendingPathComponent("Library", isDirectory: true)
+        for leaf in ["Application Support", "Caches", "HTTPStorages", "Preferences"] {
+            try createPrivateDirectory(library.appendingPathComponent(leaf, isDirectory: true))
+        }
+        let link = library.appendingPathComponent("Keychains", isDirectory: false)
+        guard !fileManager.fileExists(atPath: link.path) else { return }
+        try fileManager.createSymbolicLink(
+            atPath: link.path,
+            withDestinationPath: homeSymlinkRootURL
+                .appendingPathComponent("Library/Keychains", isDirectory: true).path
         )
     }
 
@@ -676,6 +714,10 @@ struct LauncherGenerator {
             try createPrivateDirectory(spec.profileURL)
             profileCreated = true
             try writeProfileMarker(instanceID: instance.id, profileURL: spec.profileURL)
+            if AppCompatibilityRegistry.production
+                .rule(withID: compatibilityRuleID)?.requiresLoginKeychainLink == true {
+                try provisionIsolatedHome(at: spec.profileURL)
+            }
             if needsCodexHome {
                 _ = try createFreshCodexHome(for: instance.id, storage: instance.storage)
                 codexHomeCreated = true

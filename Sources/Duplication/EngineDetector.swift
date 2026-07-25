@@ -33,6 +33,23 @@ struct AppCompatibilityRule: Equatable {
     /// scanners detect CLI homes by these dot-folder names; the symlink points
     /// at the real UUID-keyed sibling home. `nil` means no visible link.
     var homeSymlinkPrefix: String? = nil
+    /// Electron and Chromium profiles are selected with `--user-data-dir=`.
+    /// Native-engine apps that isolate purely through environment implement no
+    /// such flag, and an unrecognised argument must not be assumed harmless, so
+    /// those rules opt out of emitting it.
+    var passesUserDataDirArgument = true
+    /// Native apps whose credential store is Keychain-backed need the user's
+    /// login keychain reachable *inside* the redirected home, because the
+    /// keychain search path is home-relative. Without it the app silently sets
+    /// `can_persist_config=0` and the sign-in is lost on quit rather than
+    /// failing loudly. The launcher provisions `Library/Keychains` inside the
+    /// isolated home as a symlink to the real `~/Library/Keychains`.
+    ///
+    /// SAFETY: that link points at the user's actual keychains. Every removal
+    /// path that can reach the isolated home must delete the *link* and never
+    /// follow it. Foundation's `removeItem` and `trashItem` both operate on the
+    /// link itself, which is what this codebase uses.
+    var requiresLoginKeychainLink = false
 
     /// Expands `{profileDir}` and `{codexHomeDir}` in each required value.
     /// Any other unresolved `{...}` token is a rule-authoring error and
@@ -108,6 +125,43 @@ struct AppCompatibilityRegistry {
                 "CODEX_ELECTRON_USER_DATA_PATH": "{profileDir}",
             ],
             homeSymlinkPrefix: "codex"
+        ),
+        // Gemini (com.google.GeminiMacOS) — the first native-engine entry.
+        //
+        // Evidence 2026-07-25 on 1.86.7.600: five accounts isolated
+        // simultaneously, each with its own account slot, cookie jar and chat
+        // store; cold start restored a sign-in with `StartNewOAuth` count 0 and
+        // `new=0`; verified again after relocating a live profile into the vault.
+        //
+        // Isolation is CFFIXED_USER_HOME *only*. Plain HOME does nothing —
+        // macOS Foundation resolves the home directory from the password
+        // database and ignores the variable (probe-verified), and unsetting HOME
+        // entirely still restored the login. The app implements no
+        // profile/user-data flag, so `--user-data-dir=` is suppressed here.
+        //
+        // Known residual leak: `~/Library/Preferences/com.google.GeminiMacOS.plist`
+        // stays shared, because cfprefsd resolves the per-user domain and
+        // ignores CFFIXED_USER_HOME. That covers feature flags and window
+        // frames; accounts do not collide, since every isolated profile names
+        // its own slot `user1`.
+        //
+        // Untested, not verified: login persistence and cold start are proven,
+        // but this rule has not yet survived a real vendor update, which is the
+        // second gate the catalogue requires before a `.verified` claim.
+        AppCompatibilityRule(
+            id: "com-google-geminimacos-native-untested",
+            bundleIdentifier: "com.google.GeminiMacOS",
+            teamIdentifier: "EQHXZ8M8AV",
+            engine: .native,
+            testedVersions: ["1.86.7.600"],
+            assurance: .untested,
+            acceptsAnyVersion: true,
+            requiredEnvironment: [
+                "CFFIXED_USER_HOME": "{profileDir}",
+            ],
+            homeSymlinkPrefix: nil,
+            passesUserDataDirArgument: false,
+            requiresLoginKeychainLink: true
         )
     ])
 

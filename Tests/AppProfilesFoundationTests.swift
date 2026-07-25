@@ -1406,14 +1406,16 @@ private struct AppProfilesFoundationTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let rules = AppCompatibilityRegistry.production.rules
-        expect(rules.count == 2,
-               "production must contain exactly Claude Verified and ChatGPT Untested")
+        expect(rules.count == 3,
+               "production must contain exactly Claude Verified, ChatGPT Untested and Gemini Untested")
         guard let claude = rules.first(where: {
             $0.id == "com-anthropic-claudefordesktop-verified"
         }), let chatGPT = rules.first(where: {
             $0.id == "com-openai-codex-untested"
+        }), let gemini = rules.first(where: {
+            $0.id == "com-google-geminimacos-native-untested"
         }) else {
-            expect(false, "both explicit production rules must be present")
+            expect(false, "every explicit production rule must be present")
             return
         }
         expect(claude.id == "com-anthropic-claudefordesktop-verified",
@@ -1450,6 +1452,33 @@ private struct AppProfilesFoundationTests {
         ], "ChatGPT must retain both required isolation paths")
         expect(chatGPT.homeSymlinkPrefix == "codex",
                "ChatGPT profiles must expose a visible ~/.codex-* home symlink")
+
+        // Both Electron entries must keep the historical launch shape now that
+        // the native rule can opt out of it.
+        expect(claude.passesUserDataDirArgument && chatGPT.passesUserDataDirArgument,
+               "Electron rules must still receive --user-data-dir=")
+        expect(!claude.requiresLoginKeychainLink && !chatGPT.requiresLoginKeychainLink,
+               "Electron rules must not provision a login-keychain link")
+
+        expect(gemini.bundleIdentifier == "com.google.GeminiMacOS",
+               "Gemini must pin the installed bundle identifier")
+        expect(gemini.teamIdentifier == "EQHXZ8M8AV",
+               "Gemini must pin Google's signing Team ID")
+        expect(gemini.engine == .native,
+               "Gemini must pin its detected native engine")
+        expect(gemini.assurance == .untested && gemini.acceptsAnyVersion,
+               "Gemini must stay honestly Untested until it survives a vendor update")
+        expect(gemini.testedVersions == ["1.86.7.600"],
+               "Gemini must record the version its isolation evidence covers")
+        expect(gemini.requiredEnvironment == [
+            "CFFIXED_USER_HOME": "{profileDir}",
+        ], "Gemini isolates through CFFIXED_USER_HOME alone; HOME is ignored by Foundation")
+        expect(!gemini.passesUserDataDirArgument,
+               "Gemini implements no profile flag, so --user-data-dir= must be suppressed")
+        expect(gemini.requiresLoginKeychainLink,
+               "Gemini needs the login keychain reachable or it silently stops persisting logins")
+        expect(gemini.homeSymlinkPrefix == nil,
+               "Gemini has no CLI home for multi-account scanners to discover")
 
         let tested = makeInstalledApp(
             root: root,
