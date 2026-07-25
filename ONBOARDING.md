@@ -33,8 +33,11 @@ isolated **App Profiles** (separate logins) for ChatGPT/Claude. Repo:
 
 ## 1. Current state
 
-- **Shipped: v1.4.3 (build 20)** — **Latest** GitHub release (`v1.4.3`, 9 signed
-  assets). `main` == working-branch HEAD == `2be9ff1`.
+- **Preparing: v1.4.6 (build 23)** — Gemini App Profiles, on
+  `feature/1.4.2-native-dock` (merged up to `main`, `./tools/check.sh` green). Not
+  tagged or released yet.
+- **Shipped: v1.4.5 (build 22)** — Latest GitHub release. `main` == `00c81db`.
+  v1.4.4 and v1.4.5 shipped without refreshing this handover; corrected here.
 - Prior shipped: **v1.4.1** (UI-only: bordered tab bar, `↻ Updates…`), **v1.4.2**
   (generator-card **Rename Dock Icon + Change Icon** for the native launcher, durable).
 - **v1.4.3 contents:** the App Profile generator only force-adds Klik PRO's native

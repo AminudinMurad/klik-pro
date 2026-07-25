@@ -2,6 +2,30 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.4.6
+
+Gemini joins App Profiles — the first supported app that is not built on Electron.
+
+- **Gemini App Profiles.** Google's Gemini desktop app can now hold a separate profile
+  per Google account, each with its own login, cookies, notebooks and chat list, all
+  running at the same time. Verified with four accounts open together.
+- **Listed as Experimental.** Isolation and login persistence are confirmed on-machine,
+  but the profile has not yet been re-checked after a Gemini update — the second gate
+  Klik PRO requires before calling an app Verified.
+- **Gemini logins persist.** Gemini stores its sign-in somewhere only reachable when it
+  can also see the login keychain; without that it signed in, worked for the session,
+  then silently forgot the account on quit. Profiles are now set up so it stores the
+  sign-in properly the first time.
+- **No change to the app itself.** Gemini accepts no profile switch on launch, so Klik
+  PRO redirects its storage location per profile instead. `/Applications/Gemini.app` is
+  never copied, modified or re-signed, and profiles survive Gemini's own updates.
+- **Fixed: profiles were built with launch options their app did not support.** The
+  Electron-style data-folder switch was applied unconditionally. Profiles now receive
+  only the options their app understands.
+
+Two profiles on the *same* Google account show the same conversations — Gemini keeps
+chats on Google's servers. App Profiles separate logins, not cloud history.
+
 ## 1.4.5
 
 A fix for App Profile data that could not be deleted, and a clearer Advanced tab.
