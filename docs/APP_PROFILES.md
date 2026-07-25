@@ -119,7 +119,7 @@ updates, which matters more for the target apps.
 | Per-instance notifications | No (shared) | Yes |
 | Per-instance macOS permissions | No (shared) | Yes |
 | Dedicated launcher + hotkey + mouse button | **Yes** | Not provided by the approach |
-| Native (non-Electron) apps | Not supported | App-dependent (entitlements / app groups / keychain / provisioning can block it) |
+| Native (non-Electron) apps | Gemini only, Untested (`CFFIXED_USER_HOME` + keychain link); others not supported | App-dependent (entitlements / app groups / keychain / provisioning can block it) |
 | App Store / Apple-provisioned apps | Not supported | Not supported |
 | Reversibility | Trivial | Delete bundle + profile |
 | Ongoing maintenance | None | Regenerate on each update |

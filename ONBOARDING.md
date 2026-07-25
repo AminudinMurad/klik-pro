@@ -45,6 +45,23 @@ isolated **App Profiles** (separate logins) for ChatGPT/Claude. Repo:
   back-to-back before a **single `killall Dock`** so a tile can't be clobbered
   mid-relaunch (the "star bundle created but never pinned" bug).
 
+- **On branch, unreleased — Gemini App Profiles** (`feature/1.4.2-native-dock`,
+  `4127a30` + `7dbaba8`): the first `.native` catalogue entry,
+  `com-google-geminimacos-native-untested`. Gemini exposes **no** profile flag, so
+  isolation is `CFFIXED_USER_HOME={profileDir}` plus a `Library/Keychains` symlink the
+  launcher provisions — without that link the app sets `can_persist_config=0` and
+  silently drops the sign-in on quit. Plain `HOME` does nothing: Foundation resolves
+  the home from the password database and ignores it. `AppCompatibilityRule` gained
+  `requiresLoginKeychainLink` and `passesUserDataDirArgument`, and
+  `specification(for:)` no longer hardcodes `--user-data-dir=` (it would have handed
+  native apps a flag they don't implement). `eligibility()` needed no change.
+  Rationale and evidence: `docs/gemini-native-isolation-resume.md`.
+  **Owed before release:** the rule is `.untested`. A parked evidence instance at
+  `~/Library/Application Support/Klik PRO Evidence/gemini-1.86.7.600/` needs a
+  one-time sign-in, then the relaunch and post-update attestations (commands in its
+  `README.md`) before it can be promoted to `.verified`. Do not claim Verified in
+  release notes until both gates are recorded.
+
 ## 2. Next: v1.4.4 — UI optimization only
 
 **No new features.** UI polish / optimization pass (scope to be defined with the user).
