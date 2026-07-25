@@ -138,3 +138,38 @@ Residue from the rejected bundle-id experiment:
 `~/Library/{Application Support,Caches,HTTPStorages}/com.google.GeminiMacOS.klik2`,
 `~/Library/Preferences/com.google.GeminiMacOS.klik2*.plist`, and a 238 MB re-signed
 bundle under the session scratchpad `bundleid-test/`.
+
+## NOT DONE — Gemini is not listed in the App Profiles UI
+
+The catalogue rule makes Gemini *eligible*, but the generator UI is separately
+curated, so nothing appears on screen yet. This is the remaining work before v1.4.6
+is actually usable. Found 2026-07-25 after the release build; **do not publish v1.4.6
+until this is resolved or the release notes are corrected.**
+
+Two possible paths — check the cheap one first:
+
+**A. It may already be reachable as an "alternative" (cheap, check first).**
+`AppProfilesUI.swift:1374` builds `supportedCandidates = candidates.filter { $0.canCreate }`,
+then `:1377` collects `alternatives` as every supported candidate that is *not* one of
+the two hardcoded cards. If `AppProfileCandidate.canCreate` is true for
+`.experimental` eligibility, Gemini should already be selectable through the
+alternatives picker, and the only fix needed is wording/discoverability. **Verify what
+`canCreate` returns for `.experimental` before writing any UI code.**
+
+**B. A dedicated third generator card (expensive).**
+`AppProfilesUI.swift` hardcodes exactly two: `chatGPTCard` / `claudeCard`, with ~40
+reference points — declarations (`:1208-1209`), init (`:1249-1254`), layout origins
+(`:1262-1263`, and `loadingView` height at `:1264` plus the `702` frame height at
+`:1257`), 20 closure wirings (`:1309-1330`), the `addSubview` list (`:1331`), dock and
+menu-bar state (`:1347-1370`), and the update/hide paths (`:1375-1402`).
+
+Worse, every one of those closures dispatches an `AppProfileOriginalApp` case
+(`.chatGPT` / `.claude`, defined in `KlikProConfig.swift:163-164`). Adding `.gemini`
+cascades into all the original-app handlers in `KlikProApp.swift` — open, assign, dock
+create/rename/change-icon/reset/delete, native dock add/remove, menu-bar toggle. Several
+of those are Electron-shaped assumptions that need auditing for a native app rather than
+copying blindly.
+
+Recommendation: do A first. Only build B if the alternatives path genuinely cannot
+surface Gemini, and treat the `AppProfileOriginalApp` expansion as its own reviewed
+change rather than part of the card work.
