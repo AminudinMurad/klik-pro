@@ -1508,8 +1508,9 @@ final class AppProfilesContentView: NSView {
 /// same mould as `AppProfilesContentView`: chrome in `draw(_:)`, everything else
 /// a subview, and all real work driven by the owner through closures + setters.
 /// Locked behind a padlock by default so the data-location controls can't be
-/// changed by accident; unlocking reveals two sections — choose/clear the folder
-/// new profiles are stored in, and scan/adopt an existing Klik PRO data folder.
+/// changed by accident; unlocking reveals three sections — the data folder new
+/// profiles are stored in (choose, clear, or Scan & Import an existing one), the
+/// per-profile maintenance rows, and profile cleanup for leftovers.
 private final class FlippedMaintenanceView: NSView {
     override var isFlipped: Bool { true }
 }
@@ -1527,25 +1528,30 @@ final class AdvancedSettingsContentView: NSView {
     )
     private let lockHint = NSTextField(labelWithString: "Click the lock to unlock")
 
-    // Unlocked-state views — "Data folder for new profiles".
+    // Unlocked-state views — "Data folder for new profiles". Scan & Import lives
+    // here too: it points Klik PRO at an existing data folder, which is the same
+    // decision as choosing one.
     private let dataRootLabel = NSTextField(labelWithString: "DATA FOLDER FOR NEW PROFILES")
     private let dataRootBody = NSTextField(wrappingLabelWithString:
         "New App Profiles are stored here so their logins survive uninstalling Klik PRO. "
-        + "Existing profiles are never moved."
+        + "Existing profiles are never moved. Already have a Klik PRO data folder from a "
+        + "reinstall or another Mac? Scan & Import brings back the App Profiles it holds — "
+        + "pick the folder containing \"vault.json\", not the \".claude\" or \".codex\" "
+        + "links in your Home folder."
     )
     private let dataRootValueField = NSTextField(labelWithString: "")
     private let chooseButton = AppProfileButton(title: "Choose Folder…", frame: .zero)
     private let clearButton = AppProfileButton(title: "Clear", frame: .zero)
+    private let scanButton = AppProfileButton(title: "Scan & Import…", frame: .zero)
 
-    // Unlocked-state views — "Recover from an existing folder".
-    private let recoverLabel = NSTextField(labelWithString: "RECOVER FROM AN EXISTING FOLDER")
-    private let recoverBody = NSTextField(wrappingLabelWithString:
-        "Already have a Klik PRO data folder from a reinstall or another Mac? "
-        + "Scan the folder that contains \"vault.json\" (the one you set as your Data "
-        + "Folder above) to re-adopt the App Profiles it holds — not the \".claude\" or "
-        + "\".codex\" links in your Home folder. Existing profiles are left untouched."
+    // Unlocked-state views — "Profile cleanup". Leftovers outlive the profiles
+    // that made them, so this sits after the maintenance rows.
+    private let cleanupLabel = NSTextField(labelWithString: "PROFILE CLEANUP")
+    private let cleanupBody = NSTextField(wrappingLabelWithString:
+        "Find and remove leftovers from App Profiles you have already removed — Dock, "
+        + "Launchpad, and menu-bar icons, custom-icon copies, lock files, and profile "
+        + "data with no Klik PRO entry. Only Klik PRO-owned locations are scanned."
     )
-    private let scanButton = AppProfileButton(title: "Scan & Adopt…", frame: .zero)
     private let deepScanButton = AppProfileButton(title: "Deep Scan for Leftovers…", frame: .zero)
 
     // Unlocked-state views — lifecycle and repair. Rows are rebuilt from the
@@ -1564,7 +1570,9 @@ final class AdvancedSettingsContentView: NSView {
     var onUnlock: (() -> Void)?
     var onChooseFolder: (() -> Void)?
     var onClearFolder: (() -> Void)?
-    var onScanAndAdopt: (() -> Void)?
+    /// Scan & Import — point Klik PRO at an existing data folder and bring back
+    /// the App Profiles its `vault.json` describes.
+    var onScanAndImport: (() -> Void)?
     /// Deep scan for orphaned launcher/metadata leftovers, with one-click clean.
     var onDeepScan: (() -> Void)?
     var onRepair: ((AppProfileInstance) -> Void)?
@@ -1585,8 +1593,8 @@ final class AdvancedSettingsContentView: NSView {
     private var lockedViews: [NSView] { [lockButton, lockTitle, lockBody, lockHint] }
     private var unlockedViews: [NSView] {
         [dataRootLabel, dataRootBody, dataRootValueField, chooseButton, clearButton,
-         recoverLabel, recoverBody, scanButton, deepScanButton, maintenanceLabel,
-         maintenanceBody, maintenanceScroll, statusField]
+         scanButton, maintenanceLabel, maintenanceBody, maintenanceScroll,
+         cleanupLabel, cleanupBody, deepScanButton, statusField]
     }
 
     override var isFlipped: Bool { true }
@@ -1619,38 +1627,42 @@ final class AdvancedSettingsContentView: NSView {
         lockHint.textColor = .controlAccentColor
         lockHint.alignment = .center
 
-        // Section 1 — Data folder.
+        // Section 1 — Data folder, including Scan & Import for an existing one.
         styleSectionLabel(dataRootLabel, frame: NSRect(x: 28, y: 34, width: width - 56, height: 16))
-        styleBody(dataRootBody, frame: NSRect(x: 28, y: 58, width: width - 56, height: 36))
-        dataRootValueField.frame = NSRect(x: 28, y: 104, width: width - 56, height: 20)
+        styleBody(dataRootBody, frame: NSRect(x: 28, y: 58, width: width - 56, height: 54))
+        dataRootValueField.frame = NSRect(x: 28, y: 118, width: width - 56, height: 20)
         dataRootValueField.font = .systemFont(ofSize: 12, weight: .medium)
         dataRootValueField.textColor = .appTextPrimary
         dataRootValueField.lineBreakMode = .byTruncatingMiddle
-        chooseButton.frame = NSRect(x: 28, y: 134, width: 150, height: 28)
+        chooseButton.frame = NSRect(x: 28, y: 148, width: 150, height: 28)
         chooseButton.onPress = { [weak self] in self?.onChooseFolder?() }
-        clearButton.frame = NSRect(x: 186, y: 134, width: 90, height: 28)
+        clearButton.frame = NSRect(x: 186, y: 148, width: 90, height: 28)
         clearButton.onPress = { [weak self] in self?.onClearFolder?() }
+        scanButton.frame = NSRect(x: 284, y: 148, width: 170, height: 28)
+        scanButton.toolTip =
+            "Point Klik PRO at an existing data folder and bring back the App Profiles "
+            + "its \"vault.json\" describes. Existing profiles are left untouched."
+        scanButton.onPress = { [weak self] in self?.onScanAndImport?() }
 
-        // Section 2 — Recover.
-        styleSectionLabel(recoverLabel, frame: NSRect(x: 28, y: 210, width: width - 56, height: 16))
-        styleBody(recoverBody, frame: NSRect(x: 28, y: 234, width: width - 56, height: 56))
-        scanButton.frame = NSRect(x: 28, y: 300, width: 170, height: 28)
-        scanButton.onPress = { [weak self] in self?.onScanAndAdopt?() }
-        deepScanButton.frame = NSRect(x: 206, y: 300, width: 226, height: 28)
-        deepScanButton.toolTip =
-            "Find and remove leftover Dock, Launchpad, and menu-bar icons, custom-icon "
-            + "copies, lock files, and data folders from profiles you've removed."
-        deepScanButton.onPress = { [weak self] in self?.onDeepScan?() }
-
-        styleSectionLabel(maintenanceLabel, frame: NSRect(x: 28, y: 354, width: width - 56, height: 16))
-        styleBody(maintenanceBody, frame: NSRect(x: 28, y: 378, width: width - 56, height: 36))
-        maintenanceScroll.frame = NSRect(x: 28, y: 424, width: width - 56, height: 190)
+        // Section 2 — Maintenance rows for the profiles Klik PRO still tracks.
+        styleSectionLabel(maintenanceLabel, frame: NSRect(x: 28, y: 210, width: width - 56, height: 16))
+        styleBody(maintenanceBody, frame: NSRect(x: 28, y: 234, width: width - 56, height: 36))
+        maintenanceScroll.frame = NSRect(x: 28, y: 280, width: width - 56, height: 204)
         maintenanceScroll.drawsBackground = false
         maintenanceScroll.hasVerticalScroller = true
         maintenanceScroll.autohidesScrollers = true
         maintenanceScroll.documentView = maintenanceDocument
 
-        statusField.frame = NSRect(x: 28, y: 626, width: width - 56, height: 40)
+        // Section 3 — Profile cleanup for what removed profiles left behind.
+        styleSectionLabel(cleanupLabel, frame: NSRect(x: 28, y: 518, width: width - 56, height: 16))
+        styleBody(cleanupBody, frame: NSRect(x: 28, y: 542, width: width - 56, height: 36))
+        deepScanButton.frame = NSRect(x: 28, y: 588, width: 226, height: 28)
+        deepScanButton.toolTip =
+            "Find and remove leftover Dock, Launchpad, and menu-bar icons, custom-icon "
+            + "copies, lock files, and data folders from profiles you've removed."
+        deepScanButton.onPress = { [weak self] in self?.onDeepScan?() }
+
+        statusField.frame = NSRect(x: 28, y: 634, width: width - 56, height: 40)
         statusField.font = .systemFont(ofSize: 12)
         statusField.textColor = .appTextSecondary
 
@@ -1894,11 +1906,11 @@ final class AdvancedSettingsContentView: NSView {
         NSColor.separatorColor.setStroke()
         let border = NSBezierPath(roundedRect: card, xRadius: 12, yRadius: 12)
         border.lineWidth = 1; border.stroke()
-        // A hairline divider between the two sections, only while unlocked.
+        // A hairline divider between each of the three sections, only while unlocked.
         if !isLocked {
             NSColor.separatorColor.setFill()
-            NSBezierPath(rect: NSRect(x: 28, y: 186, width: bounds.width - 56, height: 1)).fill()
-            NSBezierPath(rect: NSRect(x: 28, y: 342, width: bounds.width - 56, height: 1)).fill()
+            NSBezierPath(rect: NSRect(x: 28, y: 196, width: bounds.width - 56, height: 1)).fill()
+            NSBezierPath(rect: NSRect(x: 28, y: 504, width: bounds.width - 56, height: 1)).fill()
         }
     }
 }

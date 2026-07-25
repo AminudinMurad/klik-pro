@@ -568,12 +568,30 @@ grep -q 'presentOnboarding(force: true)' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'alert.addButton(withTitle: "Start Using Klik PRO")' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'alert.addButton(withTitle: "Set Up Accessibility…")' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'KLIK_PRO_PREVIEW_ACCESSIBILITY_GRANTED' "$ROOT/Sources/KlikProApp.swift"
-# Step 3 is opt-in: grant now, or "Skip for Now" (completes onboarding, grant later).
+# Step 4 is opt-in: grant now, or "Skip for Now" (completes onboarding, grant later).
 grep -q 'alert.addButton(withTitle: "Skip for Now")' "$ROOT/Sources/KlikProApp.swift"
 if grep -q 'addButton(withTitle: "View Mappings")' "$ROOT/Sources/KlikProApp.swift"; then
-  echo "Onboarding step 3 no longer offers View Mappings" >&2
+  echo "Onboarding step 4 no longer offers View Mappings" >&2
   exit 1
 fi
+# Step 2 offers the suggested data folder as the default action, so a fresh install
+# can store profiles durably without a later migration. Its skip uses the same
+# "Skip for Now" wording as the Accessibility step — never "Not Now"/Cancel — so the
+# choice is never forced and never reads as an escape. The folder must be applied
+# with the other first-run choices rather than persisted mid-flow.
+grep -q 'alert.addButton(withTitle: "Use This Folder")' "$ROOT/Sources/KlikProApp.swift"
+dataFolderStepBlock="$(sed -n '/^    case .dataFolder:/,/^    case .preferences:/p' \
+  "$ROOT/Sources/KlikProApp.swift")"
+grep -q 'alert.addButton(withTitle: "Skip for Now")' <<<"$dataFolderStepBlock"
+grep -q 'alert.addButton(withTitle: "Back")' <<<"$dataFolderStepBlock"
+grep -q 'func defaultVaultDataRootPath' "$ROOT/Sources/Duplication/VaultDataRoot.swift"
+grep -q 'pendingOnboardingDataRoot' "$ROOT/Sources/KlikProApp.swift"
+if grep -q 'KlikProConfigStore.save' <<<"$(sed -n '/func prepareOnboardingDataFolder/,/^    }/p' "$ROOT/Sources/KlikProApp.swift")"; then
+  echo "The first-run data folder must not be persisted before onboarding completes" >&2
+  exit 1
+fi
+grep -q 'KLIK_PRO_PREVIEW_ONBOARDING_STEP=4' "$ROOT/tools/render-previews.sh"
+grep -q 'onboarding-data-folder.png' "$ROOT/tools/render-previews.sh"
 grep -q 'onboardingCompleted = schemaVersion < 8' "$ROOT/Sources/KlikProConfig.swift"
 grep -q 'Open-source mouse shortcuts and App Profiles for macOS.' "$ROOT/Sources/KlikProApp.swift"
 grep -A4 'openAccessibilityLink = URLLinkView' "$ROOT/Sources/KlikProApp.swift" | grep -q 'style: .outline'
@@ -813,9 +831,28 @@ grep -q 'update-hover.png' "$ROOT/tools/render-previews.sh"
 grep -q 'close-hover.png' "$ROOT/tools/render-previews.sh"
 grep -q 'onboarding-back-hover.png' "$ROOT/tools/render-previews.sh"
 grep -q 'about.png' "$ROOT/tools/render-previews.sh"
-# README shows the animated onboarding flow (GIF) at the same display width.
+# README shows the animated onboarding flow (GIF) at the same display width. It is
+# built from the rendered fixtures — one frame per first-run page — so an added or
+# reordered step can never leave a stale recording in the README.
 grep -q 'onboarding-flow.gif' "$ROOT/README.md"
 grep -Eq 'onboarding-flow\.gif[^\"]*" width="462"' "$ROOT/README.md"
+[[ -s "$ROOT/assets/onboarding-flow.gif" ]]
+grep -q 'tools/render-onboarding-flow.swift' "$ROOT/tools/render-previews.sh"
+onboardingFlowFrames="$(sed -n '/^let frameNames = \[/,/^\]/p' \
+  "$ROOT/tools/render-onboarding-flow.swift")"
+for onboardingFlowFrame in \
+  onboarding.png onboarding-data-folder.png onboarding-toggles.png onboarding-access.png
+do
+  grep -q "\"$onboardingFlowFrame\"" <<<"$onboardingFlowFrames" || {
+    echo "The onboarding flow GIF must include every first-run page" >&2
+    exit 1
+  }
+done
+[[ "$(sips -g pixelWidth "$ROOT/assets/onboarding-flow.gif" 2>/dev/null \
+  | awk '/pixelWidth/ { print $2 }')" == "972" ]] || {
+  echo "Unexpected onboarding flow GIF width" >&2
+  exit 1
+}
 grep -q 'app-profiles-icon-showcase.gif' "$ROOT/README.md"
 [[ -s "$ROOT/assets/app-profiles-icon-showcase.gif" ]]
 # The locked-state Advanced screenshot documents the new lock/warning gate.
@@ -868,6 +905,7 @@ done
 onboardingFixtureHeight() {
   case "$(basename "$1")" in
     onboarding.png) echo "576" ;;
+    onboarding-data-folder.png) echo "860" ;;
     onboarding-toggles.png) echo "832" ;;
     onboarding-access.png|onboarding-back-hover.png) echo "736" ;;
     onboarding-granted.png) echo "668" ;;
@@ -877,6 +915,8 @@ onboardingFixtureHeight() {
 for onboardingFixture in \
   "$previewRunOne/fixtures/onboarding.png" \
   "$previewRunTwo/fixtures/onboarding.png" \
+  "$previewRunOne/fixtures/onboarding-data-folder.png" \
+  "$previewRunTwo/fixtures/onboarding-data-folder.png" \
   "$previewRunOne/fixtures/onboarding-toggles.png" \
   "$previewRunTwo/fixtures/onboarding-toggles.png" \
   "$previewRunOne/fixtures/onboarding-access.png" \
@@ -906,6 +946,9 @@ done
 cmp \
   "$previewRunOne/fixtures/onboarding.png" \
   "$previewRunTwo/fixtures/onboarding.png"
+cmp \
+  "$previewRunOne/fixtures/onboarding-data-folder.png" \
+  "$previewRunTwo/fixtures/onboarding-data-folder.png"
 cmp \
   "$previewRunOne/fixtures/onboarding-toggles.png" \
   "$previewRunTwo/fixtures/onboarding-toggles.png"

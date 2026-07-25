@@ -2631,18 +2631,22 @@ final class ButtonHoverOutlineView: NSView {
 /// what they want (or skips) and `ToggleView` applies and persists those choices when
 /// the sheet is confirmed. Kept to one screen at a fixed 430×252 size so the rendered
 /// onboarding fixtures stay dimensionally stable across releases.
-/// The three first-launch pages. Toggles and actions never share a page: Welcome
-/// introduces the app, Preferences holds only the four setting toggles, and
-/// Accessibility holds the one macOS permission plus the finishing actions. Steps
-/// can always go Back; there is no Cancel — the flow completes on the last page.
+/// The four first-launch pages. Toggles and actions never share a page: Welcome
+/// introduces the app, Data folder chooses where App Profile logins are stored,
+/// Preferences holds only the four setting toggles, and Accessibility holds the one
+/// macOS permission plus the finishing actions. Steps can always go Back; there is
+/// no Cancel — the flow completes on the last page.
 enum OnboardingStep: Int {
     case welcome = 1
-    case preferences = 2
-    case accessibility = 3
+    case dataFolder = 2
+    case preferences = 3
+    case accessibility = 4
+
+    static let count = 4
 }
 
 private func makeOnboardingStepLabel(_ step: OnboardingStep, y: CGFloat, width: CGFloat) -> NSTextField {
-    let label = NSTextField(labelWithString: "Step \(step.rawValue) of 3")
+    let label = NSTextField(labelWithString: "Step \(step.rawValue) of \(OnboardingStep.count)")
     label.frame = NSRect(x: 0, y: y, width: width, height: 16)
     label.alignment = .center
     label.font = .systemFont(ofSize: 11)
@@ -2677,6 +2681,100 @@ final class OnboardingWelcomePageView: NSView {
     }
 
     required init?(coder: NSCoder) { nil }
+}
+
+/// Step 2 — where new App Profiles keep their logins. Pre-filled with
+/// `defaultVaultDataRootPath()`, so the durable choice is one click and nobody has
+/// to understand the vault to get past this page. Picking a different folder is a
+/// button on the page rather than a fourth alert button, which keeps the alert's
+/// three actions on one row and the page's own action next to the path it changes.
+final class OnboardingDataFolderPageView: NSView {
+    override var isFlipped: Bool { true }
+
+    /// Runs the folder picker, returning the chosen path or nil if cancelled. Set by
+    /// the owner so this view never has to know about `NSOpenPanel` policy.
+    var onChooseFolder: (() -> String?)?
+
+    /// The folder "Use This Folder" would apply — the suggested vault until the
+    /// user picks another one.
+    private(set) var selectedPath: String = defaultVaultDataRootPath()
+    /// Why the last picked folder was refused, shown in place of the hint.
+    var rejectionReason: String? {
+        didSet { refresh() }
+    }
+
+    private let contentWidth: CGFloat = 430
+    private let pathField = NSTextField(labelWithString: "")
+    private let chooseButton = NSButton()
+    private let noteField = NSTextField(wrappingLabelWithString: "")
+
+    init() {
+        super.init(frame: NSRect(x: 0, y: 0, width: 430, height: 202))
+
+        let heading = NSTextField(labelWithString: "Where your profile logins live")
+        heading.frame = NSRect(x: 0, y: 0, width: contentWidth, height: 22)
+        heading.alignment = .center
+        heading.font = .boldSystemFont(ofSize: 15)
+
+        let body = NSTextField(
+            wrappingLabelWithString: "App Profiles keep each account signed in. Storing them in their own folder means those logins survive uninstalling Klik PRO, reinstalling it, or moving to a new Mac."
+        )
+        body.frame = NSRect(x: 28, y: 30, width: contentWidth - 56, height: 52)
+        body.font = .systemFont(ofSize: 13)
+        body.alignment = .center
+        body.textColor = .appTextSecondary
+        body.maximumNumberOfLines = 3
+
+        pathField.frame = NSRect(x: 28, y: 88, width: contentWidth - 56, height: 20)
+        pathField.alignment = .center
+        pathField.font = .systemFont(ofSize: 13, weight: .medium)
+        pathField.textColor = .appTextPrimary
+        pathField.lineBreakMode = .byTruncatingMiddle
+
+        chooseButton.title = "Choose Folder…"
+        chooseButton.bezelStyle = .rounded
+        chooseButton.frame = NSRect(x: contentWidth / 2 - 75, y: 114, width: 150, height: 24)
+        chooseButton.font = .systemFont(ofSize: 12)
+
+        noteField.frame = NSRect(x: 28, y: 148, width: contentWidth - 56, height: 34)
+        noteField.alignment = .center
+        noteField.font = .systemFont(ofSize: 12)
+        noteField.textColor = .appTextSecondary
+        noteField.maximumNumberOfLines = 2
+
+        chooseButton.target = self
+        chooseButton.action = #selector(choosePressed)
+
+        addSubview(heading)
+        addSubview(body)
+        addSubview(pathField)
+        addSubview(chooseButton)
+        addSubview(noteField)
+        addSubview(makeOnboardingStepLabel(.dataFolder, y: 186, width: contentWidth))
+        refresh()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    @objc private func choosePressed() {
+        guard let picked = onChooseFolder?() else { return }
+        selectedPath = picked
+        rejectionReason = nil
+        refresh()
+    }
+
+    private func refresh() {
+        pathField.stringValue = (selectedPath as NSString).abbreviatingWithTildeInPath
+        if let rejectionReason {
+            noteField.stringValue = rejectionReason
+            noteField.textColor = .systemRed
+        } else {
+            noteField.stringValue =
+                "Klik PRO creates this folder if needed. Skip for Now keeps logins inside Klik "
+                + "PRO's own Application Support folder."
+            noteField.textColor = .appTextSecondary
+        }
+    }
 }
 
 final class OnboardingAccessibilityPageView: NSView {
@@ -2839,7 +2937,8 @@ func confirmUnlockAdvancedSettings() -> Bool {
 func makeOnboardingAlert(
     step: OnboardingStep,
     accessibilityGranted: Bool,
-    checklist: OnboardingChecklistView
+    checklist: OnboardingChecklistView,
+    dataFolder: OnboardingDataFolderPageView
 ) -> NSAlert {
     let alert = NSAlert()
     alert.alertStyle = .informational
@@ -2866,6 +2965,16 @@ func makeOnboardingAlert(
     case .welcome:
         alert.accessoryView = OnboardingWelcomePageView()
         alert.addButton(withTitle: "Continue")
+    case .dataFolder:
+        // Buttons: [Use This Folder, Skip for Now, Back]. The suggested folder is the
+        // default action, so the durable choice costs one click; the page carries its
+        // own Choose Folder… button beside the path. Skipping is not a Cancel — it
+        // keeps the existing Application Support layout and moves on, the same way
+        // the Accessibility step's Skip for Now does.
+        alert.accessoryView = dataFolder
+        alert.addButton(withTitle: "Use This Folder")
+        alert.addButton(withTitle: "Skip for Now")
+        alert.addButton(withTitle: "Back")
     case .preferences:
         alert.accessoryView = checklist
         alert.addButton(withTitle: "Continue")
@@ -2960,6 +3069,10 @@ final class ToggleView: NSView {
     )
     private var saveInProgress = false
     private var appProfileLifecycleInProgress = false
+    /// The data folder chosen during first-run onboarding, applied together with the
+    /// other first-run choices on the last page. Nil means new profiles stay in
+    /// Application Support.
+    private var pendingOnboardingDataRoot: String?
     private var appProfileInteractionShield: NSView?
     private var unsavedChangesPreviewOverride = false
     private let headerWordmark: KlikProWordmarkView = {
@@ -3510,8 +3623,8 @@ final class ToggleView: NSView {
         advancedView.onClearFolder = { [weak self] in
             self?.clearVaultDataFolder()
         }
-        advancedView.onScanAndAdopt = { [weak self] in
-            self?.scanAndAdoptVaultFolder()
+        advancedView.onScanAndImport = { [weak self] in
+            self?.scanAndImportVaultFolder()
         }
         advancedView.onDeepScan = { [weak self] in
             self?.performDeepScanForLeftovers()
@@ -4009,22 +4122,22 @@ final class ToggleView: NSView {
         configurationDidChange()
     }
 
-    /// Advanced tab → "Scan & Adopt…". Picks an existing Klik PRO data folder and
-    /// re-adopts the App Profiles its `vault.json` describes, regenerating every
+    /// Advanced tab → "Scan & Import…". Picks an existing Klik PRO data folder and
+    /// brings back the App Profiles its `vault.json` describes, regenerating every
     /// ephemeral artifact from the folder's CURRENT path. A folder without a valid
     /// manifest is refused by `adoptVault`. Existing rows are merged untouched.
-    private func scanAndAdoptVaultFolder() {
+    private func scanAndImportVaultFolder() {
         guard !saveInProgress, !appProfileLifecycleInProgress else {
             showAppProfileAlert(
                 title: "Please wait",
-                message: "Finish the current Save or App Profile change before adopting a data folder."
+                message: "Finish the current Save or App Profile change before importing a data folder."
             )
             return
         }
         guard !hasUnsavedConfigurationChanges else {
             showAppProfileAlert(
                 title: "Save current changes first",
-                message: "Save or restore your current changes before adopting a data folder."
+                message: "Save or restore your current changes before importing a data folder."
             )
             return
         }
@@ -4058,19 +4171,19 @@ final class ToggleView: NSView {
             needsDisplay = true
             let skippedSuffix = result.skippedInstanceIDs.isEmpty
                 ? ""
-                : " \(result.skippedInstanceIDs.count) could not be adopted."
+                : " \(result.skippedInstanceIDs.count) could not be imported."
             if result.adopted.isEmpty {
                 // adoptVault only persists when it adopts something; persist the
                 // now-set data folder pointer so the choice survives relaunch.
                 _ = KlikProConfigStore.save(result.config)
                 advancedView.setStatus(
-                    "Data folder set. No new App Profiles were found to adopt." + skippedSuffix,
+                    "Data folder set. No new App Profiles were found to import." + skippedSuffix,
                     color: .appTextSecondary
                 )
             } else {
                 let noun = result.adopted.count == 1 ? "App Profile" : "App Profiles"
                 advancedView.setStatus(
-                    "Adopted \(result.adopted.count) \(noun) from the data folder." + skippedSuffix,
+                    "Imported \(result.adopted.count) \(noun) from the data folder." + skippedSuffix,
                     color: KlikProBrand.green
                 )
             }
@@ -4078,7 +4191,7 @@ final class ToggleView: NSView {
             config.dataRoot = previousDataRoot
             rebuildAppProfileManager()
             let message = (error as? AppProfileManagerError).map(appProfileErrorMessage)
-                ?? "That folder could not be adopted."
+                ?? "That folder could not be imported."
             advancedView.setStatus(message, color: .systemRed)
         }
     }
@@ -4681,7 +4794,7 @@ final class ToggleView: NSView {
                 self.advancedView.setStatus(
                     failed == 0
                         ? "\(removed) leftover item(s) \(verb)."
-                        : "\(removed) \(verb); \(failed) could not be removed and remain on disk. Quit the related app or restart macOS, then scan again.",
+                        : "\(removed) \(verb); \(failed) could not be removed and remain on disk — Klik PRO either could not verify them as its own or the disk refused. Check those paths in Finder, then scan again.",
                     color: failed == 0 ? KlikProBrand.green : .systemOrange
                 )
                 self.refreshAppProfileHealth()
@@ -4703,7 +4816,7 @@ final class ToggleView: NSView {
             if case .failed = $0.outcome { return true }
             return false
         }
-        return "Partly \(verb): \(failed.count) item(s) could not be removed and remain on disk. Quit the related app or restart macOS, then try again."
+        return "Partly \(verb): \(failed.count) item(s) could not be removed and remain on disk — Klik PRO either could not verify them as its own or the disk refused. Reveal the path in Finder to see what is left."
     }
 
     private func createManagedAppProfile(from candidate: AppProfileCandidate) {
@@ -7334,8 +7447,15 @@ final class ToggleView: NSView {
               let window = window,
               window.attachedSheet == nil else { return }
 
-        // One checklist instance carries the toggle choices across Back/Continue.
-        presentOnboardingStep(.welcome, selections: OnboardingChecklistView())
+        // One checklist and one data-folder page carry their choices across
+        // Back/Continue, so re-presenting a step never loses what was picked.
+        let dataFolder = OnboardingDataFolderPageView()
+        dataFolder.onChooseFolder = { [weak self] in self?.chooseOnboardingDataFolder() }
+        presentOnboardingStep(
+            .welcome,
+            selections: OnboardingChecklistView(),
+            dataFolder: dataFolder
+        )
     }
 
     /// One sheet per step. Welcome has a single Continue; later steps offer Back;
@@ -7343,7 +7463,8 @@ final class ToggleView: NSView {
     /// up and changing a toggle never leaves a half-applied state.
     private func presentOnboardingStep(
         _ step: OnboardingStep,
-        selections: OnboardingChecklistView
+        selections: OnboardingChecklistView,
+        dataFolder: OnboardingDataFolderPageView
     ) {
         guard let window = window, window.attachedSheet == nil else { return }
 
@@ -7351,23 +7472,45 @@ final class ToggleView: NSView {
         let alert = makeOnboardingAlert(
             step: step,
             accessibilityGranted: granted,
-            checklist: selections
+            checklist: selections,
+            dataFolder: dataFolder
         )
 
         alert.beginSheetModal(for: window) { [weak self] response in
             guard let self = self else { return }
             let advance: (OnboardingStep) -> Void = { next in
                 DispatchQueue.main.async {
-                    self.presentOnboardingStep(next, selections: selections)
+                    self.presentOnboardingStep(
+                        next, selections: selections, dataFolder: dataFolder
+                    )
                 }
             }
             switch step {
             case .welcome:
-                advance(.preferences)
+                advance(.dataFolder)
+            case .dataFolder:
+                // Buttons: [Use This Folder, Skip for Now, Back]
+                switch response {
+                case .alertFirstButtonReturn:
+                    dataFolder.rejectionReason =
+                        self.prepareOnboardingDataFolder(dataFolder.selectedPath)
+                    // A folder that cannot be used keeps the user on this page with
+                    // the reason shown, rather than silently falling back.
+                    dataFolder.rejectionReason == nil
+                        ? advance(.preferences)
+                        : advance(.dataFolder)
+                case .alertSecondButtonReturn:
+                    // Skip for Now — new profiles stay in Application Support.
+                    self.pendingOnboardingDataRoot = nil
+                    dataFolder.rejectionReason = nil
+                    advance(.preferences)
+                default:
+                    advance(.welcome)
+                }
             case .preferences:
                 response == .alertFirstButtonReturn
                     ? advance(.accessibility)
-                    : advance(.welcome)
+                    : advance(.dataFolder)
             case .accessibility:
                 // Finishing always completes onboarding and applies the toggles. When
                 // opening Accessibility setup, that flow starts the helper, so the apply
@@ -7402,6 +7545,51 @@ final class ToggleView: NSView {
         }
     }
 
+    /// First-run "Choose Folder…". Returns the picked folder, or nil if the picker
+    /// was cancelled. Validation happens in `prepareOnboardingDataFolder` so a
+    /// refused folder can be shown on the page with its reason.
+    private func chooseOnboardingDataFolder() -> String? {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Choose"
+        panel.message = "Choose or create a folder to store new App Profiles. "
+            + "Pick a location outside the app, such as Documents or an external disk. "
+            + "Use the New Folder button to make a new one."
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        return url.standardizedFileURL.path
+    }
+
+    /// Validates a first-run data folder and creates it when it does not exist yet,
+    /// so the choice is real before onboarding moves on. Returns nil on success, or
+    /// the reason to show on the page. Nothing is persisted here — the folder is
+    /// applied with the rest of the first-run choices on the last page.
+    private func prepareOnboardingDataFolder(_ path: String) -> String? {
+        if let reason = vaultPathRejectionReason(path) { return reason }
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) {
+            guard isDirectory.boolValue else {
+                return "That path already exists and is not a folder. Choose another."
+            }
+        } else {
+            do {
+                try FileManager.default.createDirectory(
+                    at: URL(fileURLWithPath: path, isDirectory: true),
+                    withIntermediateDirectories: true
+                )
+            } catch {
+                return "That folder could not be created. Choose another."
+            }
+        }
+        // Re-check the created folder: creation can succeed at a path that is still
+        // not usable as a data folder (an unwritable mount, for instance).
+        if let reason = vaultPathRejectionReason(path) { return reason }
+        pendingOnboardingDataRoot = path
+        return nil
+    }
+
     /// Persist and apply the first-run toggle choices. UserDefaults-backed switches
     /// (launch at login, auto-update) are written with concrete values so a later launch
     /// never re-resolves them from the pre-onboarding defaults; config-backed switches
@@ -7429,12 +7617,20 @@ final class ToggleView: NSView {
         config.showMenuBarIcon = showMenuBarIcon
         config.caffeinateMenuEnabled = effectiveCaffeinate
         config.onboardingCompleted = true
+        // The first-run data folder lands in the same save as the toggles, so a
+        // fresh install starts storing profiles in it — no later migration.
+        if let dataRoot = pendingOnboardingDataRoot {
+            config.dataRoot = dataRoot
+            rebuildAppProfileManager()
+            advancedView.setDataRoot(dataRoot)
+        }
         recheckControlState()
 
         if KlikProConfigStore.save(config) {
             persistedConfig = config
             persistedControlState = controlState
         }
+        pendingOnboardingDataRoot = nil
 
         guard startHelper, !previewRenderingIsActive else { return }
         saveApplyQueue.async {

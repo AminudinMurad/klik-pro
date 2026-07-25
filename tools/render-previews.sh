@@ -89,23 +89,26 @@ if [[ "$MODE" == "all" ]]; then
   xcrun swift "$ROOT/tools/render-app-profiles-showcase.swift"
 fi
 
-# Onboarding fixtures cover all three steps. Step 3 renders the actual first-run
+# Onboarding fixtures cover all four steps. Step 4 renders the actual first-run
 # state (permission still required) plus the granted variant.
 render_preview "$FIXTURES/onboarding.png" onboarding
 KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
   KLIK_PRO_PREVIEW_ONBOARDING_STEP=2 \
+  "$EXECUTABLE" "$FIXTURES/onboarding-data-folder.png" onboarding
+KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
+  KLIK_PRO_PREVIEW_ONBOARDING_STEP=3 \
   "$EXECUTABLE" "$FIXTURES/onboarding-toggles.png" onboarding
 KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
-  KLIK_PRO_PREVIEW_ONBOARDING_STEP=3 \
+  KLIK_PRO_PREVIEW_ONBOARDING_STEP=4 \
   "$EXECUTABLE" "$FIXTURES/onboarding-access.png" onboarding
 KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
-  KLIK_PRO_PREVIEW_ONBOARDING_STEP=3 \
+  KLIK_PRO_PREVIEW_ONBOARDING_STEP=4 \
   KLIK_PRO_PREVIEW_ACCESSIBILITY_GRANTED=1 \
   "$EXECUTABLE" "$FIXTURES/onboarding-granted.png" onboarding
 # A matched pair verifies the hover outline on the Back button independently of
 # the permission-status copy and primary action.
 KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
-  KLIK_PRO_PREVIEW_ONBOARDING_STEP=3 \
+  KLIK_PRO_PREVIEW_ONBOARDING_STEP=4 \
   KLIK_PRO_PREVIEW_ONBOARDING_BACK_HOVER=1 \
   "$EXECUTABLE" "$FIXTURES/onboarding-back-hover.png" onboarding
 # Menu-bar About uses the same shared wordmark and badge metrics.
@@ -138,9 +141,16 @@ KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
   KLIK_PRO_PREVIEW_CLOSE_HOVER=1 \
   "$EXECUTABLE" "$FIXTURES/close-hover.png" mappings
 
+if [[ "$MODE" == "all" ]]; then
+  # The README onboarding animation is built from the fixtures above, so adding or
+  # reordering a first-run page can never leave a stale hand-made recording behind.
+  xcrun swift "$ROOT/tools/render-onboarding-flow.swift" "$FIXTURES"
+fi
+
 echo "Rendered v$VERSION previews (working directory: $WORK)"
 echo "UI fixtures:"
 echo "  $FIXTURES/onboarding.png"
+echo "  $FIXTURES/onboarding-data-folder.png"
 echo "  $FIXTURES/onboarding-toggles.png"
 echo "  $FIXTURES/onboarding-access.png"
 echo "  $FIXTURES/onboarding-granted.png"

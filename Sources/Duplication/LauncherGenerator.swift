@@ -197,8 +197,8 @@ struct LauncherGenerator {
 
     /// The UUID-keyed sibling home a rule's `{codexHomeDir}` placeholder
     /// expands to. Deliberately outside `Profiles/<UUID>` so the target app's
-    /// own symlinks (plugin caches, tmp wrappers) never sit inside the
-    /// symlink-rejecting profile-deletion path.
+    /// own symlinks (plugin caches, tmp wrappers) stay clear of the profile
+    /// tree the deletion path scans for escaping links.
     func codexHomeURL(for id: UUID) -> URL {
         applicationSupportURL
             .appendingPathComponent("CodexHomes", isDirectory: true)
@@ -1877,7 +1877,7 @@ struct LauncherGenerator {
 
     /// Reclaims a single owned data artifact — either to the Trash (reversible)
     /// or permanently. Every kind is re-validated against its exact Klik PRO
-    /// root immediately before the op, so a swapped path, a symlink, or a
+    /// root immediately before the op, so a swapped path, a symlinked root, or a
     /// non-UUID name fails closed and nothing is touched. Marker-bearing kinds
     /// (`profileRoot`, `vaultContainer` via its `user-data`) re-prove ownership;
     /// `codexHome`/`customIcon` are gated purely by their standardized position.
@@ -1893,7 +1893,9 @@ struct LauncherGenerator {
         let standardized = candidateURL.standardizedFileURL
         switch kind {
         case .profileRoot:
-            // Application Support profile root: marker-gated, symlink-rejecting.
+            // Application Support profile root: marker-gated; the root itself may
+            // never be a symlink, and no descendant may resolve to a directory
+            // outside the profile (`isSafeDescendantSymlink`).
             guard storage == .applicationSupport else {
                 throw LauncherGeneratorError.unsafeRemoval
             }
@@ -1905,7 +1907,10 @@ struct LauncherGenerator {
             )
         case .vaultContainer:
             // `<Vault>/Instances/<UUID>`: position-gated, and its `user-data`
-            // must carry the ownership marker (that is the ownership proof).
+            // must carry the ownership marker (that is the ownership proof). The
+            // symlink-escape scan therefore covers `user-data`, not the whole
+            // container — `config-home` and `custom-icon.icns` are removed on the
+            // container's position gate alone.
             guard storage == .vault,
                   let expected = try? vaultInstanceDirectoryURL(for: instanceID),
                   standardized == expected.standardizedFileURL else {
@@ -2120,13 +2125,64 @@ struct LauncherGenerator {
             throw LauncherGeneratorError.unsafeRemoval
         }
         for case let child as URL in enumerator {
+            // An unavailable `isSymbolicLink` fails closed: this runs immediately
+            // before a destructive op, so "cannot tell" is not "not a symlink".
             guard !enumerationFailed,
                   let childValues = try? child.resourceValues(forKeys: [.isSymbolicLinkKey]),
-                  childValues.isSymbolicLink != true else {
+                  let childIsSymbolicLink = childValues.isSymbolicLink else {
+                throw LauncherGeneratorError.unsafeRemoval
+            }
+            guard childIsSymbolicLink else { continue }
+            guard isSafeDescendantSymlink(child, profileRoot: standardized) else {
                 throw LauncherGeneratorError.unsafeRemoval
             }
         }
         guard !enumerationFailed else { throw LauncherGeneratorError.unsafeRemoval }
+    }
+
+    /// Whether one symlink found inside an owned profile may travel with that
+    /// profile's removal.
+    ///
+    /// Every Chromium-based profile that has ever launched keeps four symlinks at
+    /// its root — `SingletonLock`, `SingletonCookie`, `SingletonSocket`, and
+    /// `RunningChromeVersion` — and `SingletonSocket` deliberately points into the
+    /// app's own temporary directory, outside the profile. Refusing every
+    /// descendant symlink therefore made Delete Data — for a tracked profile or an
+    /// orphan row, in Trash and permanent mode alike — and Deep Scan's data-folder
+    /// cleanup impossible for real ChatGPT and Claude profiles, with no way for the
+    /// user to recover: the links are recreated by the next launch. (Remove and
+    /// Archive were unaffected: they never touch profile data.)
+    ///
+    /// Removal acts on the profile ROOT — `moveItem` (a same-directory `rename(2)`
+    /// for staging), `removeItem` (`removefile(3)`, a physical walk), and
+    /// `trashItem` (a rename into the item's own volume trash). None of them
+    /// descend into a descendant link, so this check cannot be what protects a
+    /// link's target, and an over-permissive verdict here cannot destroy anything
+    /// outside the profile. What it does keep is the spec's I6/§6.5 rule — "not a
+    /// symlink escaping the roots" — as a tripwire on the one shape that could
+    /// hand a tree walk a way out: a link resolving to a DIRECTORY outside the
+    /// profile. Links to files, sockets, and missing targets are ordinary.
+    private func isSafeDescendantSymlink(_ link: URL, profileRoot: URL) -> Bool {
+        // `.isDirectoryKey` does NOT follow a link, so it must be read from the
+        // resolved target; reading it from `link` would make this a silent no-op.
+        // `resolvingSymlinksInPath()` returns its input unchanged for a dangling
+        // link or a loop, which lands in the permissive branch below — correct:
+        // neither can widen a walk.
+        let resolved = link.resolvingSymlinksInPath().standardizedFileURL
+        guard let values = try? resolved.resourceValues(forKeys: [.isDirectoryKey]),
+              values.isDirectory == true else {
+            return true
+        }
+        // Case-folded prefix match, so a case-variant path still reads as inside
+        // the profile on the case-insensitive volumes macOS ships by default. This
+        // errs open on a case-sensitive volume, which is the safe direction here:
+        // "inside" only means the removal proceeds, and the removal is NOFOLLOW.
+        // Both sides come from `resolvingSymlinksInPath()` — the root is proven a
+        // fixed point of it above — so the leading `/private` that it strips can
+        // never be present on one side only.
+        let rootKey = profileRoot.standardizedFileURL.path.lowercased()
+        let resolvedKey = resolved.path.lowercased()
+        return resolvedKey == rootKey || resolvedKey.hasPrefix(rootKey + "/")
     }
 
     private func isSafeGeneratedLauncher(_ url: URL, expectedBundleID: String) throws -> Bool {
