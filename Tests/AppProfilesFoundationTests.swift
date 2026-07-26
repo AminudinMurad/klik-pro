@@ -209,6 +209,8 @@ private struct AppProfilesFoundationTests {
         testVaultPathDerivationAndDefaultGolden()
         testVaultLocationValidationFailsClosed()
         testSchema11VaultMigrationRoundTrip()
+        testTopPinsPersistAndClamp()
+        testTopPinsCannotDeadlockOnUnresolvablePins()
         testCreateInVaultWritesManifestAndLeavesExistingUntouched()
         testVaultHealParityAndPortability()
         testVaultAdoptionRegeneratesFromManifest()
@@ -254,11 +256,17 @@ private struct AppProfilesFoundationTests {
 
     private static func testSchema10DefaultsAndSynchronization() {
         let defaults = KlikProConfig.default
-        expect(defaults.schemaVersion == 12, "new configs must use schema 12")
+        expect(defaults.schemaVersion == 13, "new configs must use schema 13")
         expect(defaults.dataRoot == nil, "new configs must default to no vault (Application Support)")
-        expect(defaults.instances.count == 2, "schema 12 must contain both legacy targets")
+        expect(defaults.instances.count == 2, "schema 13 must contain both legacy targets")
 
-        for target in QuickLaunchTarget.allCases {
+        // Only ChatGPT and Claude ever shipped a v1.x legacy wrapper, so only they own a
+        // legacyInstanceID. Every target added since (Gemini, Canva, Zoom, Spotify, …)
+        // returns nil and has no legacy row to seed — iterating all cases here would
+        // fail on the first of them.
+        let legacyTargets = QuickLaunchTarget.allCases.filter { $0.legacyInstanceID != nil }
+        expect(legacyTargets.count == 2, "exactly two targets carry a v1.x legacy wrapper")
+        for target in legacyTargets {
             guard let instance = defaults.instances.first(where: {
                 $0.legacyQuickLaunchTarget == target
             }) else {
@@ -271,7 +279,8 @@ private struct AppProfilesFoundationTests {
             expect(instance.profileOwnership == .external, "legacy data must never be owned")
             expect(instance.launcherPath == target.launcherWrapperPath,
                    "legacy wrapper path must remain byte-for-byte compatible")
-            expect(instance.hotkey == baseMapping(for: target.shortcutSlot, in: defaults),
+            // Both legacy targets predate the optional slot, so they always have one.
+            expect(instance.hotkey == baseMapping(for: target.shortcutSlot!, in: defaults),
                    "legacy instance hotkey must mirror the v1 field")
             expect(instance.mouseButton == quickLaunchMouseButton(for: target, in: defaults),
                    "legacy instance button must mirror the v1 field")
@@ -1259,8 +1268,11 @@ private struct AppProfilesFoundationTests {
         let externalSentinel = externalLauncher.appendingPathComponent("external-data")
         try! Data("untouched".utf8).write(to: externalSentinel)
         let target = QuickLaunchTarget.chatGPT
+        // ChatGPT is one of the two targets that shipped a v1.x wrapper, so it always
+        // has a legacy UUID; unwrap once rather than at every use below.
+        let legacyID = target.legacyInstanceID!
         let legacy = AppProfileInstance(
-            id: target.legacyInstanceID,
+            id: legacyID,
             label: "Legacy work",
             launcherKind: .legacyExternal,
             launcherPath: externalLauncher.path,
@@ -1287,7 +1299,7 @@ private struct AppProfilesFoundationTests {
             registry: AppCompatibilityRegistry(rules: [rule]),
             generator: generator,
             persist: { persisted = $0; return true },
-            resolveLegacyTarget: { $0.id == target.legacyInstanceID ? target : nil },
+            resolveLegacyTarget: { $0.id == legacyID ? target : nil },
             inspectApplication: { url in
                 url.standardizedFileURL == source.bundleURL ? source : nil
             }
@@ -1304,10 +1316,10 @@ private struct AppProfilesFoundationTests {
                && converted.instance.pinToMenuBar == legacy.pinToMenuBar
                && converted.instance.menuColor == legacy.menuColor,
                "conversion must transfer per-instance display and assignment metadata transactionally")
-        expect(converted.config.suppressedLegacyInstanceIDs.contains(target.legacyInstanceID),
+        expect(converted.config.suppressedLegacyInstanceIDs.contains(legacyID),
                "conversion must suppress only the converted legacy UUID")
         expect(!normalizedQuickLaunchConfig(converted.config).instances.contains {
-            $0.id == target.legacyInstanceID
+            $0.id == legacyID
         }, "normalization must not silently recreate a converted legacy row")
         expect(try! Data(contentsOf: externalSentinel) == Data("untouched".utf8),
                "conversion must never alter the external wrapper or its data")
@@ -1377,7 +1389,8 @@ private struct AppProfilesFoundationTests {
                "the launcher payload environment must match the persisted instance exactly")
 
         let legacy = AppProfileInstance(
-            id: QuickLaunchTarget.chatGPT.legacyInstanceID,
+            // ChatGPT shipped a v1.x wrapper, so its legacy UUID is always present.
+            id: QuickLaunchTarget.chatGPT.legacyInstanceID!,
             label: "Legacy env",
             launcherKind: .legacyExternal,
             launcherPath: root.appendingPathComponent("External.app").path,
@@ -1447,8 +1460,14 @@ private struct AppProfilesFoundationTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let rules = AppCompatibilityRegistry.production.rules
-        expect(rules.count == 3,
-               "production must contain exactly Claude Verified, ChatGPT Untested and Gemini Untested")
+        // An exact count keeps an unvetted rule from being added silently: growing the
+        // catalogue must be a deliberate edit here too. Current catalogue — Claude,
+        // ChatGPT, Gemini, Canva, Zoom, Spotify, Antigravity, Antigravity IDE, Chrome,
+        // Brave. The three original rules keep their detailed pins below.
+        expect(rules.count == 10,
+               "production must contain exactly the ten catalogued rules")
+        expect(Set(rules.map(\.id)).count == rules.count,
+               "every production rule id must be unique — ids are persisted per instance")
         guard let claude = rules.first(where: {
             $0.id == "com-anthropic-claudefordesktop-verified"
         }), let chatGPT = rules.first(where: {
@@ -2655,6 +2674,115 @@ private struct AppProfilesFoundationTests {
         )
         expect(roundTripped == vaulted,
                "schema 11 must round-trip dataRoot and storage untouched")
+    }
+
+    /// The two existing round-trip tests both encode a config whose new fields are still
+    /// at their defaults, so they would pass green even if `topPinnedOriginals` /
+    /// `topPinnedProfileIDs` had been left out of `CodingKeys` — the field would silently
+    /// never persist and the user's pins would reset on every launch. This test sets both
+    /// to non-default values first, which is the only thing that actually catches it.
+    private static func testTopPinsPersistAndClamp() {
+        var pinned = KlikProConfig.default
+        let profileA = UUID()
+        let profileB = UUID()
+        pinned.topPinnedOriginals = [.claude, .gemini]
+        pinned.topPinnedProfileIDs = [profileA, profileB]
+        let encoded = try! JSONEncoder().encode(pinned)
+        let decoded = try! JSONDecoder().decode(KlikProConfig.self, from: encoded)
+        expect(decoded.topPinnedOriginals == [.claude, .gemini],
+               "pinned native apps must persist, in pin order")
+        expect(decoded.topPinnedProfileIDs == [profileA, profileB],
+               "pinned App Profiles must persist, in pin order")
+        expect(decoded == pinned, "a config carrying pins must round-trip exactly")
+
+        // Order is load-bearing: the pin list decides which cards lead the list, so a
+        // set-like reordering on the way to disk would shuffle the user's layout.
+        var reordered = pinned
+        reordered.topPinnedOriginals = [.gemini, .claude]
+        let reversed = try! JSONDecoder().decode(
+            KlikProConfig.self, from: try! JSONEncoder().encode(reordered)
+        )
+        expect(reversed.topPinnedOriginals == [.gemini, .claude],
+               "pin order must survive encoding rather than being normalized to a set")
+
+        // An older config predates both keys and must decode to empty — nothing is ever
+        // auto-pinned on an upgrading user's behalf.
+        var object = try! JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+        object.removeValue(forKey: "topPinnedOriginals")
+        object.removeValue(forKey: "topPinnedProfileIDs")
+        let legacy = try! JSONDecoder().decode(
+            KlikProConfig.self,
+            from: try! JSONSerialization.data(withJSONObject: object)
+        )
+        expect(legacy.topPinnedOriginals.isEmpty && legacy.topPinnedProfileIDs.isEmpty,
+               "a config written before pinning existed must decode with nothing pinned")
+        expect(KlikProConfig.default.topPinnedOriginals.isEmpty
+                && KlikProConfig.default.topPinnedProfileIDs.isEmpty,
+               "a fresh install must start with no pins used")
+
+        // Normalization clamps defensively, so a hand-edited file cannot exceed the cap
+        // or waste a slot on a duplicate.
+        var overCap = KlikProConfig.default
+        overCap.topPinnedOriginals = [.chatGPT, .chatGPT, .claude, .gemini, .canva, .zoom]
+        let clamped = normalizedQuickLaunchConfig(overCap)
+        expect(clamped.topPinnedOriginals == [.chatGPT, .claude, .gemini],
+               "normalization must de-duplicate and trim the pin list to the cap")
+        expect(clamped.topPinnedOriginals.count == KlikProConfig.topPinLimit,
+               "the clamped pin list must be exactly the cap")
+
+        // Normalization must not disturb an already-valid list.
+        var withinCap = KlikProConfig.default
+        withinCap.topPinnedProfileIDs = [profileA]
+        expect(normalizedQuickLaunchConfig(withinCap).topPinnedProfileIDs == [profileA],
+               "normalization must leave a valid pin list untouched")
+    }
+
+    /// The cap must never be able to lock the user out. Pinning three apps and then
+    /// uninstalling them used to leave every remaining card reporting "already full",
+    /// with the pinned cards gone and therefore nothing left to unpin — verified against
+    /// a rendered preview before this rule existed.
+    private static func testTopPinsCannotDeadlockOnUnresolvablePins() {
+        let installed: Set<String> = ["a", "b"]
+        let resolvable: (String) -> Bool = { installed.contains($0) }
+
+        // Three pins, none of them installed: the cap must treat the list as empty.
+        let allStale = ["x", "y", "z"]
+        let recovered = topPinsAdding("a", to: allStale, isResolvable: resolvable)
+        expect(recovered != nil, "pins with no card on screen must not consume a slot")
+        // The new pin has to survive normalization's clamp, so room is made by releasing
+        // the entries that have no card rather than by appending a fourth.
+        let clamped = clampedTopPins(recovered ?? [])
+        expect(clamped.contains("a"),
+               "the pin just added must survive the clamp, not be trimmed away")
+        expect(clamped.count <= KlikProConfig.topPinLimit,
+               "making room must keep the stored list within the cap")
+
+        // A genuinely full list still refuses, and refuses without mutating anything.
+        let full = ["a", "b", "x"]
+        let fullResolvable: (String) -> Bool = { ["a", "b", "x"].contains($0) }
+        expect(topPinsAdding("c", to: full, isResolvable: fullResolvable) == nil,
+               "a list of three resolvable pins must refuse a fourth")
+
+        // Mixed: two live pins plus one stale one has a slot free, and taking it must not
+        // cost either live pin.
+        let mixed = ["a", "b", "stale"]
+        let grown = topPinsAdding("c", to: mixed, isResolvable: {
+            ["a", "b", "c"].contains($0)
+        })
+        expect(grown != nil, "a stale pin must not block the third slot")
+        let grownClamped = clampedTopPins(grown ?? [])
+        expect(grownClamped.contains("a") && grownClamped.contains("b")
+                && grownClamped.contains("c"),
+               "making room must sacrifice only the stale pin, never a live one")
+        expect(!grownClamped.contains("stale"),
+               "the stale pin is the one released when its slot is needed")
+
+        // Room is only made when needed: below the cap, a stale pin is left in place so a
+        // reinstall restores it.
+        let sparse = ["stale"]
+        let kept = topPinsAdding("a", to: sparse, isResolvable: resolvable)
+        expect(kept == ["stale", "a"],
+               "a stale pin must be preserved while the list is under the cap")
     }
 
     private static func testCreateInVaultWritesManifestAndLeavesExistingUntouched() {
@@ -3954,6 +4082,11 @@ private struct AppProfilesFoundationTests {
         // mouse mirrors stay unassigned, exactly as in the reported configuration.
         config.chatGPTMouseButton = nil
         config.claudeMouseButton = nil
+        // Conflict evaluation short-circuits a disabled mapping to .ok, and both of these
+        // now ship off, so the fixture turns them on: the rule under test is when a
+        // duplicate badge should appear, not what a fresh install enables.
+        config.middleButton.enabled = true
+        config.gestureButton.enabled = true
         // Reproduce the report: Middle carries the Gesture slot's default base combo.
         config.middleButton.combo = config.gestureButton.combo
         expect(config.middleButton.combo.signature == config.gestureButton.combo.signature,

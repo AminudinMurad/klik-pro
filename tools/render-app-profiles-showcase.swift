@@ -50,7 +50,13 @@ let scenes = [
         image: mappings,
         title: "The same icon follows every mapping",
         subtitle: "App Profiles and Mappings refresh together, so assignments stay easy to recognise.",
-        crop: NSRect(x: 900, y: 650, width: 850, height: 920)
+        // Framed on the Mappings APP PROFILES column (y is from the TOP — see the
+        // `crop` doc comment), so the scene actually shows the badged icons its caption
+        // is about. Re-tuned when the list gained its three-card viewport and the taller
+        // header gap: those moved the rows down, leaving the previous rect framing the
+        // mouse card instead. Nothing in check.sh verifies this framing — it only asserts
+        // the GIF exists — so re-check it by eye after any change to the list geometry.
+        crop: NSRect(x: 950, y: 938, width: 850, height: 700)
     ),
 ]
 

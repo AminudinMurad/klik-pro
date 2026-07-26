@@ -2,6 +2,55 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.5.0 (unreleased)
+
+The app lists on Mappings and App Profiles now use one card, and a fresh install starts quiet.
+
+- **One card everywhere.** All four app lists — Native Apps and App Profiles on Mappings,
+  the generator and your profiles on App Profiles — now use the same two-row card: a large
+  app icon down the left, the name on the first row, and the buttons lined up on the second.
+  The columns line up across both tabs.
+- **Per-card "Native app" label removed.** The list is already titled Native Apps, so
+  repeating it under every name only cost a row.
+- **Verified / Unverified badge.** Each app in the catalogue now shows how far Klik PRO has
+  tested it, beside its name. Your own profiles carry no badge — they inherit their app's.
+- **Menu Bar Icon moved into the gear.** It was a switch sitting in the middle of every
+  profile card; it is now the last item in that card's gear menu, still a real switch. The
+  name gets the whole row back. Mappings rows gained a gear for the same reason.
+- **Refresh moved into each list's heading.** One small refresh arrow now sits at the right
+  of every list's title instead of floating above the columns, so whichever list you are
+  reading has it to hand. It also now visibly responds while a rescan runs — previously a
+  refresh from the Mappings tab did rescan, but nothing on screen acknowledged it.
+- **Pin the three apps you actually use.** Every card now has a pin beside its gear. Pinned
+  cards move to the top of the list, on both tabs, and the Mappings lists show exactly three
+  cards at a time — so your three pinned apps are the three you see without scrolling. Each
+  list keeps its own three pins: three native apps and three App Profiles.
+  - Nothing is pinned by default, and Klik PRO never pins anything for you. Until you pin
+    something the lists stay in their usual order.
+  - Once three are pinned, a fourth pin is refused rather than quietly pushing one out —
+    unpin one to free the slot. The pin on an unpinned card dims and says so when the list
+    is full.
+  - A pin for an app you have since uninstalled (or a profile you deleted) does not hold a
+    slot, so you can never end up unable to pin anything with no pinned card left on screen
+    to unpin. Reinstalling the app brings its pin back.
+  - Pinning only reorders. Nothing is hidden: everything past the third card is one scroll
+    away, and an app with a mouse button assigned to it stays in the list whether or not
+    it is pinned.
+  - Your pins are remembered between launches, and pinning does not count as an unsaved
+    change — it never lights up "Unsaved changes" or asks you to Save first.
+- **Scroll bars are honest again.** In the app lists and App Profile Maintenance the scroll
+  handle was almost full height however long the list was, so it barely moved. It is now
+  sized to how much is actually off-screen.
+- **A fresh install starts quiet.** Middle button, Gesture button and the horizontal thumb
+  wheel all arrive off, and every thumb-wheel browser checkbox is off. Only Forward and Back
+  arrive mapped, to browser Back/Forward. No mouse button is pre-assigned to an app.
+  Existing setups keep their current mappings.
+- **Fixed: long app names truncated early.** Names such as "ChatGPT / Codex" were cut short
+  with empty space still next to them.
+- **Assign is no longer offered where it cannot work.** Canva, Zoom and Spotify have nowhere
+  to store a mouse-button assignment yet, so the button is disabled and says why instead of
+  doing nothing when pressed.
+
 ## 1.4.6
 
 Gemini joins App Profiles — the first supported app that is not built on Electron.

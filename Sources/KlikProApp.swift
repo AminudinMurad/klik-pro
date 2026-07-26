@@ -3572,6 +3572,13 @@ final class ToggleView: NSView {
         appProfilesView.onToggleOriginalMenuBar = { [weak self] target in
             self?.toggleOriginalMenuBarPin(for: target)
         }
+        // Both tabs write the same two pin fields, so either card can set the order.
+        appProfilesView.onTogglePinOriginal = { [weak self] target in
+            self?.toggleTopPin(for: target)
+        }
+        appProfilesView.onTogglePinProfile = { [weak self] instance in
+            self?.toggleTopPin(for: instance)
+        }
         appProfilesView.onOpen = { [weak self] instance in
             self?.launchAppProfile(instance)
         }
@@ -3608,6 +3615,7 @@ final class ToggleView: NSView {
             self.appProfilesView.setOriginalDockPinned(self.originalDockPinStates())
             self.appProfilesView.setOriginalDockCustomization(self.originalDockCustomizations())
             self.appProfilesView.setOriginalMenuBarPinned(self.originalMenuBarPinStates())
+            self.refreshTopPinViews()
             self.refreshAppProfileHealth()
         }
         // Reflect the current Dock pin state of the original-app launchers on their
@@ -3619,6 +3627,9 @@ final class ToggleView: NSView {
         // Menu-bar pin state is persisted in config (not read from the Dock), so it is
         // safe to reflect on the cards even while rendering deterministic previews.
         appProfilesView.setOriginalMenuBarPinned(originalMenuBarPinStates())
+        // Recover whatever the user had pinned last run. Nothing is ever auto-pinned: an
+        // empty pin list simply leaves both lists in their natural order.
+        refreshTopPinViews()
         advancedView.onUnlock = { [weak self] in
             guard let self = self, confirmUnlockAdvancedSettings() else { return }
             self.advancedView.setLocked(false)
@@ -3668,6 +3679,21 @@ final class ToggleView: NSView {
         }
         contentView.mappingProfilesView.onAssignOriginal = { [weak self] target in
             self?.assignMouseButton(to: .original(target), label: target.title)
+        }
+        // Both tabs' cards carry the menu-bar toggle in their gear, so both route to
+        // the same handlers — the state is persisted in config, not per view.
+        contentView.mappingProfilesView.onToggleMenuBar = { [weak self] instance in
+            self?.toggleMenuBarPin(for: instance)
+        }
+        contentView.mappingProfilesView.onToggleOriginalMenuBar = { [weak self] target in
+            self?.toggleOriginalMenuBarPin(for: target)
+        }
+        // Same for the list-order pin: one preference, reachable from either tab.
+        contentView.mappingProfilesView.onTogglePinOriginal = { [weak self] target in
+            self?.toggleTopPin(for: target)
+        }
+        contentView.mappingProfilesView.onTogglePinProfile = { [weak self] instance in
+            self?.toggleTopPin(for: instance)
         }
         contentView.mappingProfilesView.onRefreshApps = { [weak self] in
             guard let self else { return }
@@ -3957,6 +3983,11 @@ final class ToggleView: NSView {
         if showLoading || supportedAppCandidateCache == nil {
             appProfilesView.setAppDiscoveryLoading()
         }
+        // Every rescan shows itself on all four refresh icons, whether or not this
+        // caller asked for the full loading state. Without it a Mappings-initiated
+        // refresh (showLoading: false) gave no feedback at all: the scan ran, but an
+        // unchanged app list re-rendered identically and the control looked dead.
+        setRefreshControlsBusy(true)
         appProfileQueue.async { [weak self] in
             guard let self else { return }
             let supported = self.appProfileManager.supportedCandidates()
@@ -3965,8 +3996,17 @@ final class ToggleView: NSView {
                 self.supportedAppCandidateCache = supported
                 self.appProfilesView.setSupportedCandidates(supported)
                 self.refreshOriginalAssignmentViews()
+                self.setRefreshControlsBusy(false)
             }
         }
+    }
+
+    /// Drives all four refresh icons together — two per tab. The handover is explicit
+    /// that they must never disagree: one left enabled while the others are busy reads
+    /// as a broken control.
+    private func setRefreshControlsBusy(_ busy: Bool) {
+        appProfilesView.setRefreshing(busy)
+        contentView.mappingProfilesView.setRefreshing(busy)
     }
 
     /// Launch-time heal for already-generated profiles: existing instances
@@ -5737,9 +5777,152 @@ final class ToggleView: NSView {
                     )
                 }
                 self.appProfilesView.setOriginalMenuBarPinned(self.originalMenuBarPinStates())
+                // The Mappings native rows carry the same toggle inside their gear, so
+                // rebuild them too or that copy keeps showing the pre-change state.
+                self.refreshOriginalAssignmentViews()
                 self.needsDisplay = true
             }
         }
+    }
+
+    /// Pins or unpins a native app at the top of the app lists.
+    ///
+    /// This is a pure view preference — it changes no mapping, hotkey, Dock tile or
+    /// menu-bar state — so it deliberately departs from `toggleOriginalMenuBarPin`'s
+    /// discipline in two ways, both load-bearing:
+    ///
+    /// 1. **No unsaved-changes guard.** Only the pin field is written, and it is written
+    ///    to BOTH `config` and `persistedConfig`, so in-flight mapping edits survive and
+    ///    `hasUnsavedConfigurationChanges` is left exactly as it was. Reordering a list
+    ///    must not raise the red "Unsaved changes" footer, and must not demand the user
+    ///    commit unrelated mapping work first.
+    /// 2. **No `applySavedConfig()`.** The input helper has nothing to apply here, so
+    ///    restarting it would be pure latency for no effect.
+    ///
+    /// The cap never evicts: a full list refuses the new pin and says why, so a pin is
+    /// only ever lost by the user unpinning it.
+    private func toggleTopPin(for target: QuickLaunchTarget) {
+        // Still serialised against a save in flight — both paths write config.json.
+        guard !saveInProgress, !appProfileLifecycleInProgress else {
+            showAppProfileAlert(
+                title: "Please wait",
+                message: "Finish the current Save or App Profile change before pinning."
+            )
+            return
+        }
+        let current = clampedTopPins(persistedConfig.topPinnedOriginals)
+        let updated: [QuickLaunchTarget]
+        if current.contains(target) {
+            updated = current.filter { $0 != target }
+        } else {
+            guard let added = topPinsAdding(target, to: current, isResolvable: {
+                quickLaunchTargetApplicationURL($0) != nil
+            }) else {
+                showTopPinLimitAlert(name: originalVendorName(target))
+                return
+            }
+            updated = added
+        }
+        applyTopPins(originals: updated, profiles: nil)
+    }
+
+    /// The App Profile counterpart of `toggleTopPin(for:)`, keyed by instance id. Same
+    /// reasoning throughout — see that method's note.
+    private func toggleTopPin(for instance: AppProfileInstance) {
+        guard !saveInProgress, !appProfileLifecycleInProgress else {
+            showAppProfileAlert(
+                title: "Please wait",
+                message: "Finish the current Save or App Profile change before pinning."
+            )
+            return
+        }
+        let current = clampedTopPins(persistedConfig.topPinnedProfileIDs)
+        let liveIDs = Set(
+            persistedConfig.instances.filter { $0.state == .active }.map(\.id)
+        )
+        let updated: [UUID]
+        if current.contains(instance.id) {
+            updated = current.filter { $0 != instance.id }
+        } else {
+            guard let added = topPinsAdding(
+                instance.id, to: current, isResolvable: { liveIDs.contains($0) }
+            ) else {
+                showTopPinLimitAlert(name: instance.label)
+                return
+            }
+            updated = added
+        }
+        applyTopPins(originals: nil, profiles: updated)
+    }
+
+    private func showTopPinLimitAlert(name: String) {
+        showAppProfileAlert(
+            title: "\(KlikProConfig.topPinLimit) cards are already pinned",
+            message: "Unpin one of them to free a slot, then pin \(name). "
+                + "Pinning never removes a card you already pinned."
+        )
+    }
+
+    /// Persists a pin change and re-renders. Only the pin fields are touched, and they
+    /// are touched on both snapshots, so the unsaved-changes comparison is unaffected.
+    /// Passing nil for either list leaves it alone.
+    private func applyTopPins(originals: [QuickLaunchTarget]?, profiles: [UUID]?) {
+        let previousOriginals = persistedConfig.topPinnedOriginals
+        let previousProfiles = persistedConfig.topPinnedProfileIDs
+        if let originals {
+            persistedConfig.topPinnedOriginals = originals
+            config.topPinnedOriginals = originals
+        }
+        if let profiles {
+            persistedConfig.topPinnedProfileIDs = profiles
+            config.topPinnedProfileIDs = profiles
+        }
+        // Render before the write: a list-ordering preference should feel instant, and
+        // the failure path below restores the previous state if the save is refused.
+        refreshTopPinViews()
+        let snapshot = persistedConfig
+        appProfileQueue.async { [weak self] in
+            guard KlikProConfigStore.save(snapshot) == false else { return }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                // Roll both snapshots back together so they stay in step.
+                self.persistedConfig.topPinnedOriginals = previousOriginals
+                self.persistedConfig.topPinnedProfileIDs = previousProfiles
+                self.config.topPinnedOriginals = previousOriginals
+                self.config.topPinnedProfileIDs = previousProfiles
+                self.refreshTopPinViews()
+                self.showAppProfileAlert(
+                    title: "Pin was not saved",
+                    message: "Klik PRO could not write config.json, so the pinned cards "
+                        + "have been restored to their previous state."
+                )
+            }
+        }
+    }
+
+    /// How many native pins actually have an installed app behind them. Pins for apps that
+    /// are not installed have no card to unpin from, so they must not consume a slot.
+    private func installedTopPinCount() -> Int {
+        clampedTopPins(persistedConfig.topPinnedOriginals)
+            .filter { quickLaunchTargetApplicationURL($0) != nil }
+            .count
+    }
+
+    /// Pushes the pin state into every list that shows it. Both tabs read the same two
+    /// fields, so one pin click updates four lists.
+    private func refreshTopPinViews() {
+        let profiles = clampedTopPins(persistedConfig.topPinnedProfileIDs)
+        appProfilesView.setTopPinnedOriginals(
+            clampedTopPins(persistedConfig.topPinnedOriginals),
+            atLimit: installedTopPinCount() >= KlikProConfig.topPinLimit
+        )
+        appProfilesView.setTopPinnedProfiles(profiles)
+        contentView.mappingProfilesView.setTopPinnedProfiles(profiles)
+        // The native rows have no `onInstancesChange` fan-out, so this rebuild is the
+        // only thing that reorders them — without it the Mappings copy keeps showing
+        // the pre-change order.
+        refreshOriginalAssignmentViews()
+        needsDisplay = true
     }
 
     private func requestDualAppName(
@@ -7887,17 +8070,51 @@ final class ToggleView: NSView {
         }
     }
 
+    /// The compatibility badge for a native app in the Mappings Native Apps list.
+    /// Reads the same discovered candidates the generator column uses, so the two
+    /// lists can never disagree about an app. nil (no candidate discovered yet, or
+    /// discovery skipped during a preview render) hides the badge rather than
+    /// guessing.
+    private func nativeAppCompatibilityVerified(_ target: QuickLaunchTarget) -> Bool? {
+        guard let candidates = supportedAppCandidateCache else { return nil }
+        guard let candidate = candidates.first(where: {
+            $0.app.bundleIdentifier == target.applicationBundleIdentifier
+        }) else { return nil }
+        return candidate.eligibility.kind == .verified
+    }
+
     private func refreshOriginalAssignmentViews() {
         appProfilesView.setOriginalAssignments(
             chatGPT: config.chatGPTMouseButton,
             claude: config.claudeMouseButton
         )
-        let originals: [(QuickLaunchTarget, String, String, QuickLaunchMouseButton?)] =
-            QuickLaunchTarget.allCases.compactMap { target in
-                guard let url = quickLaunchTargetApplicationURL(target) else { return nil }
-                return (target, target.title, url.path, quickLaunchMouseButton(for: target, in: config))
-            }
-        contentView.mappingProfilesView.setOriginals(originals)
+        let menuBarPinned = persistedConfig.menuBarPinnedOriginals
+        // Read from persistedConfig, matching menuBarPinned above: `config` can hold an
+        // in-flight edit that was never written, and the list must show what is saved.
+        let topPinned = clampedTopPins(persistedConfig.topPinnedOriginals)
+        // Only pins with a card on screen count toward the cap — see `topPinsAdding`.
+        let topPinAtLimit = installedTopPinCount() >= KlikProConfig.topPinLimit
+        let originals: [MappingNativeApp] = QuickLaunchTarget.allCases.compactMap { target in
+            guard let url = quickLaunchTargetApplicationURL(target) else { return nil }
+            return MappingNativeApp(
+                target: target,
+                name: target.title,
+                path: url.path,
+                mouseButton: quickLaunchMouseButton(for: target, in: config),
+                verified: nativeAppCompatibilityVerified(target),
+                menuBarPinned: menuBarPinned.contains(target),
+                // A target with no ShortcutSlot has nowhere to persist an assignment,
+                // so its Assign control is disabled rather than silently doing nothing.
+                assignable: target.shortcutSlot != nil,
+                topPinned: topPinned.contains(target),
+                topPinAtLimit: topPinAtLimit
+            )
+        }
+        // Ordered here rather than in the view, because this method already owns the pin
+        // list and the view would otherwise need a second copy of it.
+        contentView.mappingProfilesView.setOriginals(
+            topPinnedFirst(originals, pins: topPinned) { $0.target }
+        )
     }
 
     override func updateTrackingAreas() {
@@ -8435,10 +8652,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+/// True when a browser with this bundle identifier is installed. LaunchServices
+/// answers without launching anything, and Safari is always present on macOS.
+///
+/// Must stay ABOVE `@main`: the preview renderer builds its app body with
+/// `awk '/^@main$/ { exit }'` over this file (tools/render-previews.sh), so
+/// anything declared below the entry point is invisible to it and every preview
+/// fails to compile.
+func klikProBrowserInstalled(_ bundleIdentifier: String) -> Bool {
+    if bundleIdentifier == "com.apple.Safari" { return true }
+    return NSWorkspace.shared
+        .urlForApplication(withBundleIdentifier: bundleIdentifier) != nil
+}
+
 // NOTE: With KlikProConfig.swift compiled alongside this file, Swift no
 // longer treats this file as an implicit script entry point (that special case only
 // applies when a single file is passed to swiftc), so app startup is wrapped in an
 // `@main` type rather than living as bare top-level statements.
+// Keep `@main` LAST — see the note on klikProBrowserInstalled above.
 @main
 private struct KlikProAppMain {
     static func main() {
@@ -8447,12 +8678,4 @@ private struct KlikProAppMain {
         app.delegate = delegate
         app.run()
     }
-}
-
-/// True when a browser with this bundle identifier is installed. LaunchServices
-/// answers without launching anything, and Safari is always present on macOS.
-func klikProBrowserInstalled(_ bundleIdentifier: String) -> Bool {
-    if bundleIdentifier == "com.apple.Safari" { return true }
-    return NSWorkspace.shared
-        .urlForApplication(withBundleIdentifier: bundleIdentifier) != nil
 }

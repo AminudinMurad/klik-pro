@@ -21,9 +21,15 @@ private struct PreviewMain {
             quickLaunchInstalledTargetsPreviewOverride = [.claude]
         case "both":
             quickLaunchInstalledTargetsPreviewOverride = [.chatGPT, .claude]
+        case "all":
+            // Every catalogue target treated as installed. The other values top out at two
+            // native rows, which cannot exercise the list-order pin cap (three pins) or the
+            // scrolling that starts at the fourth row.
+            quickLaunchInstalledTargetsPreviewOverride = Set(QuickLaunchTarget.allCases)
         default:
             fputs(
-                "KLIK_PRO_PREVIEW_INSTALLED_TARGETS must be none, chatgpt, claude, or both\n",
+                "KLIK_PRO_PREVIEW_INSTALLED_TARGETS must be none, chatgpt, claude, both, "
+                    + "or all\n",
                 stderr
             )
             exit(64)

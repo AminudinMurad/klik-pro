@@ -24,6 +24,296 @@ let innerCardFillColor = NSColor.appTextPrimary.withAlphaComponent(0.045)
 let innerCardCornerRadius: CGFloat = 10
 let innerCardSpacing: CGFloat = 10
 
+/// Geometry shared by every two-row app card — the App Profiles generator, the
+/// App Profiles list, and both Mappings lists. Row 1 carries the name, the
+/// optional compatibility badge and the gear; row 2 carries the action buttons,
+/// right-flushed; the icon spans both rows on the left. All four lists pin to
+/// these numbers so the cards line up across the two tabs, which is the whole
+/// point of the shared layout — keep them here rather than per class.
+enum AppCardMetrics {
+    static let height: CGFloat = 86
+    static let iconSize: CGFloat = 56
+    static let iconX: CGFloat = 14
+    static let iconNameGap: CGFloat = 12
+    /// Right padding, which also keeps the actions clear of a list scroller.
+    static let rightInset: CGFloat = 14
+    static let gearSize: CGFloat = 26
+    static let gearY: CGFloat = 12
+    /// The list-order pin, right-most on row 1. Same box as the gear so the two read
+    /// as one control cluster rather than two unrelated affordances.
+    static let pinSize: CGFloat = 26
+    /// Deliberately tighter than `buttonGap`: the pin and gear are a pair.
+    static let gearPinGap: CGFloat = 2
+    static let nameY: CGFloat = 14
+    static let nameHeight: CGFloat = 22
+    static let actionY: CGFloat = 46
+    static let actionHeight: CGFloat = 28
+    static let buttonGap: CGFloat = 8
+    static let openWidth: CGFloat = 52
+    static let generateWidth: CGFloat = 96
+    static let badgeWidth: CGFloat = 66
+    static let badgeGap: CGFloat = 8
+    /// Minimum width the assignment pill may shrink to before its label truncates.
+    static let minAssignWidth: CGFloat = 84
+
+    static var nameX: CGFloat { iconX + iconSize + iconNameGap }
+
+    static func iconFrame() -> NSRect {
+        NSRect(x: iconX, y: (height - iconSize) / 2, width: iconSize, height: iconSize)
+    }
+
+    /// Right-most control on row 1, so it lands on the same vertical line as the
+    /// action row's trailing edge below it.
+    static func pinFrame(cardWidth: CGFloat) -> NSRect {
+        NSRect(x: cardWidth - rightInset - pinSize, y: gearY, width: pinSize, height: pinSize)
+    }
+
+    /// Sits immediately left of the pin. Every card that uses this also carries a pin,
+    /// so the shift is unconditional and the three lists stay aligned with each other.
+    static func gearFrame(cardWidth: CGFloat) -> NSRect {
+        NSRect(
+            x: pinFrame(cardWidth: cardWidth).minX - gearPinGap - gearSize,
+            y: gearY, width: gearSize, height: gearSize
+        )
+    }
+}
+
+/// The Verified / Unverified compatibility pill. Only the two lists that show
+/// catalogue apps use it (the generator column and Mappings' Native Apps); the
+/// App Profiles lists stay badge-free in both tabs.
+func makeCompatibilityBadgeField() -> NSTextField {
+    let field = NSTextField(labelWithString: "")
+    field.font = .systemFont(ofSize: 10, weight: .semibold)
+    field.alignment = .center
+    field.wantsLayer = true
+    field.layer?.cornerRadius = 4
+    field.isHidden = true
+    return field
+}
+
+/// Applies the badge treatment: green reads as proven, amber as known-but-unproven.
+/// Passing nil hides the pill, which is what a card with no candidate does.
+func applyCompatibilityBadge(_ field: NSTextField, verified: Bool?) {
+    guard let verified else {
+        field.isHidden = true
+        return
+    }
+    field.isHidden = false
+    field.stringValue = verified ? "Verified" : "Unverified"
+    field.textColor = verified
+        ? NSColor.systemGreen.blended(withFraction: 0.35, of: .black) ?? .systemGreen
+        : NSColor.systemOrange.blended(withFraction: 0.4, of: .black) ?? .systemOrange
+    field.layer?.backgroundColor = (verified ? NSColor.systemGreen : NSColor.systemOrange)
+        .withAlphaComponent(0.16).cgColor
+}
+
+/// Sizes a card's name field to its own text so the badge can sit immediately
+/// after it, with both kept clear of the gear. A hidden badge gives the name the
+/// whole row. Shared so the generator and Mappings' Native Apps agree exactly.
+func layoutNameAndBadge(
+    nameField: NSTextField,
+    badgeField: NSTextField,
+    gearMinX: CGFloat
+) {
+    let nameX = AppCardMetrics.nameX
+    // Measure through the cell, not the raw string: NSTextField adds its own inset
+    // around the glyphs, so sizing to NSString.size alone leaves a field a couple of
+    // points too narrow and the label truncates ("Claude" → "Clau…") with empty space
+    // still beside it.
+    let textW: CGFloat
+    if let cell = nameField.cell {
+        textW = ceil(cell.cellSize.width) + 2
+    } else {
+        let font = nameField.font ?? .systemFont(ofSize: 15, weight: .semibold)
+        textW = ceil((nameField.stringValue as NSString)
+            .size(withAttributes: [.font: font]).width) + 6
+    }
+    let badgeW: CGFloat = badgeField.isHidden ? 0 : AppCardMetrics.badgeWidth
+    let available = gearMinX - 10 - nameX
+    let nameW = max(
+        40,
+        min(textW, available - (badgeW > 0 ? badgeW + AppCardMetrics.badgeGap : 0))
+    )
+    nameField.frame = NSRect(
+        x: nameX, y: AppCardMetrics.nameY, width: nameW, height: AppCardMetrics.nameHeight
+    )
+    if !badgeField.isHidden {
+        badgeField.frame = NSRect(
+            x: nameX + nameW + AppCardMetrics.badgeGap,
+            y: AppCardMetrics.nameY + 3,
+            width: badgeW,
+            height: 16
+        )
+    }
+}
+
+/// Lays out the two-button action row (Open + Assign) right-flushed on row 2, so
+/// the three lists that lack "+ New Profile" still end on the same vertical line
+/// as the generator's three buttons and the gear above them. The assignment pill
+/// sizes to its own label instead of stretching.
+func layoutOpenAndAssign(
+    openButton: AppProfileButton,
+    assignButton: AppProfileButton,
+    cardWidth: CGFloat
+) {
+    let gap = AppCardMetrics.buttonGap
+    let openW = AppCardMetrics.openWidth
+    let maxAssign = max(
+        AppCardMetrics.minAssignWidth,
+        cardWidth - openW - gap - AppCardMetrics.nameX - AppCardMetrics.rightInset
+    )
+    let assignW = min(assignButton.preferredAssignmentWidth(), maxAssign)
+    let rightEdge = cardWidth - AppCardMetrics.rightInset
+    let assignX = rightEdge - assignW
+    let openX = assignX - gap - openW
+    let y = AppCardMetrics.actionY
+    let h = AppCardMetrics.actionHeight
+    openButton.frame = NSRect(x: openX, y: y, width: openW, height: h)
+    assignButton.frame = NSRect(x: assignX, y: y, width: assignW, height: h)
+}
+
+/// A menu row carrying a live toggle switch, used as the last item of every card's
+/// gear menu. It is a real switch rather than a checkmark item, so an NSMenuItem
+/// custom view hosts the same ToggleSwitchView the cards used to show inline.
+/// The controller owns the real state and rebuilds the row on success, so the
+/// switch is reverted to the known value immediately and only the request is
+/// forwarded — a blocked change never leaves the switch lying.
+func makeMenuBarToggleItem(
+    isOn: Bool,
+    isEnabled: Bool,
+    onChange: @escaping () -> Void,
+    cancelTracking: @escaping () -> Void
+) -> NSMenuItem {
+    let item = NSMenuItem()
+    let container = NSView(frame: NSRect(x: 0, y: 0, width: 240, height: 30))
+    let label = NSTextField(labelWithString: "Menu Bar Icon")
+    label.font = .systemFont(ofSize: 13)
+    label.frame = NSRect(x: 14, y: 7, width: 140, height: 17)
+    let toggle = ToggleSwitchView(
+        isOn: isOn, frame: NSRect(x: 186, y: 4, width: 40, height: 22)
+    )
+    toggle.isEnabled = isEnabled
+    toggle.setAccessibilityLabel(isOn ? "Hide from menu bar" : "Show in menu bar")
+    toggle.onChange = { _ in
+        toggle.isOn = isOn
+        onChange()
+        cancelTracking()
+    }
+    container.addSubview(label)
+    container.addSubview(toggle)
+    item.view = container
+    return item
+}
+
+/// The icon-only rescan control that sits inline at the right of each list's
+/// section header. Four exist (two per tab) and every one calls the same
+/// `onRefreshApps` — a duplicated affordance, not duplicated behaviour, so
+/// whichever column the user is reading has the control to hand. Sitting inline
+/// with the section title it also costs no vertical space.
+func makeRefreshIconButton() -> AppProfileButton {
+    let button = AppProfileButton(title: "", frame: .zero)
+    button.imagePosition = .imageOnly
+    // There is no label any more, so the tooltip carries the name.
+    button.toolTip = "Refresh App List"
+    button.setAccessibilityLabel("Refresh App List")
+    if let base = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil),
+       let sized = base.withSymbolConfiguration(
+           NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+       ) {
+        sized.isTemplate = true
+        button.image = sized
+    }
+    return button
+}
+
+/// Keeps a refresh icon's state in step with the others: all four must disable
+/// together during a rescan, or one will look broken.
+func applyRefreshIconState(_ button: AppProfileButton, refreshing: Bool) {
+    button.isEnabled = !refreshing
+    button.toolTip = refreshing ? "Refreshing…" : "Refresh App List"
+    button.setAccessibilityLabel(refreshing ? "Refreshing app list" : "Refresh App List")
+}
+
+/// Stable-partitions a list so pinned entries lead, in the order the user pinned them,
+/// with everything else keeping its incoming order behind them.
+///
+/// Driven by the ordered pin array and never by a `Set`: `Set` iteration order varies
+/// between processes, which would make two otherwise identical fixture renders differ
+/// and fail the byte-comparison in `tools/check.sh`. `enumerated()` supplies the
+/// tie-break so the comparator is a strict weak ordering and unpinned items keep their
+/// relative order.
+func topPinnedFirst<Element, Key: Hashable>(
+    _ items: [Element],
+    pins: [Key],
+    key: (Element) -> Key
+) -> [Element] {
+    guard !pins.isEmpty else { return items }
+    // First occurrence wins, and duplicates are tolerated rather than trapped: a
+    // hand-edited config can repeat an entry, and this is a render path.
+    var rank: [Key: Int] = [:]
+    for (index, pin) in pins.enumerated() where rank[pin] == nil {
+        rank[pin] = index
+    }
+    return items.enumerated().sorted { lhs, rhs in
+        switch (rank[key(lhs.element)], rank[key(rhs.element)]) {
+        case let (left?, right?):
+            return left == right ? lhs.offset < rhs.offset : left < right
+        case (.some, .none):
+            return true
+        case (.none, .some):
+            return false
+        case (.none, .none):
+            return lhs.offset < rhs.offset
+        }
+    }.map(\.element)
+}
+
+/// The icon-only list-order pin that sits right of each card's gear. Both tabs carry
+/// it, because the pin the user sets on either one decides which cards lead the list
+/// everywhere — one preference, two places to set it.
+func makePinIconButton() -> AppProfileButton {
+    let button = AppProfileButton(title: "", frame: .zero)
+    button.imagePosition = .imageOnly
+    return button
+}
+
+/// Applies a pin's three states. `atLimit` is the case worth being careful with: the
+/// cap never silently evicts an existing pin, so an unpinned card in a full list shows
+/// a disabled pin that says why, rather than a live control that quietly swaps
+/// something else out.
+func applyPinIconState(_ button: AppProfileButton, pinned: Bool, atLimit: Bool) {
+    let symbol = pinned ? "pin.fill" : "pin"
+    if let base = NSImage(systemSymbolName: symbol, accessibilityDescription: nil),
+       let sized = base.withSymbolConfiguration(
+           NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+       ) {
+        sized.isTemplate = true
+        button.image = sized
+    }
+    // A pinned card stays actionable so it can always be unpinned — that is the only
+    // way to free a slot once the list is full.
+    button.isEnabled = pinned || !atLimit
+    // The glyph carries the state, not just the pill: AppProfileButton's disabled pill is
+    // only 0.03 alpha lighter than its resting one, which on a 26pt control is far too
+    // subtle to read as "no slots left" without hovering for the tooltip.
+    if pinned {
+        button.contentTintColor = .controlAccentColor
+    } else {
+        button.contentTintColor = button.isEnabled ? .appTextSecondary : .tertiaryLabelColor
+    }
+    if pinned {
+        button.toolTip = "Keep at the top of the list. Click to unpin."
+        button.setAccessibilityLabel("Unpin from the top of the list")
+    } else if atLimit {
+        button.toolTip =
+            "\(KlikProConfig.topPinLimit) cards are already pinned. Unpin one to free a slot."
+        button.setAccessibilityLabel("Cannot pin: the list already has three pinned cards")
+    } else {
+        button.toolTip = "Keep this card at the top of the list."
+        button.setAccessibilityLabel("Pin to the top of the list")
+    }
+}
+
 private final class FlippedProfileStackView: NSStackView {
     override var isFlipped: Bool { true }
 }
@@ -63,6 +353,10 @@ final class AppProfileButton: NSButton {
     /// already-assigned mouse button is clearly distinguishable from an unassigned
     /// one. Hover and press behaviour are unchanged.
     private var isAssigned = false
+    /// The rest label an assignment control was configured with. Width is measured
+    /// from this rather than `title`, which would be the hover label ("Change ⋯")
+    /// while the pointer is over the button and would size the pill wrongly.
+    private var assignmentRestTitle: String = ""
 
     override var isEnabled: Bool {
         didSet {
@@ -141,8 +435,20 @@ final class AppProfileButton: NSButton {
             self.image = nil
             self.imagePosition = .noImage
         }
+        self.assignmentRestTitle = restTitle
         self.title = isHovered ? (hoverTitle ?? restTitle) : restTitle
         updateBackground()
+    }
+
+    /// The width this assignment pill wants: its rest label plus the chain-link
+    /// glyph and padding, floored so a short assignment still reads as a control.
+    /// Callers clamp it to whatever the card can spare.
+    func preferredAssignmentWidth() -> CGFloat {
+        let font = self.font ?? .systemFont(ofSize: 11, weight: .semibold)
+        let label = assignmentRestTitle.isEmpty ? title : assignmentRestTitle
+        let titleWidth = (label as NSString).size(withAttributes: [.font: font]).width
+        let iconAllowance: CGFloat = image != nil ? 22 : 0
+        return max(ceil(titleWidth) + iconAllowance + 24, AppCardMetrics.minAssignWidth)
     }
 
     override func resetCursorRects() {
@@ -250,18 +556,27 @@ final class AppProfileGearButton: NSButton {
 
 private final class DualAppGeneratorCard: NSView {
     /// Two rows: name + badge, then the action buttons. The icon spans both.
-    /// The lists pin each card to this, so keep them in sync.
-    static let cardHeight: CGFloat = 86
+    /// Shared with the other three lists via AppCardMetrics so all four line up.
+    static let cardHeight: CGFloat = AppCardMetrics.height
     private let iconView = NSImageView()
     private let nameField = NSTextField(labelWithString: "")
-    private let badgeField = NSTextField(labelWithString: "")
+    private let badgeField = makeCompatibilityBadgeField()
     private let openButton = AppProfileButton(title: "Open", frame: .zero)
     private let generateButton = AppProfileButton(title: "+ New Profile", frame: .zero)
     private let assignButton = AppProfileButton(title: "Assign Button", frame: .zero)
     private let dockGearButton = AppProfileGearButton(frame: .zero)
+    private let pinButton = makePinIconButton()
     private(set) var candidate: AppProfileCandidate?
     private var dockPinned = false
     private var menuBarPinned = false
+    /// List-order pin state. Named `topPinned` rather than `pinned` because this class
+    /// already tracks two unrelated kinds of pinning (Dock tile and menu bar).
+    private var topPinned = false
+    private var topPinAtLimit = false
+    /// False for a target with no persisted mouse-button slot (Canva, Zoom, Spotify).
+    /// Its Assign control has nowhere to store an assignment, so it is disabled with
+    /// the reason rather than looking live and silently doing nothing.
+    private var assignable = true
     // Persisted custom name/icon for the native Dock launcher (set via the gear's
     // Rename / Change Icon). When present, the card tile reflects them so it matches
     // the Dock; nil falls back to the vendor app's own name/icon.
@@ -280,6 +595,7 @@ private final class DualAppGeneratorCard: NSView {
     var onAddNativeDock: (() -> Void)?
     var onRemoveNativeDock: (() -> Void)?
     var onToggleMenuBar: (() -> Void)?
+    var onTogglePin: (() -> Void)?
 
     override var isFlipped: Bool { true }
 
@@ -295,28 +611,23 @@ private final class DualAppGeneratorCard: NSView {
 
         // The icon spans both rows and is vertically centred, so the name row and
         // the action row read as one block beside it.
-        let iconSize: CGFloat = 56
-        iconView.frame = NSRect(
-            x: 14, y: (Self.cardHeight - iconSize) / 2, width: iconSize, height: iconSize
-        )
+        iconView.frame = AppCardMetrics.iconFrame()
         iconView.imageScaling = .scaleProportionallyUpOrDown
-        let dockGearSize: CGFloat = 26
         // A gear at the card's top-right manages the original app's Klik PRO Dock
         // icon (create / delete) and now also carries the menu-bar toggle. It never
         // touches the native vendor Dock tile.
-        dockGearButton.frame = NSRect(
-            x: width - 14 - dockGearSize, y: 12, width: dockGearSize, height: dockGearSize
-        )
+        dockGearButton.frame = AppCardMetrics.gearFrame(cardWidth: width)
         dockGearButton.toolTip = "Manage this app's Klik PRO Dock icon and menu-bar icon"
+        // The pin sits right of the gear and keeps this app at the top of the app lists
+        // on both tabs. It is a view preference only — no Dock or menu-bar effect.
+        pinButton.frame = AppCardMetrics.pinFrame(cardWidth: width)
+        pinButton.onPress = { [weak self] in self?.onTogglePin?() }
         // Row 1: name, then the compatibility badge, ending before the gear.
-        let nameX: CGFloat = 14 + iconSize + 12
-        nameField.frame = NSRect(x: nameX, y: 14, width: 140, height: 22)
+        nameField.frame = NSRect(
+            x: AppCardMetrics.nameX, y: AppCardMetrics.nameY,
+            width: 140, height: AppCardMetrics.nameHeight
+        )
         nameField.font = .systemFont(ofSize: 15, weight: .semibold)
-        badgeField.font = .systemFont(ofSize: 10, weight: .semibold)
-        badgeField.alignment = .center
-        badgeField.wantsLayer = true
-        badgeField.layer?.cornerRadius = 4
-        badgeField.isHidden = true
         assignButton.font = .systemFont(ofSize: 11, weight: .semibold)
         // The three actions (Open, + New Profile, Assign) are laid out right-flushed
         // in relayoutActionButtons(); the assignment pill sizes to its own label
@@ -333,9 +644,10 @@ private final class DualAppGeneratorCard: NSView {
         dockGearButton.onPress = { [weak self] in self?.presentDockMenu() }
         [
             iconView, nameField, badgeField, openButton, generateButton,
-            assignButton, dockGearButton,
+            assignButton, dockGearButton, pinButton,
         ]
             .forEach(addSubview)
+        applyPinIconState(pinButton, pinned: topPinned, atLimit: topPinAtLimit)
         showLoading()
     }
 
@@ -369,42 +681,51 @@ private final class DualAppGeneratorCard: NSView {
         menuBarPinned = pinned
     }
 
+    /// Reflects list-order pin state. `atLimit` is separate from `pinned` because a
+    /// full list must still let its own pinned cards be unpinned — that is how the
+    /// user frees a slot.
+    func setTopPinned(_ pinned: Bool, atLimit: Bool) {
+        topPinned = pinned
+        topPinAtLimit = atLimit
+        applyPinIconState(pinButton, pinned: pinned, atLimit: atLimit)
+    }
+
+    /// Whether this target can take a mouse-button assignment at all. Static per
+    /// target (it follows `QuickLaunchTarget.shortcutSlot`), so the controller sets it
+    /// once at construction.
+    func setAssignable(_ value: Bool) {
+        assignable = value
+        updateAssignEnabled()
+    }
+
+    /// One place decides the Assign control's enabled state: it needs both an
+    /// installed app and somewhere to persist the assignment.
+    private func updateAssignEnabled() {
+        assignButton.isEnabled = candidate != nil && assignable
+        if candidate != nil && !assignable {
+            assignButton.toolTip =
+                "\(nameField.stringValue) cannot take a mouse-button assignment yet."
+        } else {
+            assignButton.toolTip = nil
+        }
+    }
+
     /// The compatibility badge shown beside the app name. `verified` picks the
     /// green treatment; anything else reads as amber. Passing nil hides it, which
     /// is what a card with no candidate does.
     func setCompatibility(verified: Bool?) {
-        guard let verified else {
-            badgeField.isHidden = true
-            layoutNameRow()
-            return
-        }
-        badgeField.isHidden = false
-        badgeField.stringValue = verified ? "Verified" : "Unverified"
-        badgeField.textColor = verified
-            ? NSColor.systemGreen.blended(withFraction: 0.35, of: .black) ?? .systemGreen
-            : NSColor.systemOrange.blended(withFraction: 0.4, of: .black) ?? .systemOrange
-        badgeField.layer?.backgroundColor = (verified ? NSColor.systemGreen : NSColor.systemOrange)
-            .withAlphaComponent(0.16).cgColor
+        applyCompatibilityBadge(badgeField, verified: verified)
         layoutNameRow()
     }
 
     /// Sizes the name to its text so the badge can sit immediately after it, with
     /// both kept clear of the gear.
     private func layoutNameRow() {
-        let nameX: CGFloat = 14 + 56 + 12
-        let font = nameField.font ?? .systemFont(ofSize: 15, weight: .semibold)
-        let textW = ceil((nameField.stringValue as NSString)
-            .size(withAttributes: [.font: font]).width) + 2
-        let badgeGap: CGFloat = 8
-        let badgeW: CGFloat = badgeField.isHidden ? 0 : 66
-        let available = dockGearButton.frame.minX - 10 - nameX
-        let nameW = max(40, min(textW, available - (badgeW > 0 ? badgeW + badgeGap : 0)))
-        nameField.frame = NSRect(x: nameX, y: 14, width: nameW, height: 22)
-        if !badgeField.isHidden {
-            badgeField.frame = NSRect(
-                x: nameX + nameW + badgeGap, y: 17, width: badgeW, height: 16
-            )
-        }
+        layoutNameAndBadge(
+            nameField: nameField,
+            badgeField: badgeField,
+            gearMinX: dockGearButton.frame.minX
+        )
     }
 
     private func updateDockGear() {
@@ -501,35 +822,14 @@ private final class DualAppGeneratorCard: NSView {
         // than a checkmark item, so an NSMenuItem custom view hosts the same
         // ToggleSwitchView the cards used to show inline.
         menu.addItem(.separator())
-        menu.addItem(makeMenuBarToggleItem())
+        menu.addItem(makeMenuBarToggleItem(
+            isOn: menuBarPinned,
+            isEnabled: candidate != nil,
+            onChange: { [weak self] in self?.onToggleMenuBar?() },
+            cancelTracking: { [weak self] in self?.dockGearButton.menu?.cancelTracking() }
+        ))
         let origin = NSPoint(x: dockGearButton.frame.minX, y: dockGearButton.frame.maxY + 4)
         menu.popUp(positioning: nil, at: origin, in: self)
-    }
-
-    /// A menu row carrying a live toggle switch. The controller owns the real state
-    /// and pushes it back via setMenuBarPinned, so the switch is reverted to the
-    /// known value immediately and only the request is forwarded.
-    private func makeMenuBarToggleItem() -> NSMenuItem {
-        let item = NSMenuItem()
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 240, height: 30))
-        let label = NSTextField(labelWithString: "Menu Bar Icon")
-        label.font = .systemFont(ofSize: 13)
-        label.frame = NSRect(x: 14, y: 7, width: 140, height: 17)
-        let toggle = ToggleSwitchView(
-            isOn: menuBarPinned, frame: NSRect(x: 186, y: 4, width: 40, height: 22)
-        )
-        toggle.isEnabled = candidate != nil
-        toggle.setAccessibilityLabel(menuBarPinned ? "Hide from menu bar" : "Show in menu bar")
-        toggle.onChange = { [weak self] _ in
-            guard let self else { return }
-            toggle.isOn = self.menuBarPinned
-            self.onToggleMenuBar?()
-            self.dockGearButton.menu?.cancelTracking()
-        }
-        container.addSubview(label)
-        container.addSubview(toggle)
-        item.view = container
-        return item
     }
 
     @objc private func menuCreateDock() { onCreateDock?() }
@@ -554,7 +854,7 @@ private final class DualAppGeneratorCard: NSView {
             generateButton.isEnabled = false
             openButton.isEnabled = false
         }
-        assignButton.isEnabled = candidate != nil
+        updateAssignEnabled()
         applyDockCustomizationOverlay()
         updateDockGear()
         _ = alternativesAvailable
@@ -603,26 +903,25 @@ private final class DualAppGeneratorCard: NSView {
     /// assignment like "Back Button" doesn't leave a stretched control. A right inset
     /// keeps the actions clear of a list scroll bar.
     private func relayoutActionButtons() {
-        let actionY: CGFloat = 46
-        let actionH: CGFloat = 28
-        let gap: CGFloat = 8
-        let openW: CGFloat = 52
-        let generateW: CGFloat = 96
-        let font = assignButton.font ?? .systemFont(ofSize: 11, weight: .semibold)
-        let titleWidth = (assignButton.title as NSString)
-            .size(withAttributes: [.font: font]).width
-        let iconAllowance: CGFloat = assignButton.image != nil ? 22 : 0
+        let gap = AppCardMetrics.buttonGap
+        let openW = AppCardMetrics.openWidth
+        let generateW = AppCardMetrics.generateWidth
         // Cap so Open and + New Profile still fit with a left margin (rightEdge keeps
         // a matching right margin for scroll-bar clearance).
-        let maxAssign = max(84, bounds.width - openW - generateW - 2 * gap - 28)
-        let assignW = min(max(ceil(titleWidth) + iconAllowance + 24, 84), maxAssign)
-        let rightEdge = bounds.width - 14
+        let maxAssign = max(
+            AppCardMetrics.minAssignWidth,
+            bounds.width - openW - generateW - 2 * gap - 28
+        )
+        let assignW = min(assignButton.preferredAssignmentWidth(), maxAssign)
+        let rightEdge = bounds.width - AppCardMetrics.rightInset
         let assignX = rightEdge - assignW
         let generateX = assignX - gap - generateW
         let openX = generateX - gap - openW
-        openButton.frame = NSRect(x: openX, y: actionY, width: openW, height: actionH)
-        generateButton.frame = NSRect(x: generateX, y: actionY, width: generateW, height: actionH)
-        assignButton.frame = NSRect(x: assignX, y: actionY, width: assignW, height: actionH)
+        let y = AppCardMetrics.actionY
+        let h = AppCardMetrics.actionHeight
+        openButton.frame = NSRect(x: openX, y: y, width: openW, height: h)
+        generateButton.frame = NSRect(x: generateX, y: y, width: generateW, height: h)
+        assignButton.frame = NSRect(x: assignX, y: y, width: assignW, height: h)
     }
 }
 
@@ -633,9 +932,8 @@ final class AppProfileInstanceRowView: NSView {
     private let titleField = NSTextField(labelWithString: "")
     private let openButton = AppProfileButton(title: "Open", frame: .zero)
     private let assignButton = AppProfileButton(title: "Assign Button", frame: .zero)
-    private let menuBarLabel = NSTextField(labelWithString: "Menu Bar Icon")
-    private let menuBarToggle: ToggleSwitchView
     private let gearButton = AppProfileGearButton(frame: .zero)
+    private let pinButton = makePinIconButton()
     private(set) var instance: AppProfileInstance
     var onOpen: ((AppProfileInstance) -> Void)?
     var onAssign: ((AppProfileInstance) -> Void)?
@@ -644,15 +942,22 @@ final class AppProfileInstanceRowView: NSView {
     var onRemove: ((AppProfileInstance) -> Void)?
     var onChangeIcon: ((AppProfileInstance) -> Void)?
     var onAddToDock: ((AppProfileInstance) -> Void)?
+    var onTogglePin: ((AppProfileInstance) -> Void)?
 
     override var isFlipped: Bool { true }
 
-    init(instance: AppProfileInstance, health: AppProfileRuntimeHealth?, width: CGFloat) {
+    init(
+        instance: AppProfileInstance,
+        health: AppProfileRuntimeHealth?,
+        width: CGFloat,
+        topPinned: Bool,
+        topPinAtLimit: Bool
+    ) {
         self.instance = instance
-        self.menuBarToggle = ToggleSwitchView(isOn: instance.pinToMenuBar, frame: .zero)
         // Two-row card: a large app icon fills the left edge across both rows. Row 1
-        // (top) carries the app name (left) and the Menu bar toggle (right); row 2
-        // (bottom) carries all the action buttons, right-flushed.
+        // (top) carries the app name (left) and the gear (right); row 2 (bottom)
+        // carries the action buttons, right-flushed. The menu-bar control lives inside
+        // the gear menu, not inline, so the name owns the whole of row 1.
         let rowHeight = Self.rowHeight
         let vpad: CGFloat = 16           // even top & bottom padding for both rows
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: rowHeight))
@@ -679,27 +984,23 @@ final class AppProfileInstanceRowView: NSView {
         // Wider than the other controls so the assignment label ("Gesture Button")
         // fits alongside the chain-link indicator without truncating.
         let assignW: CGFloat = 132
-        let menuCaptionW: CGFloat = 82   // fits "Menu Bar Icon" at 11pt
-        let toggleW: CGFloat = 40
         let gearSize: CGFloat = 26
         let rightEdge = width - 18   // right padding so controls clear the card border
 
-        // Row 1 (top): the menu-bar control sits immediately left of the gear.
+        // Row 1 (top): the pin is right-most, with the gear immediately left of it; the
+        // menu-bar toggle is inside the gear. This card keeps its own geometry literals
+        // (it is 92pt tall, not the shared 86), so the pin is placed by hand here rather
+        // than through AppCardMetrics.
+        let pinSize = AppCardMetrics.pinSize
+        pinButton.frame = NSRect(
+            x: rightEdge - pinSize, y: vpad - 2, width: pinSize, height: pinSize
+        )
+        applyPinIconState(pinButton, pinned: topPinned, atLimit: topPinAtLimit)
         gearButton.isHidden = !managed
         gearButton.frame = NSRect(
-            x: rightEdge - gearSize, y: vpad - 2, width: gearSize, height: gearSize
+            x: pinButton.frame.minX - AppCardMetrics.gearPinGap - gearSize,
+            y: vpad - 2, width: gearSize, height: gearSize
         )
-
-        let toggleX = gearButton.frame.minX - gap - toggleW
-        menuBarToggle.frame = NSRect(x: toggleX, y: vpad, width: toggleW, height: 22)
-        menuBarToggle.setAccessibilityLabel(
-            instance.pinToMenuBar ? "Hide from menu bar" : "Show in menu bar"
-        )
-        let menuLabelX = toggleX - 6 - menuCaptionW
-        menuBarLabel.frame = NSRect(x: menuLabelX, y: vpad + 3, width: menuCaptionW, height: 16)
-        menuBarLabel.font = .systemFont(ofSize: 11, weight: .medium)
-        menuBarLabel.textColor = .appTextSecondary
-        menuBarLabel.alignment = .right
 
         // Row 2 (bottom): Open and Assign remain right-flushed.
         let buttonY = rowHeight - vpad - buttonH
@@ -726,11 +1027,11 @@ final class AppProfileInstanceRowView: NSView {
             )
             assignButton.setAccessibilityLabel("Assign a mouse button")
         }
-        // The name owns row 1 beside the icon, ending before the gear (or the
-        // card edge on external rows that have no gear), so long labels get far
-        // more room than when they shared the row with the toggle.
+        // The name owns row 1 beside the icon, ending before the gear (or before the
+        // pin on external rows, which have no gear but are still pinnable), so long
+        // labels get far more room than when they shared the row with the toggle.
         let nameX = iconView.frame.maxX + 14
-        let nameRightLimit = managed ? menuBarLabel.frame.minX : rightEdge
+        let nameRightLimit = managed ? gearButton.frame.minX : pinButton.frame.minX
         titleField.frame = NSRect(
             x: nameX, y: vpad,
             width: max(80, nameRightLimit - nameX - gap), height: 22
@@ -741,21 +1042,13 @@ final class AppProfileInstanceRowView: NSView {
         assignButton.onPress = { [weak self] in
             guard let self else { return }; self.onAssign?(self.instance)
         }
-        menuBarToggle.onChange = { [weak self] _ in
-            guard let self else { return }
-            // The controller owns the real menu-bar state and rebuilds this row on a
-            // successful change; revert the optimistic flip so a blocked change (e.g.
-            // unsaved edits) never leaves the toggle showing the wrong state.
-            self.menuBarToggle.isOn = self.instance.pinToMenuBar
-            self.onToggleMenuBar?(self.instance)
-        }
         gearButton.setAccessibilityLabel("Manage \(instance.label)")
-        gearButton.toolTip = "Rename, change icon, or remove from Klik PRO"
+        gearButton.toolTip = "Rename, change icon, menu-bar icon, or remove from Klik PRO"
         gearButton.onPress = { [weak self] in self?.presentManageMenu() }
-        [
-            iconView, titleField, openButton, assignButton,
-            menuBarLabel, menuBarToggle, gearButton,
-        ]
+        pinButton.onPress = { [weak self] in
+            guard let self else { return }; self.onTogglePin?(self.instance)
+        }
+        [iconView, titleField, openButton, assignButton, gearButton, pinButton]
             .forEach(addSubview)
     }
 
@@ -791,6 +1084,18 @@ final class AppProfileInstanceRowView: NSView {
         remove.target = self
         remove.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
         menu.addItem(remove)
+        // The menu-bar control is last, after a divider — the same position it holds
+        // in the generator card's gear, so both card types agree.
+        menu.addItem(.separator())
+        menu.addItem(makeMenuBarToggleItem(
+            isOn: instance.pinToMenuBar,
+            isEnabled: true,
+            onChange: { [weak self] in
+                guard let self else { return }
+                self.onToggleMenuBar?(self.instance)
+            },
+            cancelTracking: { [weak self] in self?.gearButton.menu?.cancelTracking() }
+        ))
         let origin = NSPoint(x: gearButton.frame.minX, y: gearButton.frame.maxY + 4)
         menu.popUp(positioning: nil, at: origin, in: self)
     }
@@ -807,23 +1112,33 @@ final class AppProfileInstanceRowView: NSView {
 /// Button (assigning a mouse button to launch the profile is natural on the
 /// mouse-mapping tab); full management stays on the App Profiles tab.
 private final class MappingAppProfileOpenRowView: NSView {
-    /// Compact single-line card so four rows fit the Mappings column before scrolling.
-    static let rowHeight: CGFloat = 60
+    /// The shared two-row card, so this list lines up with the other three.
+    static let rowHeight: CGFloat = AppCardMetrics.height
     private let iconView = NSImageView()
     private let titleField = NSTextField(labelWithString: "")
     private let assignButton = AppProfileButton(title: "Assign Button", frame: .zero)
     private let openButton = AppProfileButton(title: "Open", frame: .zero)
+    private let gearButton = AppProfileGearButton(frame: .zero)
+    private let pinButton = makePinIconButton()
     private let instance: AppProfileInstance
     var onOpen: ((AppProfileInstance) -> Void)?
     var onAssign: ((AppProfileInstance) -> Void)?
+    var onToggleMenuBar: ((AppProfileInstance) -> Void)?
+    var onTogglePin: ((AppProfileInstance) -> Void)?
 
     override var isFlipped: Bool { true }
 
-    init(instance: AppProfileInstance, health: AppProfileRuntimeHealth?, width: CGFloat) {
+    init(
+        instance: AppProfileInstance,
+        health: AppProfileRuntimeHealth?,
+        width: CGFloat,
+        topPinned: Bool,
+        topPinAtLimit: Bool
+    ) {
         self.instance = instance
-        // Single compact line: a small icon, the app name, then Open + Assign right-flushed.
-        // Sized so four rows fit the Mappings column before scrolling; long names truncate
-        // with the full name in a tooltip.
+        // The icon spans both rows; row 1 carries the name and the gear, row 2 the
+        // right-flushed actions. No badge — the App Profiles lists stay badge-free in
+        // both tabs — and no "+ New Profile" on this tab.
         let rowHeight = Self.rowHeight
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: rowHeight))
         wantsLayer = true
@@ -832,27 +1147,36 @@ private final class MappingAppProfileOpenRowView: NSView {
         layer?.borderColor = NSColor.separatorColor.cgColor
         layer?.borderWidth = 1
 
-        let iconSize: CGFloat = 36
-        iconView.frame = NSRect(x: 12, y: (rowHeight - iconSize) / 2, width: iconSize, height: iconSize)
+        iconView.frame = AppCardMetrics.iconFrame()
         iconView.imageScaling = .scaleProportionallyUpOrDown
         iconView.image = appProfileDisplayIcon(for: instance)
 
-        let gap: CGFloat = 8
-        let buttonH: CGFloat = 26
-        let rightEdge = width - 16
-        let openW: CGFloat = 48
-        let assignW: CGFloat = 118
-        let buttonY = (rowHeight - buttonH) / 2
-        let assignX = rightEdge - assignW
-        let openX = assignX - gap - openW
-        openButton.frame = NSRect(x: openX, y: buttonY, width: openW, height: buttonH)
-        assignButton.frame = NSRect(x: assignX, y: buttonY, width: assignW, height: buttonH)
+        let managed = instance.launcherKind == .managed
+        gearButton.isHidden = !managed
+        gearButton.frame = AppCardMetrics.gearFrame(cardWidth: width)
+        gearButton.toolTip = "Manage this profile's menu-bar icon"
+        gearButton.setAccessibilityLabel("Manage \(instance.label)")
+        gearButton.onPress = { [weak self] in self?.presentManageMenu() }
 
-        let nameX = iconView.frame.maxX + 12
+        // Every profile can be pinned, including an external launcher, so unlike the
+        // gear this control is never hidden.
+        pinButton.frame = AppCardMetrics.pinFrame(cardWidth: width)
+        applyPinIconState(pinButton, pinned: topPinned, atLimit: topPinAtLimit)
+        pinButton.onPress = { [weak self] in
+            guard let self else { return }
+            self.onTogglePin?(self.instance)
+        }
+
+        // An external launcher shows no gear, so the name runs on to the pin instead —
+        // not to the card edge, which would slide the title under the pin.
+        let nameRightLimit = managed ? gearButton.frame.minX : pinButton.frame.minX
         titleField.frame = NSRect(
-            x: nameX, y: (rowHeight - 22) / 2, width: max(60, openX - gap - nameX), height: 22
+            x: AppCardMetrics.nameX,
+            y: AppCardMetrics.nameY,
+            width: max(80, nameRightLimit - AppCardMetrics.nameX - AppCardMetrics.buttonGap),
+            height: AppCardMetrics.nameHeight
         )
-        titleField.font = .systemFont(ofSize: 13, weight: .semibold)
+        titleField.font = .systemFont(ofSize: 15, weight: .semibold)
         titleField.textColor = .appTextPrimary
         titleField.stringValue = instance.label
         titleField.lineBreakMode = .byTruncatingTail
@@ -885,30 +1209,81 @@ private final class MappingAppProfileOpenRowView: NSView {
             guard let self else { return }
             self.onOpen?(self.instance)
         }
-        [iconView, titleField, assignButton, openButton].forEach(addSubview)
+        [iconView, titleField, assignButton, openButton, gearButton, pinButton]
+            .forEach(addSubview)
+        layoutOpenAndAssign(
+            openButton: openButton, assignButton: assignButton, cardWidth: width
+        )
+    }
+
+    /// The gear exists to host the menu-bar toggle; renaming, icons and removal stay
+    /// on the App Profiles tab.
+    private func presentManageMenu() {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        menu.addItem(makeMenuBarToggleItem(
+            isOn: instance.pinToMenuBar,
+            isEnabled: true,
+            onChange: { [weak self] in
+                guard let self else { return }
+                self.onToggleMenuBar?(self.instance)
+            },
+            cancelTracking: { [weak self] in self?.gearButton.menu?.cancelTracking() }
+        ))
+        let origin = NSPoint(x: gearButton.frame.minX, y: gearButton.frame.maxY + 4)
+        menu.popUp(positioning: nil, at: origin, in: self)
     }
 
     required init?(coder: NSCoder) { nil }
 }
 
-/// An installed vendor app shown as an assignment target. It intentionally has
-/// only Open and Assign: originals never receive managed-profile lifecycle actions.
+/// One installed native app as the Mappings Native Apps list shows it. Bundled
+/// into a struct rather than a long tuple because the row needs the badge, the
+/// menu-bar state and whether the target can take an assignment at all.
+struct MappingNativeApp {
+    let target: QuickLaunchTarget
+    let name: String
+    let path: String
+    let mouseButton: QuickLaunchMouseButton?
+    /// nil hides the pill; true reads "Verified", false "Unverified".
+    let verified: Bool?
+    let menuBarPinned: Bool
+    /// False for a target with no persisted mouse-button slot, whose Assign
+    /// control would otherwise look live and silently do nothing.
+    let assignable: Bool
+    /// Whether this app is pinned to the top of the app lists. Distinct from
+    /// `menuBarPinned`, which is menu-bar visibility.
+    let topPinned: Bool
+    /// True when the list already holds `KlikProConfig.topPinLimit` pins and this app
+    /// is not one of them, so its pin renders disabled with the reason.
+    let topPinAtLimit: Bool
+}
+
+/// An installed vendor app shown as an assignment target, using the same two-row
+/// card as the other three lists. It offers only Open and Assign — originals never
+/// receive managed-profile lifecycle actions — plus a gear holding the menu-bar
+/// toggle. No "+ New Profile": this tab assigns buttons, it does not create
+/// profiles.
 private final class MappingOriginalAppRowView: NSView {
-    static let rowHeight: CGFloat = 60
+    static let rowHeight: CGFloat = AppCardMetrics.height
     private let target: QuickLaunchTarget
+    private let nameField = NSTextField(labelWithString: "")
+    private let badgeField = makeCompatibilityBadgeField()
+    private let openButton = AppProfileButton(title: "Open", frame: .zero)
+    private let assignButton = AppProfileButton(title: "Assign Button", frame: .zero)
+    private let gearButton = AppProfileGearButton(frame: .zero)
+    private let pinButton = makePinIconButton()
+    private let menuBarPinned: Bool
     var onOpen: ((QuickLaunchTarget) -> Void)?
     var onAssign: ((QuickLaunchTarget) -> Void)?
+    var onToggleMenuBar: ((QuickLaunchTarget) -> Void)?
+    var onTogglePin: ((QuickLaunchTarget) -> Void)?
 
     override var isFlipped: Bool { true }
 
-    init(
-        target: QuickLaunchTarget,
-        name: String,
-        path: String,
-        mouseButton: QuickLaunchMouseButton?,
-        width: CGFloat
-    ) {
-        self.target = target
+    init(app: MappingNativeApp, width: CGFloat) {
+        self.target = app.target
+        self.menuBarPinned = app.menuBarPinned
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: Self.rowHeight))
         wantsLayer = true
         layer?.cornerRadius = innerCardCornerRadius
@@ -916,58 +1291,95 @@ private final class MappingOriginalAppRowView: NSView {
         layer?.borderColor = NSColor.separatorColor.cgColor
         layer?.borderWidth = 1
 
-        // Single compact line matching MappingAppProfileOpenRowView: icon, the app name over
-        // a "Native app" caption, then Open + Assign right-flushed.
-        let iconSize: CGFloat = 36
-        let icon = NSImageView(frame: NSRect(x: 12, y: (Self.rowHeight - iconSize) / 2, width: iconSize, height: iconSize))
+        // The icon spans both rows on the left; row 1 is name + badge + gear and
+        // row 2 the right-flushed actions, matching the generator card exactly.
+        let icon = NSImageView(frame: AppCardMetrics.iconFrame())
         icon.imageScaling = .scaleProportionallyUpOrDown
-        icon.image = NSWorkspace.shared.icon(forFile: path)
+        icon.image = NSWorkspace.shared.icon(forFile: app.path)
 
-        let gap: CGFloat = 8
-        let buttonH: CGFloat = 26
-        let rightEdge = width - 16
-        let openW: CGFloat = 48
-        let assignW: CGFloat = 118
-        let buttonY = (Self.rowHeight - buttonH) / 2
-        let assignX = rightEdge - assignW
-        let openX = assignX - gap - openW
+        gearButton.frame = AppCardMetrics.gearFrame(cardWidth: width)
+        gearButton.toolTip = "Manage this app's menu-bar icon"
+        gearButton.setAccessibilityLabel("Manage \(app.name)")
+        gearButton.onPress = { [weak self] in self?.presentManageMenu() }
 
-        let nameX = icon.frame.maxX + 12
-        let nameW = max(60, openX - gap - nameX)
-        let title = NSTextField(labelWithString: name)
-        title.frame = NSRect(x: nameX, y: 11, width: nameW, height: 18)
-        title.font = .systemFont(ofSize: 13, weight: .semibold)
-        title.textColor = .appTextPrimary
-        title.lineBreakMode = .byTruncatingTail
-        title.toolTip = name
-        let original = NSTextField(labelWithString: "Native app")
-        original.frame = NSRect(x: nameX, y: 31, width: nameW, height: 14)
-        original.font = .systemFont(ofSize: 10, weight: .medium)
-        original.textColor = .appTextSecondary
+        pinButton.frame = AppCardMetrics.pinFrame(cardWidth: width)
+        applyPinIconState(pinButton, pinned: app.topPinned, atLimit: app.topPinAtLimit)
+        pinButton.onPress = { [weak self] in
+            guard let self else { return }; self.onTogglePin?(self.target)
+        }
 
-        let assign = AppProfileButton(title: "Assign Button", frame: .zero)
-        let open = AppProfileButton(title: "Open", frame: .zero)
-        assign.frame = NSRect(x: assignX, y: buttonY, width: assignW, height: buttonH)
-        open.frame = NSRect(x: openX, y: buttonY, width: openW, height: buttonH)
-        if let mouseButton {
-            assign.configureAssignment(
-                restTitle: "\(mouseButton.title) Button",
+        nameField.font = .systemFont(ofSize: 15, weight: .semibold)
+        nameField.textColor = .appTextPrimary
+        nameField.stringValue = app.name
+        nameField.lineBreakMode = .byTruncatingTail
+        nameField.toolTip = app.name
+        applyCompatibilityBadge(badgeField, verified: app.verified)
+
+        assignButton.font = .systemFont(ofSize: 11, weight: .semibold)
+        if let mouseButton = app.mouseButton {
+            let assignmentTitle = "\(mouseButton.title) Button"
+            assignButton.configureAssignment(
+                restTitle: assignmentTitle,
                 symbolName: "link",
                 hoverTitle: "Change ⋯",
                 assigned: true
             )
+            assignButton.toolTip = assignmentTitle
+            assignButton.setAccessibilityLabel(
+                "Change button assignment, currently \(assignmentTitle)"
+            )
         } else {
-            assign.configureAssignment(
+            assignButton.configureAssignment(
                 restTitle: "Assign Button", symbolName: "link.badge.plus", hoverTitle: nil
             )
+            assignButton.setAccessibilityLabel("Assign a mouse button")
         }
-        assign.onPress = { [weak self] in
+        // A target with no mouse-button slot cannot store an assignment, so the
+        // control is disabled with the reason rather than failing silently.
+        if !app.assignable {
+            assignButton.isEnabled = false
+            assignButton.toolTip = "\(app.name) cannot take a mouse-button assignment yet."
+        }
+
+        assignButton.onPress = { [weak self] in
             guard let self else { return }; self.onAssign?(self.target)
         }
-        open.onPress = { [weak self] in
+        openButton.onPress = { [weak self] in
             guard let self else { return }; self.onOpen?(self.target)
         }
-        [icon, title, original, open, assign].forEach(addSubview)
+        [icon, nameField, badgeField, openButton, assignButton, gearButton, pinButton]
+            .forEach(addSubview)
+        layoutNameAndBadge(
+            nameField: nameField, badgeField: badgeField, gearMinX: gearButton.frame.minX
+        )
+        layoutActionRow()
+    }
+
+    /// Open + Assign, right-flushed to the card's trailing edge — the same line the
+    /// pin ends on above them, so this list and the generator's three-button row end
+    /// on one vertical edge.
+    private func layoutActionRow() {
+        layoutOpenAndAssign(
+            openButton: openButton, assignButton: assignButton, cardWidth: bounds.width
+        )
+    }
+
+    /// The gear exists to host the menu-bar toggle; full management of a native app
+    /// stays on the App Profiles tab.
+    private func presentManageMenu() {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        menu.addItem(makeMenuBarToggleItem(
+            isOn: menuBarPinned,
+            isEnabled: true,
+            onChange: { [weak self] in
+                guard let self else { return }
+                self.onToggleMenuBar?(self.target)
+            },
+            cancelTracking: { [weak self] in self?.gearButton.menu?.cancelTracking() }
+        ))
+        let origin = NSPoint(x: gearButton.frame.minX, y: gearButton.frame.maxY + 4)
+        menu.popUp(positioning: nil, at: origin, in: self)
     }
 
     required init?(coder: NSCoder) { nil }
@@ -983,6 +1395,9 @@ private final class MappingSectionCardView: NSView {
     private let stackView = FlippedProfileStackView()
     private let spinner = NSProgressIndicator()
     private let loadingLabel = NSTextField(labelWithString: "Loading apps…")
+    /// The rescan control, inline at the right of this card's section header.
+    let refreshButton = makeRefreshIconButton()
+    var onRefresh: (() -> Void)?
 
     override var isFlipped: Bool { true }
 
@@ -994,25 +1409,47 @@ private final class MappingSectionCardView: NSView {
         layer?.borderColor = NSColor.separatorColor.cgColor
         layer?.borderWidth = 1
 
-        titleField.frame = NSRect(x: 18, y: 14, width: frame.width - 36, height: 16)
+        // The refresh icon shares the header line with the title, so it costs no
+        // vertical space; the title stops short of it.
+        let refreshSide: CGFloat = 26
+        refreshButton.frame = NSRect(
+            x: frame.width - 14 - refreshSide, y: 9, width: refreshSide, height: refreshSide
+        )
+        refreshButton.onPress = { [weak self] in self?.onRefresh?() }
+
+        titleField.frame = NSRect(
+            x: 18, y: 14, width: max(60, refreshButton.frame.minX - 26), height: 16
+        )
         titleField.font = .boldSystemFont(ofSize: 11)
         titleField.textColor = .appTextSecondary
         titleField.stringValue = title
 
         // Each card scrolls its own group. The scroller auto-hides when everything
-        // fits, so the two-item Native Apps card doesn't show a near-full-height
-        // stub handle; it appears with a proportional handle only when the profiles
-        // overflow.
-        let scrollY: CGFloat = 36
-        let scrollH = frame.height - 48
+        // fits, so a card holding three or fewer rows shows no stub handle; it appears
+        // with a proportional handle only when the list overflows.
+        //
+        // The viewport is sized to exactly `KlikProConfig.topPinLimit` cards, which is
+        // what makes the pin worth having: the three pinned cards are the three visible
+        // without scrolling. Longer lists still scroll — nothing is hidden, and an app
+        // that is not pinned is one scroll away, not gone. The height this frees at the
+        // top becomes the gap between the refresh icon and the first card.
+        let rowSpacing: CGFloat = 8
+        let stackInsets = NSEdgeInsets(top: 1, left: 0, bottom: 2, right: 0)
+        let visibleRows = CGFloat(KlikProConfig.topPinLimit)
+        let scrollH = stackInsets.top + stackInsets.bottom
+            + visibleRows * AppCardMetrics.height
+            + (visibleRows - 1) * rowSpacing
+        // Floored at the old 36pt so a shorter card degrades to the previous tight
+        // layout instead of computing a negative origin.
+        let scrollY = max(36, frame.height - scrollH - 12)
         scrollView.frame = NSRect(x: 12, y: scrollY, width: frame.width - 24, height: scrollH)
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
         stackView.orientation = .vertical
         stackView.alignment = .leading
-        stackView.spacing = 8
-        stackView.edgeInsets = NSEdgeInsets(top: 1, left: 0, bottom: 2, right: 0)
+        stackView.spacing = rowSpacing
+        stackView.edgeInsets = stackInsets
         scrollView.documentView = stackView
 
         // Loading state (mirrors the App Profiles tab): a centered spinner + caption
@@ -1032,7 +1469,7 @@ private final class MappingSectionCardView: NSView {
         loadingLabel.alignment = .center
         loadingLabel.isHidden = true
 
-        [titleField, scrollView, spinner, loadingLabel].forEach(addSubview)
+        [titleField, refreshButton, scrollView, spinner, loadingLabel].forEach(addSubview)
     }
 
     required init?(coder: NSCoder) { nil }
@@ -1078,10 +1515,14 @@ private final class MappingSectionCardView: NSView {
         let contentHeight = stackView.edgeInsets.top + stackView.edgeInsets.bottom
             + CGFloat(itemCount) * perItemHeight
             + CGFloat(max(0, itemCount - 1)) * stackView.spacing
-        stackView.frame = NSRect(
-            x: 0, y: 0, width: width,
-            height: max(scrollView.contentSize.height, contentHeight)
-        )
+        // The document is exactly as tall as its rows — never stretched up to the
+        // viewport. Stretching it made the scroller's handle length meaningless: the
+        // handle is drawn as viewport/document, so padding the document toward the
+        // viewport height forced a nearly full-length handle that barely moved. With
+        // the true height the handle is proportional (a list one card taller than the
+        // viewport shows a handle one card short of full), and autohidesScrollers hides
+        // it outright when everything fits.
+        stackView.frame = NSRect(x: 0, y: 0, width: width, height: contentHeight)
     }
 
     /// Shows the centered spinner + caption and clears any rows — for the window on
@@ -1107,68 +1548,61 @@ final class MappingAppProfilesView: NSView {
     private let profilesCard: MappingSectionCardView
     private var instances: [AppProfileInstance]
     private var runtimeHealth: [UUID: AppProfileRuntimeHealth] = [:]
-    private var originals: [(target: QuickLaunchTarget, name: String, path: String, button: QuickLaunchMouseButton?)] = []
+    private var originals: [MappingNativeApp] = []
     // False until the first setOriginals call (the app scan reporting in). Until then
     // the Native Apps card shows a loading spinner rather than "No native apps".
     private var originalsLoaded = false
+    /// Profiles pinned to the top, in the user's pin order. Natives arrive already
+    /// ordered from the controller (it builds `MappingNativeApp`), but this list sorts
+    /// its own rows by label, so it needs the pin order to apply afterwards.
+    private var topPinnedProfileIDs: [UUID] = []
     var onOpen: ((AppProfileInstance) -> Void)?
     var onAssign: ((AppProfileInstance) -> Void)?
     var onOpenOriginal: ((QuickLaunchTarget) -> Void)?
     var onAssignOriginal: ((QuickLaunchTarget) -> Void)?
-    // Re-scans installed native apps and reloads the profiles list for both columns,
-    // mirroring the App Profiles tab's "Refresh App List".
-    let refreshButton = AppProfileButton(title: "Refresh App List", frame: .zero)
+    var onToggleMenuBar: ((AppProfileInstance) -> Void)?
+    var onToggleOriginalMenuBar: ((QuickLaunchTarget) -> Void)?
+    var onTogglePinOriginal: ((QuickLaunchTarget) -> Void)?
+    var onTogglePinProfile: ((AppProfileInstance) -> Void)?
+    // Re-scans installed native apps and reloads the profiles list for both columns.
+    // Each column header carries its own icon; both call this.
     var onRefreshApps: (() -> Void)?
 
     override var isFlipped: Bool { true }
 
     init(instances: [AppProfileInstance], frame: NSRect) {
         self.instances = instances
-        // A slim header row holds the Refresh App List button (left-aligned, above the
-        // Native Apps column); the two cards sit below it side by side. The outer view is
-        // itself a transparent container
-        // (no card chrome, no "YOUR APP PROFILES" title). Native apps take the LEFT column,
-        // the generated App Profiles the RIGHT. Each column is its own card with its own
-        // caption and independent vertical scroller.
-        let headerHeight: CGFloat = 34
+        // Two cards side by side, filling the whole view: the old Refresh App List
+        // header row is gone (its icon now sits inline in each card's header), so all
+        // of that vertical space goes to the lists — which the taller two-row cards
+        // need. The outer view is itself a transparent container (no card chrome, no
+        // title). Native apps take the LEFT column, the generated App Profiles the
+        // RIGHT. Each column is its own card with its own caption, its own refresh
+        // icon, and an independent vertical scroller.
         let gap: CGFloat = 16
         let columnWidth = (frame.width - gap) / 2
-        let cardsHeight = frame.height - headerHeight
         nativeCard = MappingSectionCardView(
             title: "NATIVE APPS",
-            frame: NSRect(x: 0, y: headerHeight, width: columnWidth, height: cardsHeight)
+            frame: NSRect(x: 0, y: 0, width: columnWidth, height: frame.height)
         )
         profilesCard = MappingSectionCardView(
             title: "APP PROFILES",
             frame: NSRect(
-                x: columnWidth + gap, y: headerHeight,
-                width: columnWidth, height: cardsHeight
+                x: columnWidth + gap, y: 0,
+                width: columnWidth, height: frame.height
             )
         )
         super.init(frame: frame)
-        // Icon only: the clockwise arrow alone, right-aligned, so the header row
-        // costs almost nothing. The label lives in the tooltip instead.
-        let refreshSide: CGFloat = 26
-        refreshButton.frame = NSRect(
-            x: bounds.width - refreshSide, y: 2, width: refreshSide, height: refreshSide
-        )
-        refreshButton.title = ""
-        refreshButton.imagePosition = .imageOnly
-        refreshButton.toolTip = "Refresh App List"
-        // Leading clockwise-arrow glyph, matching the "Updates…" button's refresh affordance.
-        if let base = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil),
-           let sized = base.withSymbolConfiguration(
-               NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
-           ) {
-            sized.isTemplate = true
-            refreshButton.image = sized
-            refreshButton.imagePosition = .imageLeading
-            refreshButton.imageHugsTitle = true
-        }
-        refreshButton.setAccessibilityLabel("Refresh App List")
-        refreshButton.onPress = { [weak self] in self?.onRefreshApps?() }
-        [nativeCard, profilesCard, refreshButton].forEach(addSubview)
+        nativeCard.onRefresh = { [weak self] in self?.onRefreshApps?() }
+        profilesCard.onRefresh = { [weak self] in self?.onRefreshApps?() }
+        [nativeCard, profilesCard].forEach(addSubview)
         rebuildRows()
+    }
+
+    /// Keeps both header icons in step during a rescan.
+    func setRefreshing(_ refreshing: Bool) {
+        applyRefreshIconState(nativeCard.refreshButton, refreshing: refreshing)
+        applyRefreshIconState(profilesCard.refreshButton, refreshing: refreshing)
     }
 
     required init?(coder: NSCoder) { nil }
@@ -1184,13 +1618,16 @@ final class MappingAppProfilesView: NSView {
         rebuildRows()
     }
 
-    func setOriginals(
-        _ originals: [(QuickLaunchTarget, String, String, QuickLaunchMouseButton?)]
-    ) {
-        self.originals = originals.map {
-            (target: $0.0, name: $0.1, path: $0.2, button: $0.3)
-        }
+    func setOriginals(_ originals: [MappingNativeApp]) {
+        self.originals = originals
         originalsLoaded = true
+        rebuildRows()
+    }
+
+    /// The pinned profile ids, in pin order. Separate from `setInstances` because the
+    /// pins change independently of the profile list itself.
+    func setTopPinnedProfiles(_ ids: [UUID]) {
+        topPinnedProfileIDs = ids
         rebuildRows()
     }
 
@@ -1207,16 +1644,13 @@ final class MappingAppProfilesView: NSView {
         // premature "No native apps installed" over empty space.
         if originalsLoaded {
             let nativeWidth = nativeCard.rowContentWidth
+            // Already ordered pinned-first by the controller, which owns the pin list.
             let nativeRows: [NSView] = originals.map { original in
-                let row = MappingOriginalAppRowView(
-                    target: original.target,
-                    name: original.name,
-                    path: original.path,
-                    mouseButton: original.button,
-                    width: nativeWidth
-                )
+                let row = MappingOriginalAppRowView(app: original, width: nativeWidth)
                 row.onOpen = { [weak self] in self?.onOpenOriginal?($0) }
                 row.onAssign = { [weak self] in self?.onAssignOriginal?($0) }
+                row.onToggleMenuBar = { [weak self] in self?.onToggleOriginalMenuBar?($0) }
+                row.onTogglePin = { [weak self] in self?.onTogglePinOriginal?($0) }
                 return row
             }
             nativeCard.setRows(
@@ -1236,14 +1670,26 @@ final class MappingAppProfilesView: NSView {
                 || previewRenderingIsActive
                 || FileManager.default.fileExists(atPath: instance.launcherPath))
         }.sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
-        let profileRows: [NSView] = visible.map { instance in
+        // Pinned profiles lead; the rest stay alphabetical behind them.
+        let ordered = topPinnedFirst(visible, pins: topPinnedProfileIDs) { $0.id }
+        // Only pins for profiles actually in this list consume a slot: a pin left behind by
+        // a deleted profile has no card to unpin from, so counting it would lock the user
+        // out. Set membership is fine here — nothing iterates it.
+        let liveIDs = Set(visible.map(\.id))
+        let atLimit = topPinnedProfileIDs.filter(liveIDs.contains).count
+            >= KlikProConfig.topPinLimit
+        let profileRows: [NSView] = ordered.map { instance in
             let row = MappingAppProfileOpenRowView(
                 instance: instance,
                 health: runtimeHealth[instance.id],
-                width: profilesWidth
+                width: profilesWidth,
+                topPinned: topPinnedProfileIDs.contains(instance.id),
+                topPinAtLimit: atLimit
             )
             row.onOpen = { [weak self] in self?.onOpen?($0) }
             row.onAssign = { [weak self] in self?.onAssign?($0) }
+            row.onToggleMenuBar = { [weak self] in self?.onToggleMenuBar?($0) }
+            row.onTogglePin = { [weak self] in self?.onTogglePinProfile?($0) }
             return row
         }
         profilesCard.setRows(
@@ -1257,6 +1703,14 @@ final class MappingAppProfilesView: NSView {
 final class AppProfilesContentView: NSView {
     /// Even split between the generator column and the management list.
     private static let generatorColumnRatio: CGFloat = 0.50
+    /// Top of both column headers. The titles are drawn in `draw(_:)` while the
+    /// refresh icons are real subviews, so both read this rather than repeating a
+    /// literal — that split is what let the refresh control drift out of the header
+    /// in the first place. Kept tight to the panel edge: there is nothing above the
+    /// headers, so a large inset was only dead space.
+    private static let headerTopY: CGFloat = 24
+    /// First row of column content, below the header and its one-line caption.
+    private static let columnContentY: CGFloat = 126
 
     private let explanationField = NSTextField(wrappingLabelWithString:
         "Generate another icon for the same app, with a separate login and settings. The native app is never copied, cloned or modified."
@@ -1268,7 +1722,11 @@ final class AppProfilesContentView: NSView {
     private let loadingView = NSView()
     private let loadingSpinner = NSProgressIndicator()
     private let loadingField = NSTextField(labelWithString: "Scanning installed apps…")
-    private let refreshButton = AppProfileButton(title: "Refresh App List", frame: .zero)
+    /// One rescan icon per column, inline at the right of each section header, so
+    /// whichever column the user is reading has the control to hand. Both call the
+    /// same onRefreshApps and are kept in the same enabled state.
+    private let generatorRefreshButton = makeRefreshIconButton()
+    private let profilesRefreshButton = makeRefreshIconButton()
     private let scrollView = NSScrollView()
     private let stackView = FlippedProfileStackView()
     var onGenerate: ((AppProfileCandidate) -> Void)?
@@ -1291,12 +1749,18 @@ final class AppProfilesContentView: NSView {
     var onAddToDock: ((AppProfileInstance) -> Void)?
     var onChangeApp: ((String) -> Void)?
     var onRefreshApps: (() -> Void)?
+    var onTogglePinOriginal: ((QuickLaunchTarget) -> Void)?
+    var onTogglePinProfile: ((AppProfileInstance) -> Void)?
     var onInstancesChange: (([AppProfileInstance]) -> Void)?
     var onRuntimeHealthChange: (([UUID: AppProfileRuntimeHealth]) -> Void)?
     var onStatusChange: ((String, NSColor) -> Void)?
     private var instances: [AppProfileInstance] = []
     private var supportedCandidates: [AppProfileCandidate] = []
     private var runtimeHealth: [UUID: AppProfileRuntimeHealth] = [:]
+    /// List-order pins, in the user's pin order. Both columns read these: the generator
+    /// column reorders its cards, the profiles column reorders its rows.
+    private var topPinnedOriginals: [QuickLaunchTarget] = []
+    private var topPinnedProfileIDs: [UUID] = []
 
     override var isFlipped: Bool { true }
 
@@ -1315,14 +1779,21 @@ final class AppProfilesContentView: NSView {
         // than leaving empty space below a fixed-height card.
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: 702))
 
-        explanationField.frame = NSRect(x: 18, y: 78, width: generatorWidth, height: 64)
+        explanationField.frame = NSRect(
+            x: 18, y: Self.headerTopY + 26, width: generatorWidth, height: 64
+        )
         explanationField.font = .systemFont(ofSize: 12)
         explanationField.textColor = .appTextSecondary
         let cardPitch = DualAppGeneratorCard.cardHeight + innerCardSpacing
         for (index, entry) in generatorCards.enumerated() {
-            entry.card.frame.origin = NSPoint(x: 18, y: 154 + CGFloat(index) * cardPitch)
+            entry.card.frame.origin = NSPoint(
+                x: 18, y: Self.columnContentY + CGFloat(index) * cardPitch
+            )
         }
-        loadingView.frame = NSRect(x: 18, y: 154, width: generatorWidth, height: 224 + innerCardSpacing)
+        loadingView.frame = NSRect(
+            x: 18, y: Self.columnContentY,
+            width: generatorWidth, height: 224 + innerCardSpacing
+        )
         loadingView.wantsLayer = true
         loadingView.layer?.cornerRadius = innerCardCornerRadius
         loadingView.layer?.backgroundColor = innerCardFillColor.cgColor
@@ -1347,24 +1818,31 @@ final class AppProfilesContentView: NSView {
         statusField.font = .systemFont(ofSize: 11)
         statusField.textColor = .appTextSecondary
         statusField.isHidden = true
-        // Refresh re-scans installed apps for both columns; it sits in the panel's
-        // top-right corner, out of the way of the column divider and headers.
-        refreshButton.frame = NSRect(x: width - 40, y: 12, width: 26, height: 26)
-        refreshButton.title = ""
-        refreshButton.imagePosition = .imageOnly
-        refreshButton.toolTip = "Refresh App List"
-        if let base = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil),
-           let sized = base.copy() as? NSImage {
-            sized.size = NSSize(width: 14, height: 14)
-            refreshButton.image = sized
-        }
-        refreshButton.onPress = { [weak self] in self?.onRefreshApps?() }
+        // Refresh re-scans installed apps for both columns. One icon per column,
+        // right-aligned inline with that column's section header (drawn at y 52 in
+        // draw(_:)), so it costs no vertical space and the reading column always has
+        // the control to hand.
+        let refreshSide: CGFloat = 26
+        // Centred on the header text's line (headerTopY is the text's top, ~14pt tall).
+        let headerRefreshY = Self.headerTopY + 7 - refreshSide / 2
+        generatorRefreshButton.frame = NSRect(
+            x: generatorColumnWidth - 18 - refreshSide, y: headerRefreshY,
+            width: refreshSide, height: refreshSide
+        )
+        profilesRefreshButton.frame = NSRect(
+            x: width - 18 - refreshSide, y: headerRefreshY,
+            width: refreshSide, height: refreshSide
+        )
+        generatorRefreshButton.onPress = { [weak self] in self?.onRefreshApps?() }
+        profilesRefreshButton.onPress = { [weak self] in self?.onRefreshApps?() }
 
+        // Starts on the same line as the generator's first card and absorbs the space
+        // the tightened header reclaimed, so the list shows one more row.
         scrollView.frame = NSRect(
             x: generatorColumnWidth + 12,
-            y: 142,
+            y: Self.columnContentY - 12,
             width: width - generatorColumnWidth - 28,
-            height: 546
+            height: 574
         )
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
@@ -1376,6 +1854,9 @@ final class AppProfilesContentView: NSView {
         scrollView.documentView = stackView
 
         for (target, card) in generatorCards {
+            // A target with no ShortcutSlot has no config key to store a mouse-button
+            // assignment in, so its Assign control stays disabled.
+            card.setAssignable(target.shortcutSlot != nil)
             card.onGenerate = { [weak self] in self?.onGenerate?($0) }
             card.onOpen = { [weak self] _ in self?.onOpenOriginal?(target) }
             card.onAssign = { [weak self] in self?.onAssignOriginal?(target) }
@@ -1387,8 +1868,12 @@ final class AppProfilesContentView: NSView {
             card.onAddNativeDock = { [weak self] in self?.onAddNativeOriginalDock?(target) }
             card.onRemoveNativeDock = { [weak self] in self?.onRemoveNativeOriginalDock?(target) }
             card.onToggleMenuBar = { [weak self] in self?.onToggleOriginalMenuBar?(target) }
+            card.onTogglePin = { [weak self] in self?.onTogglePinOriginal?(target) }
         }
-        ([explanationField, loadingView, statusField, refreshButton, scrollView] as [NSView]
+        ([
+            explanationField, loadingView, statusField,
+            generatorRefreshButton, profilesRefreshButton, scrollView,
+        ] as [NSView]
             + generatorCards.map(\.card)).forEach(addSubview)
         setAppDiscoveryLoading()
         setInstances(instances)
@@ -1403,14 +1888,36 @@ final class AppProfilesContentView: NSView {
         onInstancesChange?(instances)
     }
 
-    /// Stacks the visible cards from the top so a hidden one leaves no gap.
+    /// Stacks the visible cards from the top so a hidden one leaves no gap, with the
+    /// pinned ones first — the same ordering the Mappings lists use, so a pin set on
+    /// either tab reads the same on both.
     private func relayoutGeneratorCards() {
         let pitch = DualAppGeneratorCard.cardHeight + innerCardSpacing
+        let ordered = topPinnedFirst(generatorCards, pins: topPinnedOriginals) { $0.target }
         var row = 0
-        for (_, card) in generatorCards where !card.isHidden {
-            card.frame.origin = NSPoint(x: 18, y: 154 + CGFloat(row) * pitch)
+        for (_, card) in ordered where !card.isHidden {
+            card.frame.origin = NSPoint(x: 18, y: Self.columnContentY + CGFloat(row) * pitch)
             row += 1
         }
+    }
+
+    /// Reflects which native apps are pinned to the top of the app lists, and pushes the
+    /// cap state so an unpinned card in a full list shows a disabled pin with the reason.
+    /// `atLimit` is supplied by the controller rather than derived from `targets.count`:
+    /// only pins with an installed app behind them consume a slot, and this view cannot
+    /// tell which those are.
+    func setTopPinnedOriginals(_ targets: [QuickLaunchTarget], atLimit: Bool) {
+        topPinnedOriginals = targets
+        for (target, card) in generatorCards {
+            card.setTopPinned(targets.contains(target), atLimit: atLimit)
+        }
+        relayoutGeneratorCards()
+    }
+
+    /// Pinned profile ids in pin order, for the right-hand column's own ordering.
+    func setTopPinnedProfiles(_ ids: [UUID]) {
+        topPinnedProfileIDs = ids
+        rebuildRows()
     }
 
     /// Reflects the live Dock pin state of each original-app launcher on its card.
@@ -1444,8 +1951,7 @@ final class AppProfilesContentView: NSView {
         }
         loadingSpinner.stopAnimation(nil)
         loadingView.isHidden = true
-        refreshButton.isEnabled = true
-        refreshButton.setAccessibilityLabel("Refresh App List")
+        setRefreshing(false)
         // A card only appears when its app is actually installed; a listed-but-absent
         // app would otherwise show a card whose every action is dead.
         for (_, card) in generatorCards {
@@ -1454,6 +1960,9 @@ final class AppProfilesContentView: NSView {
             }
             card.isHidden = candidate == nil
             card.update(candidate: candidate, alternativesAvailable: !alternatives.isEmpty)
+            // The badge reports the matched rule's assurance, which eligibility already
+            // carries: a verified rule yields .verified, an untested one .experimental.
+            card.setCompatibility(verified: candidate.map { $0.eligibility.kind == .verified })
         }
         relayoutGeneratorCards()
         if statusField.stringValue == "Scanning installed apps…" {
@@ -1472,13 +1981,18 @@ final class AppProfilesContentView: NSView {
         }
     }
 
+    /// Keeps both column icons in step during a rescan — if one disabled without the
+    /// other, the idle one would look broken.
+    func setRefreshing(_ refreshing: Bool) {
+        applyRefreshIconState(generatorRefreshButton, refreshing: refreshing)
+        applyRefreshIconState(profilesRefreshButton, refreshing: refreshing)
+    }
+
     func setAppDiscoveryLoading() {
         for (_, card) in generatorCards { card.isHidden = true }
         loadingView.isHidden = false
         loadingSpinner.startAnimation(nil)
-        refreshButton.isEnabled = false
-        refreshButton.toolTip = "Refreshing…"
-        refreshButton.setAccessibilityLabel("Refreshing app list")
+        setRefreshing(true)
         setStatus("Scanning installed apps…")
     }
 
@@ -1510,9 +2024,23 @@ final class AppProfilesContentView: NSView {
             empty.widthAnchor.constraint(equalToConstant: rowWidth).isActive = true
             empty.heightAnchor.constraint(equalToConstant: 70).isActive = true
         } else {
-            for instance in visible.sorted(by: { $0.label.localizedStandardCompare($1.label) == .orderedAscending }) {
+            // Pinned profiles lead, then the rest alphabetically — the same ordering the
+            // Mappings profiles list uses, so both tabs agree.
+            let sorted = visible.sorted {
+                $0.label.localizedStandardCompare($1.label) == .orderedAscending
+            }
+            // Only pins for profiles present in this list consume a slot — see the same
+            // note in MappingAppProfilesView.rebuildRows.
+            let liveIDs = Set(visible.map(\.id))
+            let atLimit = topPinnedProfileIDs.filter(liveIDs.contains).count
+                >= KlikProConfig.topPinLimit
+            for instance in topPinnedFirst(sorted, pins: topPinnedProfileIDs, key: { $0.id }) {
                 let row = AppProfileInstanceRowView(
-                    instance: instance, health: runtimeHealth[instance.id], width: rowWidth
+                    instance: instance,
+                    health: runtimeHealth[instance.id],
+                    width: rowWidth,
+                    topPinned: topPinnedProfileIDs.contains(instance.id),
+                    topPinAtLimit: atLimit
                 )
                 row.onOpen = { [weak self] in self?.onOpen?($0) }
                 row.onAssign = { [weak self] in self?.onAssign?($0) }
@@ -1521,6 +2049,7 @@ final class AppProfilesContentView: NSView {
                 row.onRemove = { [weak self] in self?.onRemove?($0) }
                 row.onChangeIcon = { [weak self] in self?.onChangeIcon?($0) }
                 row.onAddToDock = { [weak self] in self?.onAddToDock?($0) }
+                row.onTogglePin = { [weak self] in self?.onTogglePinProfile?($0) }
                 stackView.addArrangedSubview(row)
                 row.widthAnchor.constraint(equalToConstant: rowWidth).isActive = true
                 // Must match AppProfileInstanceRowView's rowHeight, or the card is
@@ -1530,10 +2059,16 @@ final class AppProfilesContentView: NSView {
                 ).isActive = true
             }
         }
-        stackView.frame = NSRect(
-            x: 0, y: 0, width: rowWidth,
-            height: max(scrollView.contentSize.height, CGFloat(max(1, visible.count)) * 102 + 4)
-        )
+        // Exact document height, derived from the real row height rather than a
+        // hard-coded pitch, and never stretched up to the viewport — see the note in
+        // MappingSectionCardView.setRows: padding it makes the scroller handle's length
+        // meaningless. autohidesScrollers hides the scroller when everything fits.
+        let itemCount = max(1, visible.count)
+        let perItemHeight = visible.isEmpty ? 70 : AppProfileInstanceRowView.rowHeight
+        let contentHeight = stackView.edgeInsets.top + stackView.edgeInsets.bottom
+            + CGFloat(itemCount) * perItemHeight
+            + CGFloat(itemCount - 1) * stackView.spacing
+        stackView.frame = NSRect(x: 0, y: 0, width: rowWidth, height: contentHeight)
     }
 
     func setStatus(_ message: String, color: NSColor = .appTextSecondary) {
@@ -1549,18 +2084,18 @@ final class AppProfilesContentView: NSView {
         NSColor.separatorColor.setStroke()
         let border = NSBezierPath(roundedRect: card, xRadius: 12, yRadius: 12)
         border.lineWidth = 1; border.stroke()
-        "APP PROFILE GENERATOR".draw(at: NSPoint(x: 18, y: 52), withAttributes: [
+        "APP PROFILE GENERATOR".draw(at: NSPoint(x: 18, y: Self.headerTopY), withAttributes: [
             .font: NSFont.boldSystemFont(ofSize: 12),
             .foregroundColor: NSColor.appTextSecondary,
         ])
         let generatorColumnWidth = floor(bounds.width * Self.generatorColumnRatio)
         let profilesX = generatorColumnWidth + 16
-        "YOUR APP PROFILES".draw(at: NSPoint(x: profilesX, y: 52), withAttributes: [
+        "YOUR APP PROFILES".draw(at: NSPoint(x: profilesX, y: Self.headerTopY), withAttributes: [
             .font: NSFont.boldSystemFont(ofSize: 11),
             .foregroundColor: NSColor.appTextSecondary,
         ])
         ("Open, assign, or manage each separate profile." as NSString).draw(
-            at: NSPoint(x: profilesX, y: 79),
+            at: NSPoint(x: profilesX, y: Self.headerTopY + 27),
             withAttributes: [
                 .font: NSFont.systemFont(ofSize: 12),
                 .foregroundColor: NSColor.appTextPrimary,
@@ -1811,8 +2346,12 @@ final class AdvancedSettingsContentView: NSView {
         // config rows + (orphan header + orphan rows) when any orphans exist.
         let orphanBlock = orphans.isEmpty ? 0 : Int(headerHeight) + orphans.count * Int(rowHeight)
         let contentHeight = CGFloat(ordered.count) * rowHeight + CGFloat(orphanBlock)
-        let documentHeight = max(maintenanceScroll.contentSize.height, contentHeight)
-        maintenanceDocument.frame = NSRect(x: 0, y: 0, width: width, height: documentHeight)
+        // Exact document height, never stretched up to the viewport: the scroller draws
+        // its handle as viewport/document, so padding the document toward the viewport
+        // height forced a nearly full-length handle that barely moved. With the true
+        // height the handle is proportional to how much is off-screen, and
+        // autohidesScrollers hides it entirely when the list fits.
+        maintenanceDocument.frame = NSRect(x: 0, y: 0, width: width, height: contentHeight)
 
         if ordered.isEmpty && orphans.isEmpty {
             let empty = NSTextField(labelWithString: "No managed App Profiles yet.")

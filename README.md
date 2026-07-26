@@ -368,11 +368,10 @@ already exists — if either the native app's own tile or Klik PRO's launcher is
 already in the Dock, that step is skipped; the launcher is added automatically only
 when neither is present, so you always keep a way to reopen the native app. Creating
 a profile that adds both its own Dock icon and the native launcher in one step now
-lands both tiles reliably. Each row in **Your App Profiles** ends with a **Menu bar**
-toggle (the rightmost control) for showing or hiding that instance in Klik PRO's
-menu-bar launchers. These menu-bar controls are independent of **Launch at login**:
-disabling automatic startup does not hide the icons that are already running in the
-current session.
+lands both tiles reliably. Every card's gear menu ends with a **Menu Bar Icon**
+switch for showing or hiding that instance in Klik PRO's menu-bar launchers. These
+menu-bar controls are independent of **Launch at login**: disabling automatic startup
+does not hide the icons that are already running in the current session.
 
 If an App Profile already owns a mouse button, its **Assign Button** control shows
 that button as its own label — for example **Forward Button** — with a chain-link
@@ -380,10 +379,21 @@ icon, and switches to **Change ⋯** on hover. A profile with no button assigned
 a link-with-plus icon on **Assign Button**.
 
 On fresh launch, the App Profiles tab shows one **Scanning installed apps…** spinner
-while Klik PRO scans installed applications, then switches to the ChatGPT and
-Claude cards. **Refresh App List**, in the panel's top-right, rescans installed
-apps and refreshes the profile list if ChatGPT or Claude is installed or removed
-while Klik PRO is already open.
+while Klik PRO scans installed applications, then switches to a card per installed
+app in the catalogue. A small refresh arrow sits inline at the right of every list's
+heading — one per list, all doing the same rescan — so whichever list you are reading
+has it to hand. It rescans installed apps and refreshes the profile list when an app
+is installed or removed while Klik PRO is already open.
+
+Every card also carries a **pin**, beside its gear. Pinning moves a card to the top of
+its list on both tabs, and the Mappings lists show exactly three cards at a time, so
+the apps you pin are the ones you see without scrolling. Each list keeps its own three
+pins — three native apps and three App Profiles. Nothing is pinned until you pin it,
+and Klik PRO never pins anything on your behalf. Once three are pinned the fourth pin
+is refused rather than silently replacing one, so unpin to free a slot. Pinning only
+changes the order: everything past the third card is one scroll away, an app keeps its
+mouse-button assignment whether pinned or not, and pinning never counts as an unsaved
+change.
 
 Generated launchers use the name you choose for their visible `.app` icon, while
 their profile data remains safely UUID-keyed inside Klik PRO's Application Support

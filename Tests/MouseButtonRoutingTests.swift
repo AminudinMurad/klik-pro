@@ -78,8 +78,8 @@ private struct MouseButtonRoutingTests {
         expect(enclosingKlikProAppURL(for: URL(fileURLWithPath: "/tmp/klik-pro-input")) == nil,
                "an unbundled helper must not invent an enclosing app path")
 
-        expect(ShortcutSlot.allCases.count == 6,
-               "only the four active mouse mappings and two global hotkeys belong in ShortcutSlot")
+        expect(ShortcutSlot.allCases.count == 7,
+               "only the four active mouse mappings and three global hotkeys belong in ShortcutSlot")
         expect(QuickLaunchMouseButton.allCases.map(\.title) == ["Middle", "Gesture", "Forward", "Back"],
                "quick-launch assignment order must be Middle, Gesture, Forward, Back")
         expect(QuickLaunchTarget.chatGPT.applicationBundleIdentifier == "com.openai.codex"
@@ -224,8 +224,8 @@ private struct MouseButtonRoutingTests {
         expect(shortcutSlot(forMouseButtonNumber: 5) == nil,
                "unmanaged button 5 must pass through")
 
-        expect(KlikProConfig.default.schemaVersion == 12,
-               "new configurations must use schema 12 (App Profile lifecycle fields)")
+        expect(KlikProConfig.default.schemaVersion == 13,
+               "new configurations must use schema 13 (Gemini launch target fields)")
         expect(!KlikProConfig.default.onboardingCompleted,
                "a new configuration must begin with onboarding pending")
         expect(!KlikProConfig.default.showMenuBarIcon,
@@ -236,11 +236,27 @@ private struct MouseButtonRoutingTests {
                "legacy Dual App menu icon seed must remain compatible by default")
         expect(!KlikProConfig.default.specialFeatureEnabled,
                "Special Feature must remain off until the user enables it")
-        expect(KlikProConfig.default.thumbWheel.firefoxEnabled,
-               "Firefox thumb-wheel tab switching must be enabled by default")
-        expect(KlikProConfig.default.chatGPTMouseButton == .forward
-               && KlikProConfig.default.claudeMouseButton == .back,
-               "new configurations must link Forward to ChatGPT and Back to Claude")
+        // A fresh install starts quiet (owner decision): the thumb wheel is off and
+        // every per-browser checkbox with it, so nothing is opted in on the user's
+        // behalf and the pull-down reads "No browsers".
+        expect(!KlikProConfig.default.thumbWheel.enabled
+               && !KlikProConfig.default.thumbWheel.chromeEnabled
+               && !KlikProConfig.default.thumbWheel.braveEnabled
+               && !KlikProConfig.default.thumbWheel.firefoxEnabled
+               && !KlikProConfig.default.thumbWheel.safariEnabled,
+               "a fresh install must start with the thumb wheel and every browser off")
+        // Only Forward and Back arrive mapped, and to a keyboard shortcut (browser
+        // Back/Forward) — never to an app. No mouse button is pre-assigned.
+        expect(KlikProConfig.default.chatGPTMouseButton == nil
+               && KlikProConfig.default.claudeMouseButton == nil
+               && KlikProConfig.default.geminiMouseButton == nil,
+               "no mouse button may arrive pre-assigned to an app")
+        expect(!KlikProConfig.default.middleButton.enabled
+               && !KlikProConfig.default.gestureButton.enabled,
+               "Middle and Gesture must start off; only Forward and Back are mapped")
+        expect(KlikProConfig.default.forwardButton.enabled
+               && KlikProConfig.default.backButton.enabled,
+               "Forward and Back keep their browser-shortcut defaults")
 
         // v1.3 presents original apps and managed profiles through one assignment
         // flow while retaining their backwards-compatible storage fields.
@@ -425,7 +441,11 @@ private struct MouseButtonRoutingTests {
                "default Back must retain Safari's documented Command-[ fallback")
         expect(KlikProConfig.default.forwardButton.combo.signature == defaultBrowserForwardCombo.signature,
                "default Forward must retain Safari's documented Command-] fallback")
+        // This covers the routing rule — a dedicated per-browser setting wins over the
+        // generic fallback — so it states its own precondition rather than inheriting
+        // one from KlikProConfig.default, whose browser flags now all start off.
         var browserChoices = KlikProConfig.default.thumbWheel
+        browserChoices.firefoxEnabled = true
         browserChoices.defaultFallbackEnabled = false
         expect(thumbWheelMappingIsEnabled(
             for: "org.mozilla.firefox",
@@ -809,6 +829,10 @@ private struct MouseButtonRoutingTests {
                "one launcher and its intentional mouse mirror must not be Duplicate")
 
         var dormantLinkedCandidate = linkedConflictCandidate
+        // Conflict evaluation short-circuits a disabled mapping to .ok, and Middle now
+        // ships off, so this fixture turns it on explicitly: the rule under test is
+        // about a restored base mapping's conflicts, not about the shipped default.
+        dormantLinkedCandidate.middleButton.enabled = true
         dormantLinkedCandidate.middleButton.combo = dormantLinkedCandidate.backButton.combo
         let dormantStatuses = evaluateShortcutConflicts(
             candidate: dormantLinkedCandidate,
@@ -854,6 +878,12 @@ private struct MouseButtonRoutingTests {
                "a third matching shortcut must make the launcher, mirror, and third row Duplicate")
 
         var config = KlikProConfig.default
+        // These two cover how an original-app mouse mirror resolves with Special
+        // Feature off, so the fixture makes those assignments itself. A fresh install
+        // no longer links any button to an app, so inheriting them from the default
+        // would leave nothing to resolve.
+        config.claudeMouseButton = .back
+        config.chatGPTMouseButton = .forward
         config.backButton.combo = KeyCombo(
             keyCode: UInt16(kVK_ANSI_C), keyDisplay: "C",
             command: true, option: true, control: false, shift: true
@@ -964,6 +994,9 @@ private struct MouseButtonRoutingTests {
         "an exact sentinel plus another map must never be abandoned as a generic conflict")
 
         var sentinelCandidate = KlikProConfig.default
+        // Gesture ships off and a disabled mapping is never evaluated, so this fixture
+        // turns it on: the rule under test is that Command-F20 is a recursive output.
+        sentinelCandidate.gestureButton.enabled = true
         sentinelCandidate.gestureButton.combo = KeyCombo(
             keyCode: UInt16(kVK_F20), keyDisplay: "F20",
             command: true, option: false, control: false, shift: false
@@ -977,6 +1010,8 @@ private struct MouseButtonRoutingTests {
                "Command-F20 must be rejected as a recursive Gesture output")
 
         var hiddenBaseSentinel = KlikProConfig.default
+        // The reserved scan only considers enabled base mappings, and Gesture ships off.
+        hiddenBaseSentinel.gestureButton.enabled = true
         hiddenBaseSentinel.gestureButton.combo = sentinelCandidate.gestureButton.combo
         hiddenBaseSentinel.chatGPTMouseButton = .gesture
         expect(mapping(for: .gestureButton, in: hiddenBaseSentinel).combo.signature

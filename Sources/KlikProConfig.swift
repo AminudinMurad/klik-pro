@@ -635,6 +635,28 @@ struct KlikProConfig: Codable, Equatable {
     // custom icon is persisted as a file under Application Support, so only the
     // name lives in the config.
     var originalDockCustomNames: [QuickLaunchTarget: String]
+    // Native apps the user pinned to the TOP of the app lists (card gear-row pin), so the
+    // three that matter stay in view without scrolling. Purely a list-ordering preference:
+    // it changes no mapping, no hotkey and no menu-bar or Dock state, which is why the name
+    // avoids the already-overloaded "menuBarPinned"/"dockPinned"/"pinToMenuBar" vocabulary.
+    //
+    // Ordered Array, not Set, for two reasons: the user's pin order is meaningful (the first
+    // pinned app stays first), and `Set` iteration order varies per process, which would make
+    // the rendered fixtures nondeterministic between the two comparison runs in check.sh.
+    // Additive and decode-tolerant: an older config decodes to an empty array (nothing
+    // pinned), so this needs no schema bump.
+    var topPinnedOriginals: [QuickLaunchTarget]
+    // App Profile instances pinned to the top of the profile lists, keyed by
+    // `AppProfileInstance.id`. Keyed by UUID rather than by index because
+    // `synchronizedLegacyQuickLaunchInstances` reorders and can drop rows on every
+    // normalize, so an index would drift. Same additive, decode-tolerant contract as
+    // `topPinnedOriginals`; a pin for a deleted profile is harmless (it simply matches
+    // nothing) and is deliberately not pruned, so restoring the profile restores its pin.
+    var topPinnedProfileIDs: [UUID]
+
+    /// The most cards either list will float to the top. Reaching it does not swap a pin
+    /// out: the user unpins to free a slot, so a pin is never lost silently.
+    static let topPinLimit = 3
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, onboardingCompleted, showMenuBarIcon, showQuickLaunchMenuIcons
@@ -644,7 +666,7 @@ struct KlikProConfig: Codable, Equatable {
         case geminiHotkey, geminiMouseButton
         case forwardButton, backButton, thumbWheel, instances
         case suppressedLegacyInstanceIDs, dataRoot, knownDataRoots, menuBarPinnedOriginals
-        case originalDockCustomNames
+        case originalDockCustomNames, topPinnedOriginals, topPinnedProfileIDs
     }
 
     /// `showMenuBarIcon` was added in schema 6. Quick Launch side-button defaults were
@@ -736,6 +758,17 @@ struct KlikProConfig: Codable, Equatable {
         originalDockCustomNames = try container.decodeIfPresent(
             [QuickLaunchTarget: String].self, forKey: .originalDockCustomNames
         ) ?? [:]
+        // Both pin lists default to empty, so an upgrading user starts with nothing pinned
+        // and sees the lists in their natural order — no card is ever auto-pinned on their
+        // behalf. Duplicates and over-cap entries from a hand-edited file are trimmed by
+        // `normalizedQuickLaunchConfig`, not here, so decoding stays lossless for
+        // inspection.
+        topPinnedOriginals = try container.decodeIfPresent(
+            [QuickLaunchTarget].self, forKey: .topPinnedOriginals
+        ) ?? []
+        topPinnedProfileIDs = try container.decodeIfPresent(
+            [UUID].self, forKey: .topPinnedProfileIDs
+        ) ?? []
         // Schema 11 → 12 is also additive. AppProfileInstance defaults missing
         // lifecycle fields to active/nil, so no profile is re-keyed or moved.
         if schemaVersion < 12 {
@@ -769,7 +802,9 @@ struct KlikProConfig: Codable, Equatable {
         dataRoot: String? = nil,
         knownDataRoots: [String] = [],
         menuBarPinnedOriginals: Set<QuickLaunchTarget> = [],
-        originalDockCustomNames: [QuickLaunchTarget: String] = [:]
+        originalDockCustomNames: [QuickLaunchTarget: String] = [:],
+        topPinnedOriginals: [QuickLaunchTarget] = [],
+        topPinnedProfileIDs: [UUID] = []
     ) {
         self.schemaVersion = schemaVersion
         self.onboardingCompleted = onboardingCompleted
@@ -794,6 +829,8 @@ struct KlikProConfig: Codable, Equatable {
         self.knownDataRoots = knownDataRoots
         self.menuBarPinnedOriginals = menuBarPinnedOriginals
         self.originalDockCustomNames = originalDockCustomNames
+        self.topPinnedOriginals = topPinnedOriginals
+        self.topPinnedProfileIDs = topPinnedProfileIDs
     }
 }
 
@@ -855,9 +892,14 @@ extension KlikProConfig {
             enabled: true,
             combo: defaultBrowserBackCombo
         ),
+            // A fresh install starts quiet: the thumb wheel is off AND every
+            // per-browser checkbox is off, so the pull-down reads "No browsers" and
+            // nothing is opted in on the user's behalf. They choose the browsers they
+            // actually want when they turn the wheel on. Existing configs keep their
+            // stored flags — this is a fresh-install default, not a migration.
             thumbWheel: ThumbWheelConfig(
-            enabled: false, chromeEnabled: true, braveEnabled: true,
-            firefoxEnabled: true, safariEnabled: true, defaultFallbackEnabled: true
+            enabled: false, chromeEnabled: false, braveEnabled: false,
+            firefoxEnabled: false, safariEnabled: false, defaultFallbackEnabled: false
         ),
             instances: []
         )
@@ -2307,7 +2349,46 @@ func normalizedQuickLaunchConfig(_ config: KlikProConfig) -> KlikProConfig {
     // Keep the history deliberately small. This is a scan allow-list, not an
     // inventory of arbitrary filesystem locations.
     normalized.knownDataRoots = Array(roots.suffix(8))
+    // Clamp both pin lists here rather than trusting the UI, so a hand-edited config or
+    // one written by a different build cannot quietly exceed the cap. De-duplicate first
+    // (a repeated entry would otherwise consume two of the three slots) and keep the
+    // user's own order, so the earliest pin stays highest.
+    normalized.topPinnedOriginals = clampedTopPins(normalized.topPinnedOriginals)
+    normalized.topPinnedProfileIDs = clampedTopPins(normalized.topPinnedProfileIDs)
     return normalized
+}
+
+/// De-duplicates preserving first-seen order, then trims to `KlikProConfig.topPinLimit`.
+/// `prefix`, not `suffix`: the pins the user set first are the ones they keep.
+func clampedTopPins<Element: Hashable>(_ pins: [Element]) -> [Element] {
+    var seen = Set<Element>()
+    return Array(pins.filter { seen.insert($0).inserted }.prefix(KlikProConfig.topPinLimit))
+}
+
+/// The pin list after pinning `pin`, or nil when the list is genuinely full.
+///
+/// A pin whose card is not currently in the list — an uninstalled app, a deleted profile —
+/// must NOT consume a slot. Otherwise a user who pins three apps and then uninstalls them
+/// is locked out permanently: every remaining card reports "already full" while the pinned
+/// cards no longer exist to unpin from. Only `isResolvable` pins count toward the cap.
+///
+/// Storage is clamped to the cap, so when the stored list is already that long the
+/// unresolvable entries are released to make room — otherwise `clampedTopPins` would
+/// silently discard the pin just added. Resolvable pins are never dropped, and an
+/// unresolvable one is only sacrificed when its slot is actually needed, so uninstalling
+/// and reinstalling an app normally restores its pin.
+func topPinsAdding<Element: Hashable>(
+    _ pin: Element,
+    to current: [Element],
+    isResolvable: (Element) -> Bool
+) -> [Element]? {
+    guard current.filter(isResolvable).count < KlikProConfig.topPinLimit else { return nil }
+    var kept = current
+    while kept.count >= KlikProConfig.topPinLimit,
+          let stale = kept.firstIndex(where: { !isResolvable($0) }) {
+        kept.remove(at: stale)
+    }
+    return kept + [pin]
 }
 
 func assignedQuickLaunchTarget(

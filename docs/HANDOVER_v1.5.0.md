@@ -310,24 +310,211 @@ enum case still renders nothing. Two ways forward:
 Take option 2. It is the same "stop pre-committing per-app plumbing" move that the generic engine
 fallback in section 3 makes for identities.
 
-## 4c. Mappings tab still untouched — the visible gap
+## 4c. Mappings tab — DONE 2026-07-26
 
-Done so far: the generator card is two rows, the generator column is data-driven, Gemini/Canva/Zoom/
-Spotify are listed, and the refresh control is icon-only. **Not done, and the owner has flagged it
-twice:**
+All four items below are implemented; §2c's card is now shared by all four lists.
 
-1. **Refresh icon placement is wrong.** It was only shrunk in place, so it floats above the cards.
-   It must sit **inline in each column's section header**, right-aligned — four in total across the
-   two tabs, all calling the same `onRefreshApps`. See the placement note in 2b.
-2. **Mappings rows still use the old compact layout** — small icon, inline buttons, and the
-   **"Native app" subtitle that must be deleted** (it is the third row, same reasoning as
-   "Installed"). Apply the 2-row card from section 2: 44–56pt icon spanning both rows, name + badge
-   + gear on row 1, right-aligned buttons on row 2, `+ New Profile` omitted.
-3. **Badges are not wired anywhere.** `DualAppGeneratorCard.setCompatibility(verified:)` exists and
-   is never called. Feed it from the matched rule's `AppCompatibilityAssurance`.
-4. **Assign Button does nothing for Canva/Zoom/Spotify** — they have no persisted mouse-button slot.
-   Either add a generic per-target assignment store, or disable the button for targets whose
-   `shortcutSlot` is nil.
+1. **Refresh icons relocated.** ✅ Four icon-only `arrow.clockwise` controls, one inline at the right
+   of each list's section header (Mappings → Native Apps + App Profiles; App Profiles tab →
+   Generator + Your App Profiles). The old floating/corner buttons and the Mappings header row are
+   gone, and that row's height went to the lists. All four call the same `onRefreshApps` and are
+   driven together by `setRefreshControlsBusy(_:)` in `KlikProApp.swift`, so they can never disagree.
+2. **Mappings rows use the shared 2-row card.** ✅ `MappingOriginalAppRowView` and
+   `MappingAppProfileOpenRowView` were rebuilt on `AppCardMetrics` (56pt icon spanning both rows,
+   name + badge + gear on row 1, right-aligned actions on row 2). The **"Native app" subtitle is
+   deleted**, a gear was added to both lists to host the menu-bar toggle, and `+ New Profile` is
+   omitted. `tools/check.sh` now asserts the subtitle stays gone.
+3. **Badges wired.** ✅ `setCompatibility(verified:)` is fed from `candidate.eligibility.kind`
+   (`.verified` → "Verified", `.experimental` → "Unverified"), which already derives from the matched
+   rule's assurance. Shown on the generator column and Mappings' Native Apps; App Profiles lists stay
+   badge-free in both tabs. Mappings reads it via `nativeAppCompatibilityVerified(_:)`, which shares
+   the generator's candidate cache so the two lists cannot disagree.
+4. **Assign disabled for slotless targets.** ✅ Canva/Zoom/Spotify have `shortcutSlot == nil`, so
+   their Assign control is disabled with an explanatory tooltip on both the generator card
+   (`setAssignable(_:)`) and the Mappings native row (`MappingNativeApp.assignable`) rather than
+   looking live and silently doing nothing. A generic per-target assignment store is still the
+   longer-term fix if these should become assignable.
+
+Also fixed in the same pass:
+
+- **Scroller handles are now proportional.** All three lists (both Mappings cards, the App Profiles
+  list, and Advanced's App Profile Maintenance) were sizing their document view to
+  `max(viewport, content)`. The scroller draws its handle as viewport/document, so padding the
+  document toward the viewport forced a nearly full-length handle that barely moved. They now use the
+  exact content height; `autohidesScrollers` still hides the scroller when everything fits.
+- **Refresh gave no feedback.** A Mappings-initiated refresh passes `showLoading: false`, so the
+  rescan ran but an unchanged app list re-rendered identically and the control looked dead. Every
+  rescan now shows on all four icons.
+- **Name truncation.** The card name field was sized from `NSString.size`, which excludes the text
+  field cell's own inset, so labels truncated with space still beside them ("Claude" → "Clau…").
+  It measures through the cell now.
+- **App Profiles column header gap.** The headers sat at y=52 with nothing above them; tightened to
+  `headerTopY = 24` and the column content moved up with it, giving the profiles list another row.
+  The drawn titles and the refresh icons both read that constant instead of repeating a literal —
+  the split is what let the refresh control drift out of the header originally.
+
+### Pre-existing breakage found and fixed while verifying
+
+None of these were caused by the UI work; all predated it and were blocking `tools/check.sh`.
+
+- `klikProBrowserInstalled` was declared **below** `@main` in `KlikProApp.swift`. The preview
+  renderer builds its app body with `awk '/^@main$/ { exit }'`, so every preview failed to compile.
+  Moved above `@main` with a comment recording the constraint.
+- Test fixtures still encoded the pre-§5 defaults. §5's "start quiet" change (Middle/Gesture off, no
+  app pre-assigned) landed without updating them, and conflict evaluation short-circuits a disabled
+  mapping to `.ok`, so several conflict/routing tests asserted badges that can no longer occur. The
+  affected fixtures now state their own preconditions instead of inheriting them from
+  `KlikProConfig.default`.
+- `ShortcutSlot.allCases.count` was asserted as 6 (now 7 — Gemini's hotkey) and
+  `KlikProConfig.default.schemaVersion` as 12 (now 13).
+- `QuickLaunchTarget.legacyInstanceID` became `UUID?`, but `AppProfilesFoundationTests` still used it
+  non-optionally and looped over `allCases` expecting every target to own a legacy row — only ChatGPT
+  and Claude ever shipped one.
+- The production registry grew to ten rules (Canva/Zoom/Spotify/Antigravity/browsers) while the test
+  still asserted exactly three. The exact-count guard is kept, updated to ten, plus an id-uniqueness
+  check since ids are persisted per instance.
+
+### Still open from §4c
+
+- **Rule ids and assurance (§2 item 7) are unchanged.** `com-openai-codex-untested` and
+  `com-google-geminimacos-native-untested` still carry assurance in their ids, and both still read
+  `.untested`, so they badge as "Unverified". The handover records an owner call that all three are
+  Verified, but house rules make verification the owner's call, so this was left alone rather than
+  changed. Renaming the two free ids is still safe; Claude's is frozen.
+
+## 4d. List-order pin — DONE 2026-07-26
+
+Owner request: *"for mapping tab, the app listing limit to 3 apps (let user pin any 3 apps) add pin
+icon (right to gear icon) on each app card. by limiting app list to 3, add a gap after the refresh
+button."* Plus three clarifications: the pin appears on **both** tabs' cards; **max 3 pins per app
+list**, and a fourth pin must be refused until the user unpins; and **nothing is auto-pinned** —
+recover the saved pins on launch, and if none are pinned leave it that way.
+
+**Interpretation that reconciles all four messages: pinning REORDERS, it does not filter.** The
+owner also said *"let the user scroll to find the assigned app… apps assigned with buttons has
+nothing to do with card pinning."* Scrolling only exists if the rows are still there, and refusing
+to auto-pin only makes sense if an unpinned list still shows apps — a filter-to-pinned reading would
+give an upgrading user two empty lists. So the Mappings **viewport** is three cards tall and pinned
+cards float to the top; nothing is ever hidden. If the owner actually wants hard filtering, the only
+change needed is a `prefix` in `MappingAppProfilesView.rebuildRows` and the equivalent for natives.
+
+### Storage — `KlikProConfig`, no schema bump
+
+`topPinnedOriginals: [QuickLaunchTarget]` and `topPinnedProfileIDs: [UUID]`, following the
+`menuBarPinnedOriginals` precedent exactly: property, explicit `CodingKeys` case, `decodeIfPresent
+?? []`, memberwise default.
+
+- **Do not bump `schemaVersion`.** `normalizedQuickLaunchConfig` pins the stored value to **12**
+  unconditionally (`KlikProConfig.swift`), `check.sh` greps that literal, and the live `config.json`
+  reads 12 — so a new `if schemaVersion < 13` gate would fire on **every** launch forever. Both
+  existing additive fields set the no-bump precedent and say so in their comments.
+- **Ordered `Array`, not `Set`.** Two reasons: pin order is meaningful (first pinned stays highest),
+  and `Set` iteration order varies per process, which would make `check.sh`'s two fixture renders
+  differ and fail its byte-comparison. `topPinnedFirst` therefore filters the ordered array and
+  never iterates a set.
+- **Two fields, not one** — natives are `QuickLaunchTarget`, profiles are instance UUIDs; the two
+  lists have disjoint identity types and independent 3-pin budgets.
+- **Keyed by UUID, never by index** — `synchronizedLegacyQuickLaunchInstances` reorders and can drop
+  rows on every normalize, so an index would drift.
+- `clampedTopPins` de-duplicates and trims to `KlikProConfig.topPinLimit` inside `normalize`, so a
+  hand-edited file cannot exceed the cap (precedent: the `knownDataRoots` truncation).
+- Stale pins are **deliberately not pruned**. A pin for an uninstalled app or deleted profile simply
+  matches nothing, so reinstalling or restoring brings the pin back.
+
+### The cap must not be able to lock the user out — bug found by rendering
+
+Counting *stored* pins toward the cap deadlocks: pin three apps, uninstall them, and every remaining
+card reports "already full" while the pinned cards no longer exist to unpin from. **This was real** —
+reproduced in a rendered preview (`topPinnedOriginals = [gemini, canva, zoom]` with only ChatGPT and
+Claude installed showed both remaining pins disabled), not a hypothetical.
+
+The rule is now in `topPinsAdding` (`KlikProConfig.swift`): **only pins that resolve to a card
+currently in the list consume a slot.** Because storage is clamped to the cap, adding a pin when the
+stored list is already that long releases the unresolvable entries to make room — otherwise
+`clampedTopPins` would silently discard the pin just added. Resolvable pins are never sacrificed, and
+an unresolvable one is only released when its slot is actually needed, so the ordinary
+uninstall → reinstall path still restores a pin.
+
+Resolvability is per list: installed app (`quickLaunchTargetApplicationURL != nil`) for natives,
+present-and-active instance for profiles. The **displayed** at-limit state uses the same count, or
+the cards would disagree with the toggle — the controller supplies it for natives
+(`installedTopPinCount()`), while each profile list derives it from the `visible` set it already
+computes. `testTopPinsCannotDeadlockOnUnresolvablePins` covers all of it.
+
+### Why pinning departs from the menu-bar-toggle discipline
+
+`toggleMenuBarPin` / `toggleOriginalMenuBarPin` guard on `hasUnsavedConfigurationChanges` and call
+`applySavedConfig()`. `applyTopPins` does **neither**, on purpose:
+
+- It writes **only the pin field**, to **both** `config` and `persistedConfig`, then saves
+  `persistedConfig`. So unsaved mapping edits survive, and `config != persistedConfig` is unchanged —
+  no red "Unsaved changes" footer for reordering a list. The existing toggles need that guard only
+  because they swap the whole struct into both snapshots, which would clobber in-flight edits.
+- No `applySavedConfig()`: the input helper has nothing to apply, so a `kickstart -k` restart would
+  be latency and permission churn for no effect.
+- The `saveInProgress` / `appProfileLifecycleInProgress` guard **is** kept — both paths write
+  `config.json`.
+- `check.sh` asserts both departures (no `applySavedConfig` in `applyTopPins`, and the dual-snapshot
+  write), because they are easy to "tidy" back into a bug.
+
+### Geometry
+
+`AppCardMetrics` gained `pinSize`/`gearPinGap` and `pinFrame(cardWidth:)`; `gearFrame` now derives
+from `pinFrame` so the gear shifts left. All three cards sharing `gearFrame` get a pin, so the shift
+is unconditional. `AppProfileInstanceRowView` keeps its own literals (it is 92pt, not the shared 86)
+and places its pin by hand. Both row types that hide the gear for external launchers now fall back
+to the **pin's** minX, not the card edge, or the title slides under the pin.
+
+`MappingSectionCardView` derives its viewport from `topPinLimit` — 3 rows = 277pt against the 352pt
+card — putting `scrollY` at 63 instead of 36, i.e. a 28pt gap under the refresh icon. Floored at 36
+so a shorter card degrades rather than computing a negative origin.
+
+### Verification
+
+- `tools/check.sh` fully green, unsandboxed, including the two-render byte-comparison that would
+  catch any nondeterminism in the ordering.
+- New `testTopPinsPersistAndClamp` covers persistence, pin order, empty-on-upgrade and the clamp.
+  Both pre-existing round-trip tests leave new fields at their defaults, so they would have passed
+  green even if the field never persisted — that gap is why this test exists. Verified it actually
+  bites by flipping the clamp's `prefix` to `suffix` (it failed) and by dropping the `CodingKeys`
+  entry (that turns out to be a **compile** error, since `init(from:)` names the case).
+- `topPinnedFirst` was extracted and exercised standalone: pin-order precedence, stability of
+  unpinned rows, dangling pins inert, duplicate pins harmless, no row lost or duplicated, and
+  identical output across 200 runs.
+- All seven Mappings fixtures and the tracked screenshots re-rendered.
+- **Verified end to end against the real app, not just unit tests.** `tools/PreviewMain.swift` gained
+  an `all` value for `KLIK_PRO_PREVIEW_INSTALLED_TARGETS` (the gap §4c left open), so a config with
+  pins can be seeded into `KLIK_PRO_CONFIG_DIRECTORY` and rendered. Confirmed through that path:
+  pins decode from `config.json`; a pinned Claude is lifted **above** ChatGPT, reversing `allCases`
+  order; the pinned pin renders filled and accent-tinted while unpinned ones stay grey; the viewport
+  shows exactly three cards; and the deadlock above both reproduced and stopped reproducing
+  (measured on the pin pill's luminance — 0.873 disabled vs 0.810 enabled — because the two states
+  differ by only 0.03 alpha).
+- That 0.03-alpha difference was itself too subtle to read, so `applyPinIconState` now also dims the
+  **glyph** (`tertiaryLabelColor`) when a pin is unavailable, rather than relying on the pill and the
+  tooltip alone.
+- **`render-app-profiles-showcase.swift` scene 3 was re-cropped.** Its rect was framed for the old
+  6-row list and, after the viewport change, showed the mouse card instead of the badged profile
+  icons its caption describes. Note the `crop` is **top-left origin** (`sourceRect` flips it) — easy
+  to get backwards. Nothing in `check.sh` verifies this framing, only that the GIF is non-empty, so
+  re-check it by eye after any Mappings list geometry change.
+
+### Still open
+
+- **The showcase GIF's eyebrow still reads "KLIK PRO 1.2.2"** (`render-app-profiles-showcase.swift`).
+  Pre-existing and unrelated to the pin; left alone rather than silently changed.
+- **No *tracked* fixture covers a pinned state.** The states above were rendered ad hoc via a seeded
+  `KLIK_PRO_CONFIG_DIRECTORY`; none of it is wired into `render-previews.sh`, so nothing re-checks the
+  pinned treatment on future changes. `INSTALLED_TARGETS=all` now exists, so adding a
+  `mappings-pinned.png` fixture is straightforward — it needs a preview override for the pin lists
+  (profile pins are keyed by runtime-generated UUIDs and so cannot be seeded from config).
+- **The disabled at-limit pin was never rendered.** It needs three pinned apps *and* a fourth
+  unpinned card on screen at once, which this machine cannot produce: the Mappings viewport is three
+  cards tall, and the generator column — the only uncapped list — shows a card per genuine candidate,
+  which is just ChatGPT and Claude here (`INSTALLED_TARGETS` overrides path lookup, not candidate
+  discovery). Covered by `testTopPinsCannotDeadlockOnUnresolvablePins` and by the tooltip/alert copy,
+  but the visual is unverified. Worth an eyeball on a machine with three-plus catalogue apps
+  installed.
 
 ## 5. Mouse Profile defaults (owner request, do next)
 
@@ -347,12 +534,25 @@ Also clear the default quick-launch overlays so no button arrives pre-assigned t
 (`geminiMouseButton` is already `nil`). Note those two currently sit on Forward and Back, so leaving
 them would contradict "no app assignment" even though the buttons themselves stay ON.
 
-**Thumb-wheel browser checklist:** the per-browser checkboxes must reflect what is actually
-installed — grey out and disable any browser that is not present, rather than offering it. Detect by
-bundle identifier through the same app scan the rest of the tab uses
+**Status 2026-07-26 — the default block is DONE.** `KlikProConfig.default` now reads: Middle off,
+Gesture off, thumb wheel off, Forward/Back on with the browser Back/Forward combos, and
+`chatGPTMouseButton` / `claudeMouseButton` / `geminiMouseButton` all nil. So on a fresh install no
+mouse button is pre-assigned to an app, and the only buttons that arrive mapped are Forward and Back,
+mapped to a **keyboard shortcut** (⌘[ / ⌘]), never to an app.
+
+**Every per-browser checkbox also now defaults OFF** (owner call 2026-07-26), so the pull-down reads
+"No browsers" on a fresh install and nothing is opted in on the user's behalf. This overrides the
+"stored flags stay as they are" note below, which referred only to the installed-browser greying.
+Existing configs keep their stored flags — it is a fresh-install default, not a migration.
+
+**Thumb-wheel browser checklist — still open.** The per-browser checkboxes must reflect what is
+actually installed — grey out and disable any browser that is not present, rather than offering it.
+Detect by bundle identifier through the same app scan the rest of the tab uses
 (`com.google.Chrome`, `com.brave.Browser`, `com.microsoft.edgemac`, `com.vivaldi.Vivaldi`).
-`ThumbWheelConfig`'s stored flags stay as they are; only the control's enabled state changes, so a
-browser that is uninstalled and later reinstalled keeps its prior choice.
+Only the control's enabled state changes, so a browser that is uninstalled and later reinstalled
+keeps its prior choice. `klikProBrowserInstalled(_:)` in `KlikProApp.swift` already does the
+detection and the Settings checkboxes use it; it must stay **above** `@main` (the preview renderer
+truncates the file there).
 
 Bump the schema only if the decoder needs to distinguish an old config from a new one — existing
 users should **keep** their current mappings; this is a fresh-install default change, not a migration.

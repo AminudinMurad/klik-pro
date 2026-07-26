@@ -664,7 +664,13 @@ grep -q 'Assign Button' "$ROOT/Sources/AppProfilesUI.swift"
 grep -q 'case original(QuickLaunchTarget)' "$ROOT/Sources/KlikProConfig.swift"
 grep -q 'case profile(UUID)' "$ROOT/Sources/KlikProConfig.swift"
 grep -q 'func assigningMouseButton(' "$ROOT/Sources/KlikProConfig.swift"
-grep -q 'Native app' "$ROOT/Sources/AppProfilesUI.swift"
+# The Mappings native rows carry NO "Native app" subtitle — it was the third row,
+# dropped for the same reason as the generator's "Installed" line. The list is
+# titled NATIVE APPS, so repeating it per card said nothing.
+if grep -q 'labelWithString: "Native app"' "$ROOT/Sources/AppProfilesUI.swift"; then
+  echo "Mappings native rows must not carry a per-card \"Native app\" subtitle" >&2
+  exit 1
+fi
 grep -q 'mappingProfilesView.onAssignOriginal' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'private static let generatorColumnRatio: CGFloat = 0.50' \
   "$ROOT/Sources/AppProfilesUI.swift"
@@ -715,6 +721,35 @@ grep -q 'mappingProfilesView.onOpen' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'mappingProfilesView.setInstances' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'mappingProfilesView.setRuntimeHealth' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'mappingProfilesView.setStatus' "$ROOT/Sources/KlikProApp.swift"
+# The list-order pin. No test target compiles AppProfilesUI.swift or KlikProApp.swift,
+# so these greps are the only guard the pin has against a later refactor dropping it.
+grep -q 'static let topPinLimit = 3' "$ROOT/Sources/KlikProConfig.swift"
+grep -q 'static func pinFrame(cardWidth: CGFloat)' "$ROOT/Sources/AppProfilesUI.swift"
+# All four card types carry a pin: the two Mappings rows, the generator card, and the
+# App Profiles tab's own row. Five hits = the factory's own declaration plus one
+# construction site per card.
+if [[ "$(grep -c 'makePinIconButton()' "$ROOT/Sources/AppProfilesUI.swift")" -ne 5 ]]; then
+  echo "All four card types must carry exactly one list-order pin" >&2
+  exit 1
+fi
+# Ordering must filter the ordered pin array, never iterate a Set: Set iteration order
+# varies per process, which would make the two fixture renders below differ.
+grep -q 'func topPinnedFirst<Element, Key: Hashable>' "$ROOT/Sources/AppProfilesUI.swift"
+# A pin is a view preference, so it must not restart the input helper and must not
+# raise the unsaved-changes footer. Both are guaranteed by writing the pin field to
+# `config` and `persistedConfig` together without calling applySavedConfig().
+if grep -A24 'private func applyTopPins' "$ROOT/Sources/KlikProApp.swift" \
+  | grep -q 'applySavedConfig'; then
+  echo "Pinning must not restart the input helper" >&2
+  exit 1
+fi
+grep -A12 'private func applyTopPins' "$ROOT/Sources/KlikProApp.swift" \
+  | grep -q 'config.topPinnedOriginals = originals'
+# Natives have no onInstancesChange fan-out, so the pin refresh must rebuild them.
+# The -A window is deliberately generous: it is a proximity check, not a line count, and
+# adding a line to the function should not fail the build. Widen it rather than delete it.
+grep -A20 'private func refreshTopPinViews' "$ROOT/Sources/KlikProApp.swift" \
+  | grep -q 'refreshOriginalAssignmentViews'
 # Renaming / removing / creating a profile must refresh the Mappings "Open App"
 # callout pickers immediately, not just the compact list — the onInstancesChange
 # fan-out rebuilds both, so a new label or a deleted profile never lingers in the
