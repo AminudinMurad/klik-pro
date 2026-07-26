@@ -145,20 +145,31 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
     case claude
     // Appended, so the existing raw values stay stable for already-persisted configs.
     case gemini
+    // Targets below carry no global hotkey and no persisted mouse-button slot:
+    // they exist so the generator can offer profiles for them.
+    case canva
+    case zoom
+    case spotify
 
     var title: String {
         switch self {
         case .chatGPT: return "ChatGPT / Codex"
         case .claude: return "Claude"
         case .gemini: return "Gemini"
+        case .canva: return "Canva"
+        case .zoom: return "Zoom"
+        case .spotify: return "Spotify"
         }
     }
 
-    var shortcutSlot: ShortcutSlot {
+    /// nil for targets that ship without a global hotkey, so adding an app costs
+    /// nothing in ShortcutSlot or KlikProConfig.
+    var shortcutSlot: ShortcutSlot? {
         switch self {
         case .chatGPT: return .chatGPTHotkey
         case .claude: return .claudeHotkey
         case .gemini: return .geminiHotkey
+        case .canva, .zoom, .spotify: return nil
         }
     }
 
@@ -167,6 +178,9 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
         case .chatGPT: return "com.openai.codex"
         case .claude: return "com.anthropic.claudefordesktop"
         case .gemini: return "com.google.GeminiMacOS"
+        case .canva: return "com.canva.CanvaDesktop"
+        case .zoom: return "us.zoom.xos"
+        case .spotify: return "com.spotify.client"
         }
     }
 
@@ -175,6 +189,9 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
         case .chatGPT: return "/Applications/ChatGPT.app"
         case .claude: return "/Applications/Claude.app"
         case .gemini: return "/Applications/Gemini.app"
+        case .canva: return "/Applications/Canva.app"
+        case .zoom: return "/Applications/zoom.us.app"
+        case .spotify: return "/Applications/Spotify.app"
         }
     }
 
@@ -192,6 +209,10 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
             return NSString(
                 string: "~/Library/Application Support/Gemini Launchers/Gemini.app"
             ).expandingTildeInPath
+        case .canva, .zoom, .spotify:
+            return NSString(
+                string: "~/Library/Application Support/\(title) Launchers/\(title).app"
+            ).expandingTildeInPath
         }
     }
 
@@ -201,6 +222,9 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
         case .chatGPT: fileName = "ChatGPT.app"
         case .claude: fileName = "Claude.app"
         case .gemini: fileName = "Gemini.app"
+        case .canva: fileName = "Canva.app"
+        case .zoom: fileName = "Zoom.app"
+        case .spotify: fileName = "Spotify.app"
         }
         return NSString(
             string: "~/Applications/Klik PRO Originals/\(fileName)"
@@ -212,6 +236,9 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
         case .chatGPT: return "local.klik-pro.original.chatgpt"
         case .claude: return "local.klik-pro.original.claude"
         case .gemini: return "local.klik-pro.original.gemini"
+        case .canva: return "local.klik-pro.original.canva"
+        case .zoom: return "local.klik-pro.original.zoom"
+        case .spotify: return "local.klik-pro.original.spotify"
         }
     }
 
@@ -223,7 +250,7 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
         switch self {
         case .chatGPT: return UUID(uuidString: "9E4FB42E-0D73-4D66-B94E-92E13934C53D")!
         case .claude: return UUID(uuidString: "6D7052E2-747A-448F-85D0-75E36DA46040")!
-        case .gemini: return nil
+        case .gemini, .canva, .zoom, .spotify: return nil
         }
     }
 }
@@ -1871,6 +1898,7 @@ func quickLaunchMouseButton(
     case .chatGPT: return config.chatGPTMouseButton
     case .claude: return config.claudeMouseButton
     case .gemini: return config.geminiMouseButton
+    case .canva, .zoom, .spotify: return nil
     }
 }
 
@@ -1942,6 +1970,7 @@ func assigningMouseButton(
     case .original(.chatGPT): updated.chatGPTMouseButton = button
     case .original(.claude): updated.claudeMouseButton = button
     case .original(.gemini): updated.geminiMouseButton = button
+    case .original(.canva), .original(.zoom), .original(.spotify): break
     case .profile(let id):
         if let index = updated.instances.firstIndex(where: {
             $0.id == id && $0.state == .active && $0.legacyQuickLaunchTarget == nil
@@ -1961,6 +1990,7 @@ func clearingMouseButton(
     case .original(.chatGPT): updated.chatGPTMouseButton = nil
     case .original(.claude): updated.claudeMouseButton = nil
     case .original(.gemini): updated.geminiMouseButton = nil
+    case .original(.canva), .original(.zoom), .original(.spotify): break
     case .profile(let id):
         if let index = updated.instances.firstIndex(where: { $0.id == id }) {
             updated.instances[index].mouseButton = nil
@@ -2004,7 +2034,11 @@ private func legacyQuickLaunchInstance(
         iconPath: nil,
         menuColor: existing?.menuColor,
         pinToMenuBar: existing?.pinToMenuBar ?? config.showQuickLaunchMenuIcons,
-        hotkey: baseMapping(for: target.shortcutSlot, in: config),
+        hotkey: target.shortcutSlot.map { baseMapping(for: $0, in: config) }
+            ?? ShortcutMapping(enabled: false, combo: KeyCombo(
+                keyCode: 0, keyDisplay: "", command: false,
+                option: false, control: false, shift: false
+            )),
         mouseButton: quickLaunchMouseButton(for: target, in: config),
         lastDetectedEngine: existing?.lastDetectedEngine,
         lastVerifiedAppVersion: existing?.lastVerifiedAppVersion,
@@ -2274,7 +2308,7 @@ func activeQuickLaunchTarget(
     switch target {
     case .chatGPT: return chatGPTAvailable ? target : nil
     case .claude: return claudeAvailable ? target : nil
-    case .gemini:
+    case .gemini, .canva, .zoom, .spotify:
         return FileManager.default.fileExists(atPath: target.standardApplicationPath)
             ? target : nil
     }
@@ -2312,9 +2346,15 @@ func mapping(
     ) else {
         return baseMapping(for: slot, in: config)
     }
+    guard let slot = target.shortcutSlot else {
+        return ShortcutMapping(enabled: false, combo: KeyCombo(
+            keyCode: 0, keyDisplay: "", command: false,
+            option: false, control: false, shift: false
+        ))
+    }
     return ShortcutMapping(
         enabled: true,
-        combo: baseMapping(for: target.shortcutSlot, in: config).combo
+        combo: baseMapping(for: slot, in: config).combo
     )
 }
 
@@ -2549,7 +2589,8 @@ func evaluateShortcutConflicts(
                 chatGPTAvailable: chatGPTAvailable,
                 claudeAvailable: claudeAvailable
               ) == target else { continue }
-        result[button.shortcutSlot] = result[target.shortcutSlot] ?? .ok
+        guard let targetSlot = target.shortcutSlot else { continue }
+        result[button.shortcutSlot] = result[targetSlot] ?? .ok
     }
 
     return result

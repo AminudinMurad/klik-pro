@@ -162,7 +162,50 @@ struct AppCompatibilityRegistry {
             homeSymlinkPrefix: nil,
             passesUserDataDirArgument: false,
             requiresLoginKeychainLink: true
-        )
+        ),
+        // Canva (com.canva.CanvaDesktop) — Electron, unsandboxed. Isolation is the
+        // stock `--user-data-dir`, verified 2026-07-25: a second instance built its
+        // own cookie jar and ran alongside the first, each signed in separately.
+        // Its sign-in is brokered through the default browser, so the callback can
+        // land on whichever instance LaunchServices picks.
+        AppCompatibilityRule(
+            id: "com-canva-canvadesktop",
+            bundleIdentifier: "com.canva.CanvaDesktop",
+            teamIdentifier: "5HD2ARTBFS",
+            engine: .electron,
+            testedVersions: [],
+            acceptsAnyVersion: true
+        ),
+        // Zoom (us.zoom.xos) — native and unsandboxed, so isolation is
+        // CFFIXED_USER_HOME. Verified 2026-07-25: a redirected instance built its own
+        // encrypted stores and left the real profile untouched. It implements no
+        // profile flag, so the user-data-dir argument is suppressed.
+        AppCompatibilityRule(
+            id: "com-zoom-xos",
+            bundleIdentifier: "us.zoom.xos",
+            teamIdentifier: "BJ4HAAB9B3",
+            engine: .native,
+            testedVersions: [],
+            acceptsAnyVersion: true,
+            requiredEnvironment: ["CFFIXED_USER_HOME": "{profileDir}"],
+            passesUserDataDirArgument: false,
+            requiresLoginKeychainLink: true
+        ),
+        // Spotify (com.spotify.client) — CEF, detected as native here, unsandboxed.
+        // Verified 2026-07-25 with nothing else running: 181 files landed in the
+        // redirected home and the real profile was untouched. Note it enforces an
+        // app-level single instance, so profiles switch rather than run side by side.
+        AppCompatibilityRule(
+            id: "com-spotify-client",
+            bundleIdentifier: "com.spotify.client",
+            teamIdentifier: "2FNC3A47ZF",
+            engine: .native,
+            testedVersions: [],
+            acceptsAnyVersion: true,
+            requiredEnvironment: ["CFFIXED_USER_HOME": "{profileDir}"],
+            passesUserDataDirArgument: false,
+            requiresLoginKeychainLink: true
+        ),
     ])
 
     let rules: [AppCompatibilityRule]

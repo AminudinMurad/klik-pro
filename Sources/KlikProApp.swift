@@ -7847,6 +7847,8 @@ final class ToggleView: NSView {
         case .chatGPT: config.chatGPTMouseButton = button
         case .claude: config.claudeMouseButton = button
         case .gemini: config.geminiMouseButton = button
+        // No persisted slot for these, so a button assignment cannot stick.
+        case .canva, .zoom, .spotify: return
         }
         configurationDidChange()
         refreshButtonAssignmentViews()
