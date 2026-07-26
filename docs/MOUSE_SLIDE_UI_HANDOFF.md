@@ -48,6 +48,31 @@ Two further defects were fixed alongside it:
 - `presentMenu()` gained a re-entrancy guard and releases `presentedMenu` through
   `defer`, so a menu can never be stacked on a live tracking session.
 
+### The same defect had also killed all three refresh buttons
+
+`RefreshIconButton.hitTest(_:)` overrides hit testing so its glyph and spinner
+cannot take the click, but it compared the incoming point with its own `bounds`:
+
+```swift
+bounds.contains(point) ? self : nil
+```
+
+`bounds.origin` is always zero while `point` is in the button's superview space, so
+the hit region was anchored at the superview's origin rather than at the button.
+Every refresh button was unclickable where it is drawn; the only live region was a
+26×26 patch at its parent's top-left corner. Verified against the real class at its
+real frames — the list header refresh (`AppProfilesUI.swift:1832`) and both App
+Profiles column refreshes (`:2146`, `:2150`) all failed, then all passed after the
+fix, which compares against `frame`.
+
+This one arrived separately, in `6c70c2b`, not with the slide redesign. Both bugs
+are the same misunderstanding of which coordinate space `NSView.hitTest(_:)` takes.
+
+Those were the only two hit-test overrides in the repository that compare a point
+with a rect; the other two (`ButtonHoverOutlineView`, and the one in
+`Sources/KlikProInput.swift`) return `nil` unconditionally and are unaffected. So
+this class of defect is now cleared repo-wide, and `check.sh` rejects both shapes.
+
 ### Why the previous run of `./tools/check.sh` exited silently
 
 Not an environment problem. `tools/check.sh` carried a source guard pinning the
@@ -70,8 +95,9 @@ through the real hosting chain (window → scroll view → flipped document →
 `MouseSlideContainerView` → overlay) and asserts which view a click actually lands
 on. It discovers the gear and arrows from the live subviews rather than hardcoding
 their frames, so moving a control cannot make it quietly stop testing them. It
-also asserts the overlay still lets clicks through to controls beneath it, and
-that a disabled gear stays inert.
+also asserts the overlay still lets clicks through to controls beneath it, that a
+disabled gear stays inert, and that all three `RefreshIconButton` instances are
+reachable at their real frames.
 
 `check.sh` runs it after the mouse-button routing tests. Verified to fail on the
 pre-fix code and pass after it.
@@ -85,6 +111,40 @@ default run:
 ```bash
 "$(ls -td build/check-* | head -1)/mouse-slide-hit-test" menu
 ```
+
+## Open findings from the 2026-07-27 audit — not fixed, owner's call
+
+Found while auditing the mouse slide after the gear fix. Each is a real defect
+confirmed against the source, but none is part of the click-routing fault, so all
+were left alone to keep the tested build tight. Listed most useful first.
+
+1. **Reset Mapping does not resync the Settings tab.** `resetMouseProfile`
+   (`Sources/KlikProApp.swift`, ~4491) refreshes only the Mappings-tab views; it
+   never calls `refreshActiveMouseProfileSettings()`, the one place that syncs the
+   Settings tab's Horizontal Thumb Wheel switch and the four browser checkboxes
+   from config. Since the tab opens on the active mapping, resetting it leaves the
+   Settings tab showing the pre-reset values — and the first click on that stale-ON
+   switch writes the value it already has, so it takes two clicks to re-enable the
+   wheel. `activateMouseProfile` already makes that call; the fix is one line.
+2. **Activate repaints before the save is accepted.** `activateMouseProfile`
+   (~4557) commits the activation into the in-memory config and repaints the ACTIVE
+   badge before calling `saveConfiguration()`. If a save is already in flight that
+   call returns early without setting a status message, so the badge and the
+   accessibility label claim the new mapping is active while config.json and the
+   running helper still hold the old one. The footer's "Unsaved changes" indicator
+   does return afterwards and a second Save applies it, so this is a misleading
+   interval rather than lost data. Most other mutating handlers already guard on
+   `saveInProgress`; this one does not.
+3. **The browse transition animates only half the slide.** `prepareMouseSlideBrowse`
+   (~2682) adds the push/fade `CATransition` to `mouseSlideContainer.layer`, whose
+   children are only the control rows and the overlay. The mouse artwork and its
+   five leader lines are drawn by the container's *superview*, so they sit outside
+   the animated subtree and snap while the controls slide.
+
+A further twelve candidates from the same audit were never verified — the audit hit
+its session limit before those verifier passes ran. They are not recorded here
+because unverified AppKit claims are frequently wrong; re-run the audit to triage
+them rather than treating any of them as real.
 
 ## Current continuation state (2026-07-27)
 

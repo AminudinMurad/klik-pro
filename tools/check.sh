@@ -631,6 +631,17 @@ require_source_literal \
   'guard isEnabled, let onMouseDown else {' \
   "$ROOT/Sources/AppProfilesUI.swift" \
   "A gear that opens its menu on mouse-down must still honor isEnabled"
+# RefreshIconButton's hitTest carried the same slip in the other direction: it
+# compared the superview-space point with its own `bounds`, anchoring the hit region
+# at the superview's origin and leaving every refresh button dead where it is drawn.
+require_source_literal \
+  'guard !isHidden, frame.contains(point) else { return nil }' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "A button that overrides hitTest must compare the point with its frame, not its bounds"
+if grep -qF 'bounds.contains(point) ? self : nil' "$ROOT/Sources/AppProfilesUI.swift"; then
+  echo "A superview-space hit-test point must not be compared with bounds" >&2
+  exit 1
+fi
 
 awk '/^@main$/ { exit } { print }' \
   "$ROOT/Sources/KlikProApp.swift" > "$OUT/MouseSlideHitTestAppBody.swift"

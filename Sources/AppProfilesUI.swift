@@ -910,9 +910,16 @@ final class RefreshIconButton: AppProfileButton {
         }
     }
 
-    /// The decorative image view must never steal the button's hit target.
+    /// The decorative glyph and spinner must never steal the button's hit target.
+    ///
+    /// `point` arrives in this button's *superview* space, so it has to be compared
+    /// with `frame`. Comparing it with `bounds` anchored the hit region at the
+    /// superview's origin instead, which left every refresh button unclickable
+    /// wherever it is actually drawn. A disabled button still claims its own area,
+    /// matching AppKit, so a click during a refresh cannot fall through to the list.
     override func hitTest(_ point: NSPoint) -> NSView? {
-        bounds.contains(point) ? self : nil
+        guard !isHidden, frame.contains(point) else { return nil }
+        return self
     }
 }
 

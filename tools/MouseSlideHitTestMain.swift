@@ -357,6 +357,52 @@ private struct MouseSlideHitTestMain {
         print("")
     }
 
+    /// `RefreshIconButton` overrides `hitTest(_:)` so its glyph and spinner cannot
+    /// take the click. That override carried the same coordinate-space slip as the
+    /// mouse overlay — comparing a superview-space point with `bounds` — which left
+    /// all three refresh buttons unclickable wherever they are drawn. These are their
+    /// real frames from `AppProfilesUI.swift`.
+    private static func runRefreshButtonCase() {
+        print("refresh buttons are clickable where they are drawn:")
+        let cases: [(String, NSRect, NSSize)] = [
+            (
+                "list header refresh",
+                NSRect(x: 436 - 14 - 26, y: 9, width: 26, height: 26),
+                NSSize(width: 436, height: 380)
+            ),
+            (
+                "generator column refresh",
+                NSRect(x: 420 - 18 - 26, y: 45, width: 26, height: 26),
+                NSSize(width: 872, height: 560)
+            ),
+            (
+                "profiles column refresh",
+                NSRect(x: 872 - 18 - 26, y: 45, width: 26, height: 26),
+                NSSize(width: 872, height: 560)
+            ),
+        ]
+        for (label, buttonFrame, hostSize) in cases {
+            let window = NSWindow(
+                contentRect: NSRect(origin: .zero, size: hostSize),
+                styleMask: [.titled],
+                backing: .buffered,
+                defer: false
+            )
+            let host = HostView(frame: NSRect(origin: .zero, size: hostSize))
+            let button = makeRefreshIconButton()
+            button.frame = buttonFrame
+            host.addSubview(button)
+            window.contentView = host
+
+            let hit = viewClicked(at: button, in: window)
+            check(
+                hit === button,
+                "a click on the \(label) reaches it (got \(describe(hit)))"
+            )
+        }
+        print("")
+    }
+
     static func main() {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
@@ -366,6 +412,7 @@ private struct MouseSlideHitTestMain {
         runCase(name: "overlay at the card origin", headerOrigin: .zero)
         runCase(name: "overlay at an offset origin", headerOrigin: NSPoint(x: 24, y: 17))
         runDisabledGearCase()
+        runRefreshButtonCase()
         if CommandLine.arguments.contains("menu") {
             runMenuPresentationCase()
         }
