@@ -2317,11 +2317,13 @@ final class PreferencesContentView: NSView {
         braveCheck = CheckboxView(label: "Brave", isOn: thumbWheel.braveEnabled, frame: NSRect(x: ix + 179, y: 372, width: 57, height: 28))
         firefoxCheck = CheckboxView(label: "Firefox", isOn: thumbWheel.firefoxEnabled, frame: NSRect(x: ix + 248, y: 372, width: 63, height: 28))
         safariCheck = CheckboxView(label: "Safari", isOn: thumbWheel.safariEnabled, frame: NSRect(x: ix + 323, y: 372, width: 58, height: 28))
+        // A browser is offered only when it is actually on the Mac. Its stored flag
+        // is left alone, so uninstalling and reinstalling restores the prior choice.
         let tabSwitchingOn = thumbWheel.enabled
-        chromeCheck.isEnabled = tabSwitchingOn
-        braveCheck.isEnabled = tabSwitchingOn
-        firefoxCheck.isEnabled = tabSwitchingOn
-        safariCheck.isEnabled = tabSwitchingOn
+        chromeCheck.isEnabled = tabSwitchingOn && klikProBrowserInstalled("com.google.Chrome")
+        braveCheck.isEnabled = tabSwitchingOn && klikProBrowserInstalled("com.brave.Browser")
+        firefoxCheck.isEnabled = tabSwitchingOn && klikProBrowserInstalled("org.mozilla.firefox")
+        safariCheck.isEnabled = tabSwitchingOn && klikProBrowserInstalled("com.apple.Safari")
         // The Caffeinate menu lives inside the main menu-bar icon's right-click menu, so
         // it stays tappable but prompts to turn the icon on first when it is hidden.
         accessibilityPermissionRow = PermissionStatusRowView(
@@ -7848,7 +7850,8 @@ final class ToggleView: NSView {
         case .claude: config.claudeMouseButton = button
         case .gemini: config.geminiMouseButton = button
         // No persisted slot for these, so a button assignment cannot stick.
-        case .canva, .zoom, .spotify: return
+        case .canva, .zoom, .spotify, .antigravity, .antigravityIDE, .chrome, .brave:
+            return
         }
         configurationDidChange()
         refreshButtonAssignmentViews()
@@ -8444,4 +8447,12 @@ private struct KlikProAppMain {
         app.delegate = delegate
         app.run()
     }
+}
+
+/// True when a browser with this bundle identifier is installed. LaunchServices
+/// answers without launching anything, and Safari is always present on macOS.
+func klikProBrowserInstalled(_ bundleIdentifier: String) -> Bool {
+    if bundleIdentifier == "com.apple.Safari" { return true }
+    return NSWorkspace.shared
+        .urlForApplication(withBundleIdentifier: bundleIdentifier) != nil
 }

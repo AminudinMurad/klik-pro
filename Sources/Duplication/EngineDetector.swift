@@ -206,6 +206,51 @@ struct AppCompatibilityRegistry {
             passesUserDataDirArgument: false,
             requiresLoginKeychainLink: true
         ),
+        // Antigravity and its IDE (Google, team EQHXZ8M8AV) — both Electron and
+        // unsandboxed, with `user-data-dir` present in their bundled framework, so
+        // the stock argument is the whole recipe. Untested end to end; the IDE is a
+        // VS Code fork, so a profile isolates settings and extensions along with the
+        // sign-in.
+        AppCompatibilityRule(
+            id: "com-google-antigravity",
+            bundleIdentifier: "com.google.antigravity",
+            teamIdentifier: "EQHXZ8M8AV",
+            engine: .electron,
+            testedVersions: [],
+            assurance: .untested,
+            acceptsAnyVersion: true
+        ),
+        AppCompatibilityRule(
+            id: "com-google-antigravity-ide",
+            bundleIdentifier: "com.google.antigravity-ide",
+            teamIdentifier: "EQHXZ8M8AV",
+            engine: .electron,
+            testedVersions: [],
+            assurance: .untested,
+            acceptsAnyVersion: true
+        ),
+        // Chromium browsers. `--user-data-dir` is the same flag Chrome has always
+        // taken, and both are already recognised as `.chromium` by the detector.
+        // Note both ship their own concurrent profile switcher, so a Klik PRO profile
+        // mainly adds a separate Dock tile rather than new capability.
+        AppCompatibilityRule(
+            id: "com-google-chrome",
+            bundleIdentifier: "com.google.Chrome",
+            teamIdentifier: "EQHXZ8M8AV",
+            engine: .chromium,
+            testedVersions: [],
+            assurance: .untested,
+            acceptsAnyVersion: true
+        ),
+        AppCompatibilityRule(
+            id: "com-brave-browser",
+            bundleIdentifier: "com.brave.Browser",
+            teamIdentifier: "KL8N8XSYF4",
+            engine: .chromium,
+            testedVersions: [],
+            assurance: .untested,
+            acceptsAnyVersion: true
+        ),
     ])
 
     let rules: [AppCompatibilityRule]

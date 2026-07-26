@@ -1466,7 +1466,8 @@ final class AppProfilesContentView: NSView {
             switch target {
             case .chatGPT: card.updateAssignment(chatGPT)
             case .claude: card.updateAssignment(claude)
-            case .gemini, .canva, .zoom, .spotify: break
+            case .gemini, .canva, .zoom, .spotify,
+                 .antigravity, .antigravityIDE, .chrome, .brave: break
             }
         }
     }

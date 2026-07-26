@@ -150,6 +150,10 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
     case canva
     case zoom
     case spotify
+    case antigravity
+    case antigravityIDE
+    case chrome
+    case brave
 
     var title: String {
         switch self {
@@ -159,6 +163,10 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
         case .canva: return "Canva"
         case .zoom: return "Zoom"
         case .spotify: return "Spotify"
+        case .antigravity: return "Antigravity"
+        case .antigravityIDE: return "Antigravity IDE"
+        case .chrome: return "Google Chrome"
+        case .brave: return "Brave"
         }
     }
 
@@ -169,7 +177,8 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
         case .chatGPT: return .chatGPTHotkey
         case .claude: return .claudeHotkey
         case .gemini: return .geminiHotkey
-        case .canva, .zoom, .spotify: return nil
+        case .canva, .zoom, .spotify, .antigravity, .antigravityIDE, .chrome, .brave:
+            return nil
         }
     }
 
@@ -181,6 +190,10 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
         case .canva: return "com.canva.CanvaDesktop"
         case .zoom: return "us.zoom.xos"
         case .spotify: return "com.spotify.client"
+        case .antigravity: return "com.google.antigravity"
+        case .antigravityIDE: return "com.google.antigravity-ide"
+        case .chrome: return "com.google.Chrome"
+        case .brave: return "com.brave.Browser"
         }
     }
 
@@ -192,6 +205,10 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
         case .canva: return "/Applications/Canva.app"
         case .zoom: return "/Applications/zoom.us.app"
         case .spotify: return "/Applications/Spotify.app"
+        case .antigravity: return "/Applications/Antigravity.app"
+        case .antigravityIDE: return "/Applications/Antigravity IDE.app"
+        case .chrome: return "/Applications/Google Chrome.app"
+        case .brave: return "/Applications/Brave Browser.app"
         }
     }
 
@@ -209,7 +226,7 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
             return NSString(
                 string: "~/Library/Application Support/Gemini Launchers/Gemini.app"
             ).expandingTildeInPath
-        case .canva, .zoom, .spotify:
+        case .canva, .zoom, .spotify, .antigravity, .antigravityIDE, .chrome, .brave:
             return NSString(
                 string: "~/Library/Application Support/\(title) Launchers/\(title).app"
             ).expandingTildeInPath
@@ -225,6 +242,10 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
         case .canva: fileName = "Canva.app"
         case .zoom: fileName = "Zoom.app"
         case .spotify: fileName = "Spotify.app"
+        case .antigravity: fileName = "Antigravity.app"
+        case .antigravityIDE: fileName = "Antigravity IDE.app"
+        case .chrome: fileName = "Google Chrome.app"
+        case .brave: fileName = "Brave.app"
         }
         return NSString(
             string: "~/Applications/Klik PRO Originals/\(fileName)"
@@ -239,6 +260,10 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
         case .canva: return "local.klik-pro.original.canva"
         case .zoom: return "local.klik-pro.original.zoom"
         case .spotify: return "local.klik-pro.original.spotify"
+        case .antigravity: return "local.klik-pro.original.antigravity"
+        case .antigravityIDE: return "local.klik-pro.original.antigravityide"
+        case .chrome: return "local.klik-pro.original.chrome"
+        case .brave: return "local.klik-pro.original.brave"
         }
     }
 
@@ -250,7 +275,8 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
         switch self {
         case .chatGPT: return UUID(uuidString: "9E4FB42E-0D73-4D66-B94E-92E13934C53D")!
         case .claude: return UUID(uuidString: "6D7052E2-747A-448F-85D0-75E36DA46040")!
-        case .gemini, .canva, .zoom, .spotify: return nil
+        case .gemini, .canva, .zoom, .spotify, .antigravity, .antigravityIDE, .chrome, .brave:
+            return nil
         }
     }
 }
@@ -794,12 +820,12 @@ extension KlikProConfig {
             showQuickLaunchMenuIcons: true,
             specialFeatureEnabled: false,
             middleButton: ShortcutMapping(
-            enabled: true,
+            enabled: false,
             combo: KeyCombo(keyCode: UInt16(kVK_ANSI_7), keyDisplay: "7",
                             command: true, option: false, control: false, shift: true)
         ),
             gestureButton: ShortcutMapping(
-            enabled: true,
+            enabled: false,
             combo: KeyCombo(keyCode: UInt16(kVK_ANSI_6), keyDisplay: "6",
                             command: true, option: false, control: false, shift: true)
         ),
@@ -818,8 +844,8 @@ extension KlikProConfig {
             combo: KeyCombo(keyCode: UInt16(kVK_ANSI_G), keyDisplay: "G",
                             command: true, option: true, control: true, shift: false)
         ),
-            chatGPTMouseButton: .forward,
-            claudeMouseButton: .back,
+            chatGPTMouseButton: nil,
+            claudeMouseButton: nil,
             geminiMouseButton: nil,
             forwardButton: ShortcutMapping(
             enabled: true,
@@ -830,7 +856,7 @@ extension KlikProConfig {
             combo: defaultBrowserBackCombo
         ),
             thumbWheel: ThumbWheelConfig(
-            enabled: true, chromeEnabled: true, braveEnabled: true,
+            enabled: false, chromeEnabled: true, braveEnabled: true,
             firefoxEnabled: true, safariEnabled: true, defaultFallbackEnabled: true
         ),
             instances: []
@@ -1898,7 +1924,7 @@ func quickLaunchMouseButton(
     case .chatGPT: return config.chatGPTMouseButton
     case .claude: return config.claudeMouseButton
     case .gemini: return config.geminiMouseButton
-    case .canva, .zoom, .spotify: return nil
+    case .canva, .zoom, .spotify, .antigravity, .antigravityIDE, .chrome, .brave: return nil
     }
 }
 
@@ -1970,7 +1996,9 @@ func assigningMouseButton(
     case .original(.chatGPT): updated.chatGPTMouseButton = button
     case .original(.claude): updated.claudeMouseButton = button
     case .original(.gemini): updated.geminiMouseButton = button
-    case .original(.canva), .original(.zoom), .original(.spotify): break
+    case .original(.canva), .original(.zoom), .original(.spotify),
+         .original(.antigravity), .original(.antigravityIDE),
+         .original(.chrome), .original(.brave): break
     case .profile(let id):
         if let index = updated.instances.firstIndex(where: {
             $0.id == id && $0.state == .active && $0.legacyQuickLaunchTarget == nil
@@ -1990,7 +2018,9 @@ func clearingMouseButton(
     case .original(.chatGPT): updated.chatGPTMouseButton = nil
     case .original(.claude): updated.claudeMouseButton = nil
     case .original(.gemini): updated.geminiMouseButton = nil
-    case .original(.canva), .original(.zoom), .original(.spotify): break
+    case .original(.canva), .original(.zoom), .original(.spotify),
+         .original(.antigravity), .original(.antigravityIDE),
+         .original(.chrome), .original(.brave): break
     case .profile(let id):
         if let index = updated.instances.firstIndex(where: { $0.id == id }) {
             updated.instances[index].mouseButton = nil
@@ -2308,7 +2338,7 @@ func activeQuickLaunchTarget(
     switch target {
     case .chatGPT: return chatGPTAvailable ? target : nil
     case .claude: return claudeAvailable ? target : nil
-    case .gemini, .canva, .zoom, .spotify:
+    case .gemini, .canva, .zoom, .spotify, .antigravity, .antigravityIDE, .chrome, .brave:
         return FileManager.default.fileExists(atPath: target.standardApplicationPath)
             ? target : nil
     }
