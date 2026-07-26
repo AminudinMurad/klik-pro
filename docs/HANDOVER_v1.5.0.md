@@ -374,6 +374,71 @@ None of these were caused by the UI work; all predated it and were blocking `too
   still asserted exactly three. The exact-count guard is kept, updated to ten, plus an id-uniqueness
   check since ids are persisted per instance.
 
+### CORRECTION 2026-07-26 — `docs/COMPATIBILITY.md` is the source of truth, and the code disagrees
+
+Owner 2026-07-26: **"we no longer use assurance. we now use a list of apps.md."** There is no
+`apps.md` in the repo — the document meant is **`docs/COMPATIBILITY.md`**. Treat that file as the
+source of truth for which apps are listed and how they are described.
+
+`AppCompatibilityAssurance` in the registry has **drifted out of sync with it**, which is why
+ChatGPT and Gemini badge "Unverified" in the shipped build:
+
+| App | COMPATIBILITY.md | `EngineDetector.swift` |
+|---|---|---|
+| ChatGPT / Codex | Verified | `.untested` |
+| Gemini | Verified | `.untested` |
+| Antigravity | Verified | `.untested` |
+| Antigravity IDE | Verified | `.untested` |
+| Google Chrome | Verified | `.untested` |
+| Brave | Verified | `.untested` |
+
+The doc's own "Unverified" section reads **"None yet."** — so per the doc, no shipping app should
+carry an Unverified badge at all. Six do.
+
+**Second divergence:** the doc lists **Cursor, Discord, Notion, Obsidian, Slack, Visual Studio Code**
+under Verified, but no rule ships for any of them. A rule is required for an app to appear at all, so
+the doc promises six apps the build cannot offer. Either add rules or move them to Pending.
+
+**To reconcile (not done — owner had not confirmed before the session ended):** set those six rules to
+`assurance: .verified` in `Sources/Duplication/EngineDetector.swift`. This is safe and independent of
+the frozen-id problem below — assurance is not part of a rule id and is not persisted per instance.
+`tools/check.sh` pins the registry's exact intent, so re-run it after.
+
+**Longer term:** if assurance is genuinely retired in favour of the doc, the badge has no runtime
+source and `setCompatibility(verified:)` / `makeCompatibilityBadgeField()` should be removed rather
+than left reading a field nobody maintains. Decide whether the badge stays at all — a field that
+exists but is not the source of truth will drift again.
+
+### CORRECTION 2026-07-26 — the id rename window has CLOSED
+
+§2 item 7 says to "rename the two that are still free, now", based on a 2026-07-25 check finding only
+Claude's id persisted. **That is no longer true.** Re-checked against the live config on 2026-07-26:
+
+| Instance | Persisted `compatibilityRuleID` |
+|---|---|
+| `ChatGPT 1` | `com-openai-codex-untested` |
+| `Claude 1` | `com-anthropic-claudefordesktop-verified` |
+| `Gemini 1` | `com-google-geminimacos-native-untested` |
+| `Canva 1` | `com-canva-canvadesktop` |
+| `Spotify 1` | `com-spotify-client` |
+
+All three assurance-bearing ids are now frozen by real profiles. Since ids are re-validated at every
+launch (`eligibility.compatibilityRuleID == instance.compatibilityRuleID`), renaming any of them now
+**breaks those profiles**. Renaming requires the `previousIDs: [String]` field §2 item 7 describes,
+accepting historical ids during validation — it is no longer a free rename.
+
+**Separable and still safe:** changing `assurance` is unrelated to the id and is not persisted per
+instance, so the badge can be corrected on its own without touching ids:
+
+```
+Sources/Duplication/EngineDetector.swift
+  com-openai-codex-untested                → assurance: .verified
+  com-google-geminimacos-native-untested   → assurance: .verified
+```
+
+The ugly ids simply remain until someone does the `previousIDs` work. That is the cost of having put
+assurance in an id — do not repeat it for new rules.
+
 ### Still open from §4c
 
 - **Rule ids and assurance (§2 item 7) are unchanged.** `com-openai-codex-untested` and
