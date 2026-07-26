@@ -191,9 +191,13 @@ cmp \
   "$ROOT/assets/KlikPRO.icns"
 
 DMG_ROOT="$WORK/dmg-root"
-DMG_MOUNT="$WORK/verify-dmg"
+DMG_MOUNT="/Volumes/Klik PRO v$VERSION"
 DMG_RW="$WORK/Klik-PRO-v$VERSION-layout.dmg"
-mkdir -p "$DMG_ROOT" "$DMG_MOUNT"
+mkdir -p "$DMG_ROOT"
+if [[ -e "$DMG_MOUNT" ]]; then
+  echo "DMG volume is already mounted: $DMG_MOUNT" >&2
+  exit 1
+fi
 ditto --norsrc --noqtn "$APP" "$DMG_ROOT/Klik PRO.app"
 ln -s /Applications "$DMG_ROOT/Applications"
 mkdir -p "$DMG_ROOT/Extras/LaunchAgents" "$DMG_ROOT/.background"
@@ -215,32 +219,31 @@ hdiutil create \
 hdiutil attach \
   -readwrite \
   -noverify \
-  -mountpoint "$DMG_MOUNT" \
   "$DMG_RW" >/dev/null
 trap 'hdiutil detach "$DMG_MOUNT" >/dev/null 2>&1 || true' EXIT
 
 osascript <<APPLESCRIPT
 tell application "Finder"
-  set dmgFolder to POSIX file "$DMG_MOUNT" as alias
-  set backgroundFile to POSIX file "$DMG_MOUNT/.background/dmg-background.png" as alias
-  open dmgFolder
-  set current view of container window of dmgFolder to icon view
-  set toolbar visible of container window of dmgFolder to false
-  set statusbar visible of container window of dmgFolder to false
-  set bounds of container window of dmgFolder to {120, 120, 880, 540}
-  set theViewOptions to icon view options of container window of dmgFolder
-  set arrangement of theViewOptions to not arranged
-  set icon size of theViewOptions to 96
-  set text size of theViewOptions to 14
-  set background picture of theViewOptions to backgroundFile
-  set position of item "Applications" of dmgFolder to {170, 210}
-  set position of item "Klik PRO.app" of dmgFolder to {610, 210}
-  set position of item "Extras" of dmgFolder to {390, 340}
-  close container window of dmgFolder
-  open dmgFolder
-  update dmgFolder without registering applications
-  delay 1
-  close container window of dmgFolder
+  tell disk "Klik PRO v$VERSION"
+    open
+    set current view of container window to icon view
+    set toolbar visible of container window to false
+    set statusbar visible of container window to false
+    set bounds of container window to {120, 120, 880, 540}
+    set theViewOptions to icon view options of container window
+    set arrangement of theViewOptions to not arranged
+    set icon size of theViewOptions to 96
+    set text size of theViewOptions to 14
+    set background picture of theViewOptions to file ".background:dmg-background.png"
+    set position of item "Applications" to {170, 210}
+    set position of item "Klik PRO.app" to {610, 210}
+    set position of item "Extras" to {390, 340}
+    close container window
+    open
+    update without registering applications
+    delay 1
+    close container window
+  end tell
 end tell
 APPLESCRIPT
 
@@ -257,7 +260,6 @@ hdiutil verify "$DMG" >/dev/null
 hdiutil attach \
   -nobrowse \
   -readonly \
-  -mountpoint "$DMG_MOUNT" \
   "$DMG" >/dev/null
 trap 'hdiutil detach "$DMG_MOUNT" >/dev/null 2>&1 || true' EXIT
 
