@@ -1255,8 +1255,9 @@ final class AppProfilesContentView: NSView {
         "Generate another icon for the same app, with a separate login and settings. The native app is never copied, cloned or modified."
     )
     private let statusField = NSTextField(labelWithString: "")
-    private let chatGPTCard: DualAppGeneratorCard
-    private let claudeCard: DualAppGeneratorCard
+    /// One generator card per launch target, built from QuickLaunchTarget.allCases so
+    /// a new target needs no wiring here. Kept in allCases order for stable layout.
+    private let generatorCards: [(target: QuickLaunchTarget, card: DualAppGeneratorCard)]
     private let loadingView = NSView()
     private let loadingSpinner = NSProgressIndicator()
     private let loadingField = NSTextField(labelWithString: "Scanning installed apps…")
@@ -1296,12 +1297,13 @@ final class AppProfilesContentView: NSView {
         let generatorColumnWidth = floor(width * Self.generatorColumnRatio)
         let generatorWidth = generatorColumnWidth - 36
         let profilesX = generatorColumnWidth + 16
-        chatGPTCard = DualAppGeneratorCard(
-            bundleIdentifier: "com.openai.codex", fallbackName: "ChatGPT", width: generatorWidth
-        )
-        claudeCard = DualAppGeneratorCard(
-            bundleIdentifier: "com.anthropic.claudefordesktop", fallbackName: "Claude", width: generatorWidth
-        )
+        generatorCards = QuickLaunchTarget.allCases.map { target in
+            (target, DualAppGeneratorCard(
+                bundleIdentifier: target.applicationBundleIdentifier,
+                fallbackName: target.title,
+                width: generatorWidth
+            ))
+        }
         // Match the outer scroll viewport so the profiles column fills the window rather
         // than leaving empty space below a fixed-height card.
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: 702))
@@ -1309,8 +1311,10 @@ final class AppProfilesContentView: NSView {
         explanationField.frame = NSRect(x: 18, y: 78, width: generatorWidth, height: 64)
         explanationField.font = .systemFont(ofSize: 12)
         explanationField.textColor = .appTextSecondary
-        chatGPTCard.frame.origin = NSPoint(x: 18, y: 154)
-        claudeCard.frame.origin = NSPoint(x: 18, y: 154 + DualAppGeneratorCard.cardHeight + innerCardSpacing)
+        let cardPitch = DualAppGeneratorCard.cardHeight + innerCardSpacing
+        for (index, entry) in generatorCards.enumerated() {
+            entry.card.frame.origin = NSPoint(x: 18, y: 154 + CGFloat(index) * cardPitch)
+        }
         loadingView.frame = NSRect(x: 18, y: 154, width: generatorWidth, height: 224 + innerCardSpacing)
         loadingView.wantsLayer = true
         loadingView.layer?.cornerRadius = innerCardCornerRadius
@@ -1356,29 +1360,21 @@ final class AppProfilesContentView: NSView {
         stackView.edgeInsets = NSEdgeInsets(top: 2, left: 0, bottom: 2, right: 0)
         scrollView.documentView = stackView
 
-        chatGPTCard.onGenerate = { [weak self] in self?.onGenerate?($0) }
-        claudeCard.onGenerate = { [weak self] in self?.onGenerate?($0) }
-        chatGPTCard.onOpen = { [weak self] _ in self?.onOpenOriginal?(.chatGPT) }
-        claudeCard.onOpen = { [weak self] _ in self?.onOpenOriginal?(.claude) }
-        chatGPTCard.onAssign = { [weak self] in self?.onAssignOriginal?(.chatGPT) }
-        claudeCard.onAssign = { [weak self] in self?.onAssignOriginal?(.claude) }
-        chatGPTCard.onCreateDock = { [weak self] in self?.onCreateOriginalDock?(.chatGPT) }
-        claudeCard.onCreateDock = { [weak self] in self?.onCreateOriginalDock?(.claude) }
-        chatGPTCard.onRenameDock = { [weak self] in self?.onRenameOriginalDock?(.chatGPT) }
-        claudeCard.onRenameDock = { [weak self] in self?.onRenameOriginalDock?(.claude) }
-        chatGPTCard.onChangeIconDock = { [weak self] in self?.onChangeOriginalDockIcon?(.chatGPT) }
-        claudeCard.onChangeIconDock = { [weak self] in self?.onChangeOriginalDockIcon?(.claude) }
-        chatGPTCard.onResetIconDock = { [weak self] in self?.onResetOriginalDockIcon?(.chatGPT) }
-        claudeCard.onResetIconDock = { [weak self] in self?.onResetOriginalDockIcon?(.claude) }
-        chatGPTCard.onDeleteDock = { [weak self] in self?.onDeleteOriginalDock?(.chatGPT) }
-        claudeCard.onDeleteDock = { [weak self] in self?.onDeleteOriginalDock?(.claude) }
-        chatGPTCard.onAddNativeDock = { [weak self] in self?.onAddNativeOriginalDock?(.chatGPT) }
-        claudeCard.onAddNativeDock = { [weak self] in self?.onAddNativeOriginalDock?(.claude) }
-        chatGPTCard.onRemoveNativeDock = { [weak self] in self?.onRemoveNativeOriginalDock?(.chatGPT) }
-        claudeCard.onRemoveNativeDock = { [weak self] in self?.onRemoveNativeOriginalDock?(.claude) }
-        chatGPTCard.onToggleMenuBar = { [weak self] in self?.onToggleOriginalMenuBar?(.chatGPT) }
-        claudeCard.onToggleMenuBar = { [weak self] in self?.onToggleOriginalMenuBar?(.claude) }
-        [explanationField, chatGPTCard, claudeCard, loadingView, statusField, refreshButton, scrollView].forEach(addSubview)
+        for (target, card) in generatorCards {
+            card.onGenerate = { [weak self] in self?.onGenerate?($0) }
+            card.onOpen = { [weak self] _ in self?.onOpenOriginal?(target) }
+            card.onAssign = { [weak self] in self?.onAssignOriginal?(target) }
+            card.onCreateDock = { [weak self] in self?.onCreateOriginalDock?(target) }
+            card.onRenameDock = { [weak self] in self?.onRenameOriginalDock?(target) }
+            card.onChangeIconDock = { [weak self] in self?.onChangeOriginalDockIcon?(target) }
+            card.onResetIconDock = { [weak self] in self?.onResetOriginalDockIcon?(target) }
+            card.onDeleteDock = { [weak self] in self?.onDeleteOriginalDock?(target) }
+            card.onAddNativeDock = { [weak self] in self?.onAddNativeOriginalDock?(target) }
+            card.onRemoveNativeDock = { [weak self] in self?.onRemoveNativeOriginalDock?(target) }
+            card.onToggleMenuBar = { [weak self] in self?.onToggleOriginalMenuBar?(target) }
+        }
+        ([explanationField, loadingView, statusField, refreshButton, scrollView] as [NSView]
+            + generatorCards.map(\.card)).forEach(addSubview)
         setAppDiscoveryLoading()
         setInstances(instances)
     }
@@ -1392,10 +1388,19 @@ final class AppProfilesContentView: NSView {
         onInstancesChange?(instances)
     }
 
+    /// Stacks the visible cards from the top so a hidden one leaves no gap.
+    private func relayoutGeneratorCards() {
+        let pitch = DualAppGeneratorCard.cardHeight + innerCardSpacing
+        var row = 0
+        for (_, card) in generatorCards where !card.isHidden {
+            card.frame.origin = NSPoint(x: 18, y: 154 + CGFloat(row) * pitch)
+            row += 1
+        }
+    }
+
     /// Reflects the live Dock pin state of each original-app launcher on its card.
     func setOriginalDockPinned(_ states: [QuickLaunchTarget: Bool]) {
-        chatGPTCard.setDockPinned(states[.chatGPT] ?? false)
-        claudeCard.setDockPinned(states[.claude] ?? false)
+        for (target, card) in generatorCards { card.setDockPinned(states[target] ?? false) }
     }
 
     /// A native Dock launcher's persisted custom name/icon, for the generator card tile.
@@ -1406,50 +1411,54 @@ final class AppProfilesContentView: NSView {
 
     /// Reflects each native launcher's persisted custom name/icon on its card.
     func setOriginalDockCustomization(_ states: [QuickLaunchTarget: DockCustomization]) {
-        chatGPTCard.setDockCustomization(
-            name: states[.chatGPT]?.name, icon: states[.chatGPT]?.icon
-        )
-        claudeCard.setDockCustomization(
-            name: states[.claude]?.name, icon: states[.claude]?.icon
-        )
+        for (target, card) in generatorCards {
+            card.setDockCustomization(name: states[target]?.name, icon: states[target]?.icon)
+        }
     }
 
     /// Reflects the persisted menu-bar pin state of each original app on its card.
     func setOriginalMenuBarPinned(_ states: [QuickLaunchTarget: Bool]) {
-        chatGPTCard.setMenuBarPinned(states[.chatGPT] ?? false)
-        claudeCard.setMenuBarPinned(states[.claude] ?? false)
+        for (target, card) in generatorCards { card.setMenuBarPinned(states[target] ?? false) }
     }
 
     func setSupportedCandidates(_ candidates: [AppProfileCandidate]) {
         supportedCandidates = candidates.filter { $0.canCreate }
-        let chatGPT = supportedCandidates.first { $0.app.bundleIdentifier == chatGPTCard.bundleIdentifier }
-        let claude = supportedCandidates.first { $0.app.bundleIdentifier == claudeCard.bundleIdentifier }
+        let cardBundleIDs = Set(generatorCards.map(\.card.bundleIdentifier))
         let alternatives = supportedCandidates.filter {
-            $0.app.bundleIdentifier != chatGPTCard.bundleIdentifier
-                && $0.app.bundleIdentifier != claudeCard.bundleIdentifier
+            !cardBundleIDs.contains($0.app.bundleIdentifier)
         }
         loadingSpinner.stopAnimation(nil)
         loadingView.isHidden = true
         refreshButton.isEnabled = true
         refreshButton.title = "Refresh App List"
         refreshButton.setAccessibilityLabel("Refresh App List")
-        chatGPTCard.isHidden = false
-        claudeCard.isHidden = false
-        chatGPTCard.update(candidate: chatGPT, alternativesAvailable: !alternatives.isEmpty)
-        claudeCard.update(candidate: claude, alternativesAvailable: !alternatives.isEmpty)
+        // A card only appears when its app is actually installed; a listed-but-absent
+        // app would otherwise show a card whose every action is dead.
+        for (_, card) in generatorCards {
+            let candidate = supportedCandidates.first {
+                $0.app.bundleIdentifier == card.bundleIdentifier
+            }
+            card.isHidden = candidate == nil
+            card.update(candidate: candidate, alternativesAvailable: !alternatives.isEmpty)
+        }
+        relayoutGeneratorCards()
         if statusField.stringValue == "Scanning installed apps…" {
             setStatus("")
         }
     }
 
     func setOriginalAssignments(chatGPT: QuickLaunchMouseButton?, claude: QuickLaunchMouseButton?) {
-        chatGPTCard.updateAssignment(chatGPT)
-        claudeCard.updateAssignment(claude)
+        for (target, card) in generatorCards {
+            switch target {
+            case .chatGPT: card.updateAssignment(chatGPT)
+            case .claude: card.updateAssignment(claude)
+            case .gemini: break
+            }
+        }
     }
 
     func setAppDiscoveryLoading() {
-        chatGPTCard.isHidden = true
-        claudeCard.isHidden = true
+        for (_, card) in generatorCards { card.isHidden = true }
         loadingView.isHidden = false
         loadingSpinner.startAnimation(nil)
         refreshButton.isEnabled = false

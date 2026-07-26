@@ -2557,7 +2557,12 @@ final class PreferencesContentView: NSView {
         )
 
         // About: one clear description, version detail, and the open-source action.
-        let ver = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String).map { "Version \($0)" } ?? "Version unavailable"
+        let info = Bundle.main.infoDictionary
+        let ver = (info?["CFBundleShortVersionString"] as? String).map { short -> String in
+            let build = info?["CFBundleVersion"] as? String
+            guard let build, !build.isEmpty else { return "Version \(short)" }
+            return "Version \(short) (\(build))"
+        } ?? "Version unavailable"
         (ver as NSString).draw(at: NSPoint(
             x: rxi,
             y: PreferencesContentView.aboutCard.minY
@@ -8111,9 +8116,11 @@ final class ToggleView: NSView {
     private var versionString: String {
         let info = Bundle.main.infoDictionary
         let short = info?["CFBundleShortVersionString"] as? String ?? "0.0"
-        // Marketing version only — the build number ("(2)") is internal and reads as
-        // a confusing pseudo-patch to users, so it's not shown in the header.
-        return "v\(short)"
+        let build = info?["CFBundleVersion"] as? String
+        // The build number disambiguates rebuilds of the same marketing version,
+        // which matters while iterating on a local build.
+        guard let build, !build.isEmpty else { return "v\(short)" }
+        return "v\(short) (\(build))"
     }
 
     private func drawHeader() {
