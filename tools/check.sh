@@ -516,7 +516,11 @@ grep -q 'Version 3, 29 June 2007' "$ROOT/LICENSE"
 grep -q 'Copyright © 2026 Aminudin Murad' "$ROOT/README.md"
 grep -q 'render-dmg-background.swift' "$ROOT/tools/build-release.sh"
 grep -q 'set background picture of theViewOptions' "$ROOT/tools/build-release.sh"
-grep -q 'Drag Klik PRO.app to Applications' "$ROOT/tools/render-dmg-background.swift"
+grep -q 'Drag Klik PRO to Applications' "$ROOT/tools/render-dmg-background.swift"
+grep -q 'arrow.lineWidth = 9' "$ROOT/tools/render-dmg-background.swift"
+grep -q 'arrow.line(to: NSPoint(x: 255, y: 210))' "$ROOT/tools/render-dmg-background.swift"
+grep -q 'Manual installation tools are available in Extras' \
+  "$ROOT/tools/render-dmg-background.swift"
 grep -q 'DMG top level must keep technical files inside Extras' "$ROOT/tools/build-release.sh"
 grep -q 'Extras/LaunchAgents' "$ROOT/tools/build-release.sh"
 if [[ "$(grep -ci 'copyright' "$ROOT/README.md")" -ne 1 ]]; then
