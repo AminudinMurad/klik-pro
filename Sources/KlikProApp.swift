@@ -1860,6 +1860,7 @@ final class MouseProfileHeaderView: NSView {
     private var scanningDevices = false
     private var swipeDeltaX: CGFloat = 0
     private var swipeLocked = false
+    private var presentedMenu: NSMenu?
 
     var onBrowse: ((UUID) -> Void)?
     var onBrowseAnimation: ((Int) -> Void)?
@@ -2047,11 +2048,22 @@ final class MouseProfileHeaderView: NSView {
             : nil
         delete.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
         menu.addItem(delete)
-        menu.popUp(
-            positioning: nil,
-            at: NSPoint(x: menuButton.bounds.minX, y: menuButton.bounds.maxY + 3),
-            in: menuButton
-        )
+        // Start menu tracking after the button's mouse-up/action event has fully
+        // completed. Opening synchronously from the button action can make AppKit
+        // treat that same event as the menu's dismissal, which looks like the gear
+        // did nothing. Retain the menu for the duration of its tracking session.
+        presentedMenu = menu
+        DispatchQueue.main.async { [weak self, weak menu] in
+            guard let self, let menu, self.presentedMenu === menu else { return }
+            let origin = NSPoint(
+                x: self.menuButton.frame.minX,
+                y: self.menuButton.frame.maxY + 4
+            )
+            menu.popUp(positioning: nil, at: origin, in: self)
+            if self.presentedMenu === menu {
+                self.presentedMenu = nil
+            }
+        }
     }
 
     private func makeDeviceMenu() -> NSMenu {

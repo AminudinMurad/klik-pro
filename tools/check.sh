@@ -1140,7 +1140,12 @@ grep -Eq 'static let deviceCard += NSRect\(x: 0, y: 0, width: .* height: 344\)' 
 grep -Eq 'static let mappingBottomCard += NSRect\(x: 0, y: 360,' \
   "$ROOT/Sources/KlikProApp.swift"
 grep -q 'private let menuButton = AppProfileGearButton' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'in: menuButton' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'private var presentedMenu: NSMenu?' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'presentedMenu = menu' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'DispatchQueue.main.async { \[weak self, weak menu\] in' \
+  "$ROOT/Sources/KlikProApp.swift"
+grep -q 'menu.popUp(positioning: nil, at: origin, in: self)' \
+  "$ROOT/Sources/KlikProApp.swift"
 grep -q 'let listY: CGFloat = 50' "$ROOT/Sources/AppProfilesUI.swift"
 grep -Fq '"Activate “\(profile.name)”"' "$ROOT/Sources/KlikProApp.swift"
 grep -q '"Assign Mouse…"' "$ROOT/Sources/KlikProApp.swift"
