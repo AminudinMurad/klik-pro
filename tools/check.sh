@@ -610,6 +610,44 @@ xcrun swiftc \
   -o "$OUT/mouse-button-routing-tests"
 "$OUT/mouse-button-routing-tests"
 
+# The Mappings mouse slide lays a transparent full-card overlay over the mapping
+# rows, so it needs a custom hitTest: clicks must fall through to the rows while the
+# overlay's own gear and arrows stay clickable. `NSView.hitTest(_:)` takes a point in
+# the receiver's SUPERVIEW space, so converting into a subview's own space first
+# subtracts its frame origin twice — which once shipped the gear and both arrows
+# completely unclickable. Screenshot fixtures cannot see this: a dead gear renders
+# exactly like a live one.
+require_source_literal \
+  'let local = superview.map { convert(point, from: $0) } ?? point' \
+  "$ROOT/Sources/KlikProApp.swift" \
+  "The mouse slide overlay must convert hit-test points from its superview space"
+if grep -qF 'subview.convert(point, from: self)' "$ROOT/Sources/KlikProApp.swift"; then
+  echo "Hit-test points must not be converted into a subview's own space before NSView.hitTest" >&2
+  exit 1
+fi
+# The gear presents its menu from mouseDown, which bypasses NSControl's own disabled
+# guard, so isEnabled has to be rechecked there.
+require_source_literal \
+  'guard isEnabled, let onMouseDown else {' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "A gear that opens its menu on mouse-down must still honor isEnabled"
+
+awk '/^@main$/ { exit } { print }' \
+  "$ROOT/Sources/KlikProApp.swift" > "$OUT/MouseSlideHitTestAppBody.swift"
+xcrun swiftc \
+  -sdk "$SDK" \
+  -module-cache-path "$MODULE_CACHE" \
+  -target "$HOST_ARCH-apple-macosx13.0" \
+  -warnings-as-errors \
+  "$OUT/MouseSlideHitTestAppBody.swift" \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "$ROOT/Sources/KlikProBrand.swift" \
+  "$ROOT/Sources/KlikProConfig.swift" \
+  "${DUPLICATION_SOURCES[@]}" \
+  "$ROOT/tools/MouseSlideHitTestMain.swift" \
+  -o "$OUT/mouse-slide-hit-test"
+"$OUT/mouse-slide-hit-test"
+
 xcrun swiftc \
   -sdk "$SDK" \
   -module-cache-path "$MODULE_CACHE" \
@@ -1142,8 +1180,18 @@ grep -Eq 'static let mappingBottomCard += NSRect\(x: 0, y: 360,' \
 grep -q 'private let menuButton = AppProfileGearButton' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'private var presentedMenu: NSMenu?' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'presentedMenu = menu' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'DispatchQueue.main.async { \[weak self, weak menu\] in' \
+# The gear opens its menu from mouse-down, like a native pull-down, so tracking
+# starts inside the same event that pressed it. This guard replaces an earlier one
+# that pinned a deferred `DispatchQueue.main.async` popUp: that workaround was
+# removed in 941be25, and because a bare `grep -q` prints nothing under `set -e`,
+# the stale guard made every later run of this script exit 1 in silence.
+grep -q 'menuButton.onMouseDown = { \[weak self\] _ in self?.presentMenu() }' \
   "$ROOT/Sources/KlikProApp.swift"
+if grep -q 'DispatchQueue.main.async { \[weak self, weak menu\] in' \
+  "$ROOT/Sources/KlikProApp.swift"; then
+  echo "The mouse gear menu must open from mouse-down, not a deferred popUp" >&2
+  exit 1
+fi
 grep -q 'menu.popUp(positioning: nil, at: origin, in: self)' \
   "$ROOT/Sources/KlikProApp.swift"
 grep -q 'let listY: CGFloat = 50' "$ROOT/Sources/AppProfilesUI.swift"

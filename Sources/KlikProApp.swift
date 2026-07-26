@@ -1881,9 +1881,8 @@ final class MouseProfileHeaderView: NSView {
         previousButton.action = #selector(browsePrevious)
         nextButton.target = self
         nextButton.action = #selector(browseNext)
-        // Begin native menu tracking on mouse-down. Waiting for the button's
-        // mouse-up action lets that same event immediately dismiss the menu on
-        // some AppKit/window configurations.
+        // Begin menu tracking on mouse-down, matching native pull-down controls,
+        // so the user can press and drag straight onto an item.
         menuButton.onMouseDown = { [weak self] _ in self?.presentMenu() }
         // Preserve Space/Return and accessibility-triggered activation, which
         // still arrive through the button's normal action.
@@ -1986,7 +1985,10 @@ final class MouseProfileHeaderView: NSView {
     @objc private func browseNext() { browse(offset: 1) }
 
     private func presentMenu() {
-        guard let id = viewedProfileID,
+        // Menu tracking runs a nested run loop, so a second request that arrives
+        // mid-session must not stack another menu on top of the live one.
+        guard presentedMenu == nil,
+              let id = viewedProfileID,
               let profile = profiles.first(where: { $0.id == id }) else { return }
         let menu = NSMenu()
         menu.autoenablesItems = false
@@ -2054,18 +2056,18 @@ final class MouseProfileHeaderView: NSView {
             : nil
         delete.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
         menu.addItem(delete)
-        // Retain the menu for the duration of its synchronous tracking session.
-        // Tracking starts from the gear's mouse-down handler, matching native
-        // pull-down controls and preventing the opening click from closing it.
+        // Retain the menu for the duration of its synchronous tracking session and
+        // release it however that session ends, so a later click is never rejected
+        // by the re-entrancy guard above.
         presentedMenu = menu
+        defer {
+            if presentedMenu === menu { presentedMenu = nil }
+        }
         let origin = NSPoint(
             x: menuButton.frame.minX,
             y: menuButton.frame.maxY + 4
         )
         menu.popUp(positioning: nil, at: origin, in: self)
-        if presentedMenu === menu {
-            presentedMenu = nil
-        }
     }
 
     private func makeDeviceMenu() -> NSMenu {
@@ -2164,11 +2166,20 @@ final class MouseProfileHeaderView: NSView {
     /// The transparent full-card overlay must not steal clicks from the mapping
     /// controls beneath it. Only its three actual NSButtons participate in hit
     /// testing.
+    ///
+    /// `point` arrives in this view's *superview* space, which is also the space
+    /// `NSView.hitTest(_:)` expects for each subview — a subview compares the
+    /// point against its own `frame`. Converting into a subview's local space
+    /// first therefore subtracts its frame origin twice, which pushed the gear
+    /// 826pt and both arrows 146pt out of reach and made all three unclickable.
+    /// Convert once into this view's own space, then hand that point to the
+    /// children unchanged.
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard !isHidden, alphaValue > 0, bounds.contains(point) else { return nil }
+        guard !isHidden, alphaValue > 0 else { return nil }
+        let local = superview.map { convert(point, from: $0) } ?? point
+        guard bounds.contains(local) else { return nil }
         for subview in subviews.reversed() {
-            let childPoint = subview.convert(point, from: self)
-            if let hit = subview.hitTest(childPoint) { return hit }
+            if let hit = subview.hitTest(local) { return hit }
         }
         return nil
     }
@@ -4392,15 +4403,18 @@ final class ToggleView: NSView {
         header.onBindDevice = { [weak self] id, identity in
             self?.bindMouseDevice(identity, to: id)
         }
+        // This closure is stored *on* the header, so capturing `header` would make it
+        // retain itself. Every other callback here reaches the controller through
+        // `self`; this one reaches the header the same way.
         header.onRescanDevices = { [weak self] in
             guard let self else { return }
-            header.setScanningDevices(true)
+            self.contentView.mouseProfileHeader.setScanningDevices(true)
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 let devices = previewRenderingIsActive ? [] : connectedMouseDevices()
                 DispatchQueue.main.async {
                     guard let self else { return }
                     self.availableMouseDevices = devices
-                    header.setScanningDevices(false)
+                    self.contentView.mouseProfileHeader.setScanningDevices(false)
                     self.refreshMouseProfileEditor()
                 }
             }

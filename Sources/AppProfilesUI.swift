@@ -959,12 +959,23 @@ final class AppProfileGearButton: NSButton {
 
     override func mouseEntered(with event: NSEvent) { isHovered = true; updateBackground() }
     override func mouseExited(with event: NSEvent) { isHovered = false; updateBackground() }
+    /// A gear that opens a menu behaves like a pull-down control: tracking starts
+    /// on mouse-down. Bypassing `super` also bypasses NSControl's own disabled
+    /// guard, so `isEnabled` has to be honored explicitly here — otherwise a
+    /// greyed-out gear would still open its menu.
     override func mouseDown(with event: NSEvent) {
-        if let onMouseDown {
-            onMouseDown(event)
-        } else {
+        guard isEnabled, let onMouseDown else {
             super.mouseDown(with: event)
+            return
         }
+        // Keep the gear visibly engaged for the life of the tracking session;
+        // `highlight(_:)` never runs on this path because the button's own mouse
+        // tracking is skipped.
+        isPressedDown = true
+        updateBackground()
+        onMouseDown(event)
+        isPressedDown = false
+        updateBackground()
     }
     override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
     override func highlight(_ flag: Bool) {

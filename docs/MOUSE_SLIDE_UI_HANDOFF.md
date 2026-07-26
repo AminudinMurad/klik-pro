@@ -5,19 +5,88 @@ Owner decisions recorded: 2026-07-26
 Branch: `release/v1.5.0`
 Next operator: Claude
 
-This handoff is the current continuation source for Claude. Preserve the two
-completed commits as authored: neither contains `Co-authored-by`, `Generated-by`,
-`Assisted-by`, or other AI attribution trailers.
+This handoff is the current continuation source for Claude. Preserve every commit
+on this branch as authored: none contains `Co-authored-by`, `Generated-by`,
+`Assisted-by`, or other AI attribution trailers, and
+`.github/workflows/no-ai-coauthor-metadata.yml` rejects both those trailers and any
+Claude/Anthropic author or committer identity.
+
+## Gear button root cause — resolved 2026-07-27
+
+The gear did not open its menu because the click never reached the button. Two
+earlier attempts (`be6ac3b`, `941be25`) both assumed the menu opened and was then
+immediately dismissed, and so changed *when* the menu is presented. The menu was
+never presented at all.
+
+`MouseProfileHeaderView` is a transparent overlay across the whole 872×344 mouse
+card, so it carries a custom `hitTest(_:)` that lets clicks fall through to the
+mapping rows beneath it while keeping its own gear and arrows clickable. That
+override did:
+
+```swift
+let childPoint = subview.convert(point, from: self)
+if let hit = subview.hitTest(childPoint) { return hit }
+```
+
+`NSView.hitTest(_:)` takes a point in the **receiver's superview** space — a
+subview compares the point against its own `frame`. Converting into the subview's
+local space first therefore subtracts its frame origin a second time. The gear
+(frame origin x = 826) was tested 826pt to the left of where it is, and both
+navigation arrows (origin y = 146) 146pt above themselves. All three controls
+returned `nil`, the overlay reported no hit, and every click fell straight through
+to `MouseSlideContainerView`.
+
+So the gear **and both slide arrows** were completely dead — not just the gear.
+The fix converts once from the superview and hands that point to the children
+unchanged.
+
+Two further defects were fixed alongside it:
+
+- `AppProfileGearButton.mouseDown(with:)` presents from mouse-down and does not
+  call `super`, which also skipped NSControl's own disabled guard, so a greyed-out
+  gear would still have opened its menu. It now rechecks `isEnabled`.
+- `presentMenu()` gained a re-entrancy guard and releases `presentedMenu` through
+  `defer`, so a menu can never be stacked on a live tracking session.
+
+### Why the previous run of `./tools/check.sh` exited silently
+
+Not an environment problem. `tools/check.sh` carried a source guard pinning the
+deferred-popUp workaround:
+
+```bash
+grep -q 'DispatchQueue.main.async { \[weak self, weak menu\] in' …
+```
+
+Commit `941be25` deleted that code, so the guard could never match again. A bare
+`grep -q` under `set -euo pipefail` prints nothing when it fails, so every run
+after `941be25` exited 1 in silence at that line. It was misread as the generated
+preview-launch boundary. The guard now pins the current mouse-down presentation
+instead, and rejects a return to the deferred popUp.
+
+### Regression cover
+
+`tools/MouseSlideHitTestMain.swift` drives the real `MouseProfileHeaderView`
+through the real hosting chain (window → scroll view → flipped document →
+`MouseSlideContainerView` → overlay) and asserts which view a click actually lands
+on. It discovers the gear and arrows from the live subviews rather than hardcoding
+their frames, so moving a control cannot make it quietly stop testing them. It
+also asserts the overlay still lets clicks through to controls beneath it, and
+that a disabled gear stays inert.
+
+`check.sh` runs it after the mouse-button routing tests. Verified to fail on the
+pre-fix code and pass after it.
+
+An opt-in end-to-end mode additionally dispatches a real left-mouse-down at the
+gear and confirms an `NSMenu` begins tracking with all eight specified items plus
+the device submenu, its rescan action and its empty-scan copy. It needs a window
+server and runs a menu-tracking loop, so it is deliberately not part of the
+default run:
+
+```bash
+"$(ls -td build/check-* | head -1)/mouse-slide-hit-test" menu
+```
 
 ## Current continuation state (2026-07-27)
-
-The latest source commits are:
-
-```text
-941be25 fix: open mouse mapping menu on mouse down
-be6ac3b fix: keep mouse mapping gear menu visible
-00b3126 fix: polish mouse mapping controls and spacing
-```
 
 Implemented in the current source:
 
@@ -27,30 +96,21 @@ Implemented in the current source:
   returning useful height to the slide/list area.
 - Refresh controls use a native `NSProgressIndicator` spinner instead of the
   earlier rotating glyph animation.
-- The mouse gear menu now begins native AppKit menu tracking directly from the
-  gear button's mouse-down event and retains the menu for the synchronous
-  tracking session. This replaces the earlier deferred mouse-up workaround and
-  prevents the opening click's mouse-up from immediately dismissing the menu.
+- The mouse gear menu begins native AppKit menu tracking directly from the gear
+  button's mouse-down event, matching native pull-down controls, and retains the
+  menu for the synchronous tracking session.
 - Space/Return and accessibility-triggered gear activation remain wired through
   the button's ordinary action path.
 - The gear menu contains activation, assignment/rescan/unassignment, add,
   rename, duplicate, reset and delete actions as specified below.
+- The gear and both slide arrows are reachable by a real click again; see the
+  root-cause section above.
 
 Live QA already confirmed the earlier DMG build displays the improved spacing
-and native spinner treatment. The next manual QA action is to launch the latest
-source or DMG and verify that one ordinary click on **Manage <mapping> mapping**
-leaves the menu visible and selectable. Exercise at least one non-destructive
-item or submenu, then confirm keyboard activation with Space/Return. Use an
-isolated temporary configuration and do not install or publish the app.
-
-`./tools/check.sh` completed with exit 0 immediately before the final gear-menu
-change (output: `build/check-20260727-002842`). After commit `941be25`, both the
-ordinary and elevated reruns passed core compilation, mouse-button routing,
-LaunchAgent installer and App Profiles foundation stages, but exited silently
-at the known generated preview-launch boundary. The latest output is
-`build/check-20260727-005023`. `git diff --check` also passed. Treat this as the
-existing macOS preview-launch environment issue, but do not claim the
-post-`941be25` full suite is green until a clean exit 0 is obtained.
+and native spinner treatment. Remaining manual QA on the current build: confirm
+keyboard activation of the gear with Space/Return, exercise one non-destructive
+menu item or submenu, and browse with the side arrows and a trackpad swipe. Use
+an isolated temporary configuration and do not install or publish the app.
 
 The DMG background/arrow remains unresolved in the mounted Finder view. Do not
 claim that the DMG arrow is fixed without fresh visual verification.
