@@ -149,6 +149,19 @@ private struct PreviewMain {
                 ] != "1" {
                     toggleView.showSupportedAppProfilesPreview()
                 }
+                if tab == "mappings",
+                   let rawIndex = ProcessInfo.processInfo.environment[
+                       "KLIK_PRO_PREVIEW_MOUSE_MAPPING_INDEX"
+                   ],
+                   let index = Int(rawIndex) {
+                    toggleView.showMouseMappingPreview(index: index)
+                }
+                if tab == "mappings",
+                   ProcessInfo.processInfo.environment[
+                       "KLIK_PRO_PREVIEW_SINGLE_MOUSE_MAPPING"
+                   ] == "1" {
+                    toggleView.showSingleMouseMappingPreview()
+                }
             }
         }
 

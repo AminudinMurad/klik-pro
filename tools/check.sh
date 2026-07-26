@@ -1040,6 +1040,10 @@ require_source_literal \
   "$ROOT/Sources/AppProfilesUI.swift" \
   "Mappings App Profiles must show the shared refresh state"
 require_source_literal \
+  'nativeCard.setRefreshing(false)' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "Mappings Native Apps must clear its initial loading overlay once apps arrive"
+require_source_literal \
   'generatorList.setRefreshing(refreshing, message: message)' \
   "$ROOT/Sources/AppProfilesUI.swift" \
   "App Profile Generator must show the shared refresh overlay"
@@ -1117,12 +1121,34 @@ grep -A24 'onInstancesChange = { \[weak self\] instances in' \
 grep -q 'systemSymbolName: "arrow.counterclockwise"' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'Reset .* shortcut to default' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'recorder.setCombo(self.defaultCombo)' "$ROOT/Sources/KlikProApp.swift"
-# The Mappings tab groups the mouse and all its button callouts in one bordered
-# "Mouse Profile" device card (drawDeviceCard), replacing the older stacked
-# recordable-shortcut card.
+# The Mappings tab groups the mouse and all its button callouts in one bordered,
+# compact Mouse Mappings slide. Browsing is non-wrapping and display-only; the
+# gear remains the sole activation/assignment/management surface.
 grep -Eq 'static let deviceCard +=' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'drawDeviceCard(in: SettingsContentView.deviceCard)' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'drawSectionLabel("Mouse Profile"' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'drawSectionLabel("Mouse Mappings"' "$ROOT/Sources/KlikProApp.swift"
+grep -Eq 'static let deviceCard += NSRect\(x: 0, y: 0, width: .* height: 316\)' \
+  "$ROOT/Sources/KlikProApp.swift"
+grep -Eq 'static let mappingBottomCard += NSRect\(x: 0, y: 332,' \
+  "$ROOT/Sources/KlikProApp.swift"
+grep -q 'private let menuButton = AppProfileGearButton' "$ROOT/Sources/KlikProApp.swift"
+grep -Fq '"Activate “\(profile.name)”"' "$ROOT/Sources/KlikProApp.swift"
+grep -q '"Assign Mouse…"' "$ROOT/Sources/KlikProApp.swift"
+grep -q '"Change Mouse…"' "$ROOT/Sources/KlikProApp.swift"
+grep -q '"Unassign Mouse"' "$ROOT/Sources/KlikProApp.swift"
+grep -q '"Add Mapping"' "$ROOT/Sources/KlikProApp.swift"
+grep -q '"Rename Mapping…"' "$ROOT/Sources/KlikProApp.swift"
+grep -q '"Duplicate Mapping"' "$ROOT/Sources/KlikProApp.swift"
+grep -q '"Reset Mapping…"' "$ROOT/Sources/KlikProApp.swift"
+grep -q '"Delete Mapping…"' "$ROOT/Sources/KlikProApp.swift"
+grep -q '"No compatible external mice found."' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'guard profileIDs.indices.contains(next) else { return }' \
+  "$ROOT/Sources/KlikProApp.swift"
+grep -q 'func handleHorizontalScroll(_ event: NSEvent)' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'NSWorkspace.shared.accessibilityDisplayShouldReduceMotion' \
+  "$ROOT/Sources/KlikProApp.swift"
+grep -q 'contentView.setMouseControlsAvailable(profile.deviceIdentity != nil)' \
+  "$ROOT/Sources/KlikProApp.swift"
 grep -q 'thumbWheelCard = NSRect(x: leftX' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'actionPicker.addItems(withTitles: \[baseActionTitle, "Open App"\])' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'baseActionTitle: "Browser Forward"' "$ROOT/Sources/KlikProApp.swift"
@@ -1202,6 +1228,10 @@ grep -q 'KLIK_PRO_PREVIEW_USE_INSTALLED_APP_ICONS' "$ROOT/Sources/KlikProApp.swi
 grep -q 'render_preview "$ROOT/assets/screenshot-mappings.png" mappings "" 1' "$ROOT/tools/render-previews.sh"
 grep -q 'special-feature-no-apps.png' "$ROOT/tools/render-previews.sh"
 grep -q 'special-feature-chatgpt-only.png' "$ROOT/tools/render-previews.sh"
+grep -q 'mouse-mapping-single.png' "$ROOT/tools/render-previews.sh"
+grep -q 'mouse-mapping-first.png' "$ROOT/tools/render-previews.sh"
+grep -q 'mouse-mapping-middle.png' "$ROOT/tools/render-previews.sh"
+grep -q 'mouse-mapping-final.png' "$ROOT/tools/render-previews.sh"
 grep -q 'private struct AppControlState: Equatable' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'controlState != persistedControlState' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'private func recheckControlState()' "$ROOT/Sources/KlikProApp.swift"
@@ -1276,6 +1306,10 @@ for fixtureName in \
   app-profiles-empty.png \
   special-feature-no-apps.png \
   special-feature-chatgpt-only.png \
+  mouse-mapping-single.png \
+  mouse-mapping-first.png \
+  mouse-mapping-middle.png \
+  mouse-mapping-final.png \
   settings-needs-permission.png \
   unsaved-changes.png \
   save-hover.png \

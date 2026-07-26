@@ -125,6 +125,20 @@ render_preview "$FIXTURES/app-profiles-empty.png" profiles "" 0 1
 # ToggleView is created; previews never inspect or mutate a live background service.
 render_preview "$FIXTURES/special-feature-no-apps.png" mappings none
 render_preview "$FIXTURES/special-feature-chatgpt-only.png" mappings chatgpt
+# Three deterministic slide states cover the boundary arrows, viewed dot/name,
+# and active-versus-viewed badge without touching the user's real config.
+KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
+  KLIK_PRO_PREVIEW_SINGLE_MOUSE_MAPPING=1 \
+  "$EXECUTABLE" "$FIXTURES/mouse-mapping-single.png" mappings
+KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
+  KLIK_PRO_PREVIEW_MOUSE_MAPPING_INDEX=0 \
+  "$EXECUTABLE" "$FIXTURES/mouse-mapping-first.png" mappings
+KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
+  KLIK_PRO_PREVIEW_MOUSE_MAPPING_INDEX=1 \
+  "$EXECUTABLE" "$FIXTURES/mouse-mapping-middle.png" mappings
+KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
+  KLIK_PRO_PREVIEW_MOUSE_MAPPING_INDEX=2 \
+  "$EXECUTABLE" "$FIXTURES/mouse-mapping-final.png" mappings
 KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
   KLIK_PRO_PREVIEW_UNSAVED=1 \
   "$EXECUTABLE" "$FIXTURES/unsaved-changes.png" mappings
@@ -161,6 +175,10 @@ echo "  $FIXTURES/app-profiles.png"
 echo "  $FIXTURES/app-profiles-empty.png"
 echo "  $FIXTURES/special-feature-no-apps.png"
 echo "  $FIXTURES/special-feature-chatgpt-only.png"
+echo "  $FIXTURES/mouse-mapping-single.png"
+echo "  $FIXTURES/mouse-mapping-first.png"
+echo "  $FIXTURES/mouse-mapping-middle.png"
+echo "  $FIXTURES/mouse-mapping-final.png"
 echo "  $FIXTURES/unsaved-changes.png"
 echo "  $FIXTURES/save-hover.png"
 echo "  $FIXTURES/update-hover.png"

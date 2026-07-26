@@ -1802,50 +1802,67 @@ final class ToggleOnlyRowView: NSView {
 
 // MARK: - Scrollable settings content (device diagram + all mapping rows)
 
-/// Compact controller embedded in the Mouse Profile card's header. Browsing is
-/// deliberately separate from activation: selecting a popup item, chevron, or
-/// page dot only loads that profile into the editor. The explicit Activate action
-/// is the only path that changes what the input helper runs.
+final class MouseSlideContainerView: NSView {
+    override var isFlipped: Bool { true }
+}
+
+/// Large, quiet side control used to browse mapping slides. NSButton supplies
+/// keyboard focus and native accessibility behavior while the borderless symbol
+/// keeps the control visually subordinate to the mapping editor.
+final class MouseSlideNavigationButton: NSButton {
+    init(symbolName: String, accessibility: String, frame: NSRect) {
+        super.init(frame: frame)
+        isBordered = false
+        imagePosition = .imageOnly
+        imageScaling = .scaleProportionallyDown
+        let symbol = NSImage(
+            systemSymbolName: symbolName,
+            accessibilityDescription: accessibility
+        )
+        symbol?.isTemplate = true
+        image = symbol?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 19, weight: .medium)
+        )
+        contentTintColor = .appTextSecondary
+        setAccessibilityLabel(accessibility)
+        toolTip = accessibility
+    }
+
+    required init?(coder: NSCoder) { nil }
+}
+
+/// Controls layered over the full mouse-mapping card. Browsing is deliberately
+/// separate from activation: arrows and trackpad swipes only load a mapping into
+/// the editor. The explicit gear-menu Activate action is the only path that
+/// changes what the input helper runs.
 final class MouseProfileHeaderView: NSView {
-    private let previousButton = IconActionButton(
+    private let previousButton = MouseSlideNavigationButton(
         symbolName: "chevron.left",
-        accessibility: "Previous Mouse Profile",
-        frame: NSRect(x: 0, y: 1, width: 26, height: 26)
+        accessibility: "Previous mouse mapping",
+        frame: NSRect(x: 8, y: 132, width: 46, height: 52)
     )
-    private let profilePopup = NSPopUpButton(
-        frame: NSRect(x: 30, y: 0, width: 154, height: 28)
-    )
-    private let nextButton = IconActionButton(
+    private let nextButton = MouseSlideNavigationButton(
         symbolName: "chevron.right",
-        accessibility: "Next Mouse Profile",
-        frame: NSRect(x: 188, y: 1, width: 26, height: 26)
+        accessibility: "Next mouse mapping",
+        frame: NSRect(x: 818, y: 132, width: 46, height: 52)
     )
-    private let addButton = IconActionButton(
-        symbolName: "plus",
-        accessibility: "Add Mouse Profile",
-        frame: NSRect(x: 218, y: 1, width: 26, height: 26)
-    )
-    private let mouseLabel = NSTextField(labelWithString: "Mouse")
-    private let devicePopup = NSPopUpButton(
-        frame: NSRect(x: 344, y: 0, width: 196, height: 28)
-    )
-    private let activeBadge = NSTextField(labelWithString: "ACTIVE")
-    private let activateButton = AppProfileButton(
-        title: "Activate", frame: NSRect(x: 554, y: 0, width: 94, height: 28)
-    )
-    private let menuButton = IconActionButton(
-        symbolName: "ellipsis",
-        accessibility: "Manage Mouse Profile",
-        frame: NSRect(x: 654, y: 1, width: 28, height: 26)
+    private let menuButton = AppProfileGearButton(
+        frame: NSRect(x: 826, y: 12, width: 30, height: 28)
     )
 
+    private var profiles: [MouseProfile] = []
     private var profileIDs: [UUID] = []
     private var viewedProfileID: UUID?
     private var activeProfileID: UUID?
     private var devices: [ConnectedMouseDevice] = []
     private var viewedDeviceIdentity: MouseDeviceIdentity?
+    private var cachedDeviceNames: [MouseDeviceIdentity: String] = [:]
+    private var scanningDevices = false
+    private var swipeDeltaX: CGFloat = 0
+    private var swipeLocked = false
 
     var onBrowse: ((UUID) -> Void)?
+    var onBrowseAnimation: ((Int) -> Void)?
     var onAdd: (() -> Void)?
     var onActivate: ((UUID) -> Void)?
     var onBindDevice: ((UUID, MouseDeviceIdentity?) -> Void)?
@@ -1859,39 +1876,16 @@ final class MouseProfileHeaderView: NSView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        profilePopup.controlSize = .small
-        profilePopup.target = self
-        profilePopup.action = #selector(profileSelectionChanged)
-        profilePopup.setAccessibilityLabel("Viewed Mouse Profile")
+        previousButton.target = self
+        previousButton.action = #selector(browsePrevious)
+        nextButton.target = self
+        nextButton.action = #selector(browseNext)
+        menuButton.onPress = { [weak self] in self?.presentMenu() }
+        menuButton.setAccessibilityLabel("Manage mouse mapping")
 
-        mouseLabel.frame = NSRect(x: 292, y: 6, width: 48, height: 17)
-        mouseLabel.font = .systemFont(ofSize: 11, weight: .semibold)
-        mouseLabel.textColor = .appTextSecondary
-
-        devicePopup.controlSize = .small
-        devicePopup.target = self
-        devicePopup.action = #selector(deviceSelectionChanged)
-        devicePopup.setAccessibilityLabel("Mouse assigned to profile")
-
-        activeBadge.font = .systemFont(ofSize: 9, weight: .bold)
-        activeBadge.textColor = .systemGreen
-        activeBadge.alignment = .center
-        activeBadge.frame = NSRect(x: 554, y: 6, width: 94, height: 16)
-        activeBadge.setAccessibilityLabel("Active Mouse Profile")
-
-        previousButton.onClick = { [weak self] in self?.browse(offset: -1) }
-        nextButton.onClick = { [weak self] in self?.browse(offset: 1) }
-        addButton.onClick = { [weak self] in self?.onAdd?() }
-        activateButton.onPress = { [weak self] in
-            guard let self, let id = self.viewedProfileID else { return }
-            self.onActivate?(id)
-        }
-        menuButton.onClick = { [weak self] in self?.presentMenu() }
-
-        [
-            previousButton, profilePopup, nextButton, addButton, mouseLabel,
-            devicePopup, activeBadge, activateButton, menuButton,
-        ].forEach(addSubview)
+        [previousButton, nextButton, menuButton].forEach(addSubview)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
     }
 
     required init?(coder: NSCoder) { nil }
@@ -1902,114 +1896,156 @@ final class MouseProfileHeaderView: NSView {
         activeID: UUID,
         connectedDevices: [ConnectedMouseDevice]
     ) {
+        self.profiles = profiles
         profileIDs = profiles.map(\.id)
         viewedProfileID = profileIDs.contains(viewedID) ? viewedID : profileIDs.first
         activeProfileID = activeID
         devices = connectedDevices
         let viewed = profiles.first { $0.id == viewedProfileID }
         viewedDeviceIdentity = viewed?.deviceIdentity
-
-        profilePopup.removeAllItems()
-        for profile in profiles {
-            profilePopup.addItem(withTitle: profile.name)
-        }
-        if let id = viewedProfileID,
-           let index = profileIDs.firstIndex(of: id) {
-            profilePopup.selectItem(at: index)
+        for device in connectedDevices {
+            cachedDeviceNames[device.identity] = device.displayName
         }
 
-        let canPage = profiles.count > 1
-        previousButton.isEnabled = canPage
-        nextButton.isEnabled = canPage
-        addButton.isEnabled = profiles.count < MouseProfile.maximumCount
-        addButton.toolTip = addButton.isEnabled
-            ? "Add Mouse Profile"
-            : "Maximum of \(MouseProfile.maximumCount) Mouse Profiles"
-
-        rebuildDevicePopup()
         let isActive = viewedProfileID == activeProfileID
-        activeBadge.isHidden = !isActive
-        activateButton.isHidden = isActive
-        activateButton.isEnabled = !isActive
+        let index = viewedProfileID.flatMap(profileIDs.firstIndex(of:)) ?? 0
+        previousButton.isEnabled = index > 0
+        nextButton.isEnabled = index + 1 < profileIDs.count
         menuButton.isEnabled = viewedProfileID != nil
+        let name = viewed?.name ?? "Mouse mapping"
+        menuButton.setAccessibilityLabel("Manage \(name) mapping")
+        let position = "Mapping \(index + 1) of \(max(1, profiles.count)), \(name)"
+        setAccessibilityLabel(isActive ? "\(position), Active" : position)
         needsDisplay = true
     }
 
-    private func rebuildDevicePopup() {
-        devicePopup.removeAllItems()
-        devicePopup.addItem(withTitle: "No mouse assigned")
-        var selectedIndex = 0
-        for (index, device) in devices.enumerated() {
-            devicePopup.addItem(withTitle: device.detail)
-            if device.identity == viewedDeviceIdentity { selectedIndex = index + 1 }
-        }
-        if let identity = viewedDeviceIdentity,
-           !devices.contains(where: { $0.identity == identity }) {
-            let serial = identity.serialNumber.map { " · …\(String($0.suffix(6)))" } ?? ""
-            let name = knownMouseDisplayName(for: identity)
-                ?? String(format: "Assigned mouse %04X:%04X", identity.vendorID, identity.productID)
-            devicePopup.addItem(
-                withTitle: "\(name)\(serial) · Not connected"
-            )
-            selectedIndex = devicePopup.numberOfItems - 1
-        }
-        devicePopup.menu?.addItem(.separator())
-        devicePopup.addItem(withTitle: "Scan for mice…")
-        devicePopup.selectItem(at: selectedIndex)
+    func setScanningDevices(_ scanning: Bool) {
+        scanningDevices = scanning
+        menuButton.toolTip = scanning ? "Scanning for mice…" : "Manage mouse mapping"
+        menuButton.setAccessibilityHelp(
+            scanning ? "Scanning for compatible external mice." : nil
+        )
     }
 
-    @objc private func profileSelectionChanged() {
-        let index = profilePopup.indexOfSelectedItem
-        guard profileIDs.indices.contains(index) else { return }
-        onBrowse?(profileIDs[index])
-    }
-
-    @objc private func deviceSelectionChanged() {
-        guard let profileID = viewedProfileID else { return }
-        let index = devicePopup.indexOfSelectedItem
-        if index == devicePopup.numberOfItems - 1 {
-            onRescanDevices?()
-            rebuildDevicePopup()
-            return
+    /// Returns true only after recognizing a deliberate horizontal trackpad
+    /// gesture. One gesture can browse at most one mapping.
+    func handleHorizontalScroll(_ event: NSEvent) -> Bool {
+        guard event.hasPreciseScrollingDeltas else { return false }
+        let momentumEnded = event.momentumPhase.contains(.ended)
+            || event.momentumPhase.contains(.cancelled)
+        if !event.momentumPhase.isEmpty {
+            let wasHandlingSwipe = swipeLocked
+            if momentumEnded {
+                swipeDeltaX = 0
+                swipeLocked = false
+            }
+            return wasHandlingSwipe
         }
-        if index == 0 {
-            onBindDevice?(profileID, nil)
-            return
+        if event.phase.contains(.began) {
+            swipeDeltaX = 0
+            swipeLocked = false
         }
-        let deviceIndex = index - 1
-        if devices.indices.contains(deviceIndex) {
-            onBindDevice?(profileID, devices[deviceIndex].identity)
+        let deltaX = event.scrollingDeltaX
+        let deltaY = event.scrollingDeltaY
+        let isHorizontal = abs(deltaX) > abs(deltaY) * 1.25
+        if isHorizontal && !swipeLocked {
+            swipeDeltaX += deltaX
+            if abs(swipeDeltaX) >= 52 {
+                browse(offset: swipeDeltaX > 0 ? 1 : -1)
+                swipeLocked = true
+            }
         }
+        let gestureEnded = event.phase.contains(.ended)
+            || event.phase.contains(.cancelled)
+        if gestureEnded {
+            swipeDeltaX = 0
+            // Keep a completed swipe locked through any momentum events. The next
+            // real gesture's `.began` phase resets it.
+        }
+        return isHorizontal
     }
 
     private func browse(offset: Int) {
         guard let viewedProfileID,
               let index = profileIDs.firstIndex(of: viewedProfileID),
               !profileIDs.isEmpty else { return }
-        let next = (index + offset + profileIDs.count) % profileIDs.count
+        let next = index + offset
+        guard profileIDs.indices.contains(next) else { return }
+        onBrowseAnimation?(offset)
         onBrowse?(profileIDs[next])
     }
 
+    @objc private func browsePrevious() { browse(offset: -1) }
+    @objc private func browseNext() { browse(offset: 1) }
+
     private func presentMenu() {
-        guard let id = viewedProfileID else { return }
+        guard let id = viewedProfileID,
+              let profile = profiles.first(where: { $0.id == id }) else { return }
         let menu = NSMenu()
+        menu.autoenablesItems = false
         func item(_ title: String, _ action: Selector) -> NSMenuItem {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
             item.target = self
             item.representedObject = id as NSUUID
             return item
         }
-        menu.addItem(item("Rename…", #selector(renameProfile(_:))))
-        let duplicate = item("Duplicate", #selector(duplicateProfile(_:)))
-        duplicate.isEnabled = profileIDs.count < MouseProfile.maximumCount
-        menu.addItem(duplicate)
-        menu.addItem(item("Reset to Defaults…", #selector(resetProfile(_:))))
+
+        let activate = item(
+            "Activate “\(profile.name)”",
+            #selector(activateProfile(_:))
+        )
+        activate.isEnabled = id != activeProfileID
+        activate.image = NSImage(systemSymbolName: "checkmark.circle", accessibilityDescription: nil)
+        menu.addItem(activate)
+
+        let assign = NSMenuItem(
+            title: profile.deviceIdentity == nil ? "Assign Mouse…" : "Change Mouse…",
+            action: nil,
+            keyEquivalent: ""
+        )
+        assign.image = NSImage(systemSymbolName: "computermouse", accessibilityDescription: nil)
+        assign.submenu = makeDeviceMenu()
+        menu.addItem(assign)
+
+        let unassign = item("Unassign Mouse", #selector(unassignMouse(_:)))
+        unassign.isEnabled = profile.deviceIdentity != nil
+        unassign.image = NSImage(systemSymbolName: "xmark.circle", accessibilityDescription: nil)
+        menu.addItem(unassign)
         menu.addItem(.separator())
-        let delete = item("Delete…", #selector(deleteProfile(_:)))
+
+        let add = item("Add Mapping", #selector(addProfile(_:)))
+        add.isEnabled = profileIDs.count < MouseProfile.maximumCount
+        add.toolTip = add.isEnabled
+            ? nil
+            : "Maximum of \(MouseProfile.maximumCount) mappings."
+        add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
+        menu.addItem(add)
+
+        let rename = item("Rename Mapping…", #selector(renameProfile(_:)))
+        rename.image = NSImage(systemSymbolName: "pencil", accessibilityDescription: nil)
+        menu.addItem(rename)
+
+        let duplicate = item("Duplicate Mapping", #selector(duplicateProfile(_:)))
+        duplicate.isEnabled = profileIDs.count < MouseProfile.maximumCount
+        duplicate.image = NSImage(
+            systemSymbolName: "plus.square.on.square",
+            accessibilityDescription: nil
+        )
+        menu.addItem(duplicate)
+
+        let reset = item("Reset Mapping…", #selector(resetProfile(_:)))
+        reset.image = NSImage(
+            systemSymbolName: "arrow.uturn.backward",
+            accessibilityDescription: nil
+        )
+        menu.addItem(reset)
+
+        let delete = item("Delete Mapping…", #selector(deleteProfile(_:)))
         delete.isEnabled = profileIDs.count > 1 && id != activeProfileID
         delete.toolTip = id == activeProfileID
-            ? "Activate another Mouse Profile before deleting this one."
+            ? "Activate another mapping before deleting this one."
             : nil
+        delete.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
         menu.addItem(delete)
         menu.popUp(
             positioning: nil,
@@ -2018,10 +2054,76 @@ final class MouseProfileHeaderView: NSView {
         )
     }
 
+    private func makeDeviceMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        if scanningDevices {
+            let scanning = NSMenuItem(
+                title: "Scanning for mice…",
+                action: nil,
+                keyEquivalent: ""
+            )
+            scanning.isEnabled = false
+            menu.addItem(scanning)
+        } else if devices.isEmpty {
+            let empty = NSMenuItem(
+                title: "No compatible external mice found.",
+                action: nil,
+                keyEquivalent: ""
+            )
+            empty.isEnabled = false
+            menu.addItem(empty)
+        } else {
+            for (index, device) in devices.enumerated() {
+                let deviceItem = NSMenuItem(
+                    title: device.detail,
+                    action: #selector(assignDevice(_:)),
+                    keyEquivalent: ""
+                )
+                deviceItem.target = self
+                deviceItem.tag = index
+                deviceItem.state = device.identity == viewedDeviceIdentity ? .on : .off
+                menu.addItem(deviceItem)
+            }
+        }
+        if let identity = viewedDeviceIdentity,
+           !devices.contains(where: { $0.identity == identity }) {
+            let serial = identity.serialNumber.map {
+                " · …\(String($0.suffix(6)))"
+            } ?? ""
+            let name = cachedDeviceNames[identity]
+                ?? knownMouseDisplayName(for: identity)
+                ?? String(format: "Assigned mouse %04X:%04X", identity.vendorID, identity.productID)
+            let disconnected = NSMenuItem(
+                title: "\(name)\(serial) · Not connected",
+                action: nil,
+                keyEquivalent: ""
+            )
+            disconnected.isEnabled = false
+            disconnected.state = .on
+            menu.addItem(disconnected)
+        }
+        menu.addItem(.separator())
+        let rescan = NSMenuItem(
+            title: scanningDevices ? "Scanning for mice…" : "Rescan for Mice",
+            action: #selector(rescanDevices),
+            keyEquivalent: ""
+        )
+        rescan.target = self
+        rescan.isEnabled = !scanningDevices
+        rescan.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil)
+        menu.addItem(rescan)
+        return menu
+    }
+
     private func representedID(_ sender: NSMenuItem) -> UUID? {
         (sender.representedObject as? NSUUID).map { $0 as UUID }
     }
 
+    @objc private func activateProfile(_ sender: NSMenuItem) {
+        if let id = representedID(sender) { onActivate?(id) }
+    }
+    @objc private func addProfile(_ sender: NSMenuItem) { onAdd?() }
     @objc private func renameProfile(_ sender: NSMenuItem) {
         if let id = representedID(sender) { onRename?(id) }
     }
@@ -2034,22 +2136,103 @@ final class MouseProfileHeaderView: NSView {
     @objc private func deleteProfile(_ sender: NSMenuItem) {
         if let id = representedID(sender) { onDelete?(id) }
     }
+    @objc private func assignDevice(_ sender: NSMenuItem) {
+        guard let id = viewedProfileID, devices.indices.contains(sender.tag) else { return }
+        let device = devices[sender.tag]
+        cachedDeviceNames[device.identity] = device.displayName
+        onBindDevice?(id, device.identity)
+    }
+    @objc private func unassignMouse(_ sender: NSMenuItem) {
+        if let id = representedID(sender) { onBindDevice?(id, nil) }
+    }
+    @objc private func rescanDevices() { onRescanDevices?() }
+
+    /// The transparent full-card overlay must not steal clicks from the mapping
+    /// controls beneath it. Only its three actual NSButtons participate in hit
+    /// testing.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard !isHidden, alphaValue > 0, bounds.contains(point) else { return nil }
+        for subview in subviews.reversed() {
+            let childPoint = subview.convert(point, from: self)
+            if let hit = subview.hitTest(childPoint) { return hit }
+        }
+        return nil
+    }
 
     override func draw(_ dirtyRect: NSRect) {
+        ("Horizontal Thumb Wheel" as NSString).draw(
+            at: NSPoint(x: 380, y: 43),
+            withAttributes: [
+                .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+                .foregroundColor: NSColor.appTextPrimary,
+            ]
+        )
         guard let viewedProfileID,
-              let viewedIndex = profileIDs.firstIndex(of: viewedProfileID) else { return }
+              let viewedIndex = profileIDs.firstIndex(of: viewedProfileID),
+              let profile = profiles.first(where: { $0.id == viewedProfileID }) else { return }
         let dotSize: CGFloat = 6
         let gap: CGFloat = 6
-        let totalWidth = CGFloat(profileIDs.count) * dotSize
+        let dotsWidth = CGFloat(profileIDs.count) * dotSize
             + CGFloat(max(0, profileIDs.count - 1)) * gap
-        var x = 268 - totalWidth / 2
+        let nameAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+            .foregroundColor: NSColor.appTextPrimary,
+        ]
+        let nameSize = (profile.name as NSString).size(withAttributes: nameAttributes)
+        let isActive = viewedProfileID == activeProfileID
+        let activeText = "ACTIVE" as NSString
+        let activeAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 8, weight: .bold),
+            .foregroundColor: NSColor.systemGreen,
+        ]
+        let activeTextSize = activeText.size(withAttributes: activeAttributes)
+        let activeWidth = activeTextSize.width + 12
+        let groupGap: CGFloat = 12
+        let badgeGap: CGFloat = 8
+        let totalWidth = dotsWidth + groupGap + nameSize.width
+            + (isActive ? badgeGap + activeWidth : 0)
+        var x = bounds.midX - totalWidth / 2
+        let centerY = bounds.height - 19
         for index in profileIDs.indices {
             (index == viewedIndex ? NSColor.controlAccentColor : NSColor.tertiaryLabelColor)
                 .setFill()
             NSBezierPath(
-                ovalIn: NSRect(x: x, y: 11, width: dotSize, height: dotSize)
+                ovalIn: NSRect(
+                    x: x,
+                    y: centerY - dotSize / 2,
+                    width: dotSize,
+                    height: dotSize
+                )
             ).fill()
             x += dotSize + gap
+        }
+        x += groupGap - gap
+        (profile.name as NSString).draw(
+            at: NSPoint(x: x, y: centerY - nameSize.height / 2),
+            withAttributes: nameAttributes
+        )
+        x += nameSize.width
+        if isActive {
+            x += badgeGap
+            let badgeRect = NSRect(
+                x: x,
+                y: centerY - 8,
+                width: activeWidth,
+                height: 16
+            )
+            NSColor.systemGreen.withAlphaComponent(0.13).setFill()
+            NSBezierPath(
+                roundedRect: badgeRect,
+                xRadius: badgeRect.height / 2,
+                yRadius: badgeRect.height / 2
+            ).fill()
+            activeText.draw(
+                at: NSPoint(
+                    x: badgeRect.midX - activeTextSize.width / 2,
+                    y: badgeRect.midY - activeTextSize.height / 2
+                ),
+                withAttributes: activeAttributes
+            )
         }
     }
 }
@@ -2104,8 +2287,9 @@ final class SettingsContentView: NSView {
     let thumbWheelToggle: ToggleSwitchView
     let thumbWheelBrowsers: ThumbWheelBrowsersButton
     let mouseProfileHeader = MouseProfileHeaderView(
-        frame: NSRect(x: 112, y: 6, width: 700, height: 30)
+        frame: NSRect(x: 0, y: 0, width: 872, height: 316)
     )
+    private let mouseSlideContainer: MouseSlideContainerView
     var onThumbWheelToggle: ((Bool) -> Void)?
     var onThumbWheelBrowserChange: ((ThumbWheelBrowsersButton.Browser, Bool) -> Void)?
     // App icons shown in the Special Feature card, loaded at runtime from the user's
@@ -2141,9 +2325,9 @@ final class SettingsContentView: NSView {
     // The mouse-guide + callouts row is prioritised (it's the point of this tab); the
     // bottom two columns are a quick-access companion — full management lives on the
     // App Profiles tab — so the guide gets the larger share of the height.
-    static let deviceCard         = NSRect(x: 0, y: 0, width: rightCardX + rightCardW, height: 360)
+    static let deviceCard         = NSRect(x: 0, y: 0, width: rightCardX + rightCardW, height: 316)
     // Native apps + App Profiles, side by side across the full width, below the guide.
-    static let mappingBottomCard  = NSRect(x: 0, y: 376, width: rightCardX + rightCardW, height: 352)
+    static let mappingBottomCard  = NSRect(x: 0, y: 332, width: rightCardX + rightCardW, height: 396)
 
     private static func previewAppIcon(for target: QuickLaunchTarget) -> NSImage {
         let label = target == .chatGPT ? "G" : "C"
@@ -2209,8 +2393,8 @@ final class SettingsContentView: NSView {
         // doesn't sit too low against the app lists below.
         let shortcutBottomLeftX: CGFloat = 110   // bottom-left (Forward); inner edge ≈ x 300
         let shortcutBottomRightX: CGFloat = 574  // bottom-right (Gesture); symmetric
-        let shortcutTopY: CGFloat = 40    // leaves a header strip for the "Mouse Profile" title
-        let shortcutBottomY: CGFloat = 216
+        let shortcutTopY: CGFloat = 40    // leaves a header strip for the "Mouse Mappings" title
+        let shortcutBottomY: CGFloat = 176
         middleButtonRow = RecordableShortcutRowView(
             title: "Middle Button",
             mapping: config.middleButton,
@@ -2350,6 +2534,7 @@ final class SettingsContentView: NSView {
             instances: config.instances,
             frame: SettingsContentView.mappingBottomCard
         )
+        mouseSlideContainer = MouseSlideContainerView(frame: SettingsContentView.deviceCard)
         // Thumb Wheel tab-switching, surfaced as a 5th callout top-centre above the mouse:
         // a master toggle and a compact browsers pull-down (line 2). "Horizontal Thumb Wheel"
         // is drawn as its title in draw(); the leader anchors just below it (see deviceCallouts).
@@ -2363,9 +2548,16 @@ final class SettingsContentView: NSView {
 
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: 728))
 
-        [middleButtonRow, gestureButtonRow, forwardRow, backRow,
-         thumbWheelToggle, thumbWheelBrowsers, mappingProfilesView,
-         mouseProfileHeader].forEach { addSubview($0) }
+        mouseSlideContainer.wantsLayer = true
+        addSubview(mouseSlideContainer)
+        [
+            middleButtonRow, gestureButtonRow, forwardRow, backRow,
+            thumbWheelToggle, thumbWheelBrowsers, mouseProfileHeader,
+        ].forEach { mouseSlideContainer.addSubview($0) }
+        addSubview(mappingProfilesView)
+        mouseProfileHeader.onBrowseAnimation = { [weak self] direction in
+            self?.prepareMouseSlideBrowse(direction: direction)
+        }
         thumbWheelBrowsers.setStates(
             chrome: config.thumbWheel.chromeEnabled,
             brave: config.thumbWheel.braveEnabled,
@@ -2413,6 +2605,29 @@ final class SettingsContentView: NSView {
     }
 
     required init?(coder: NSCoder) { nil }
+
+    private func prepareMouseSlideBrowse(direction: Int) {
+        guard let layer = mouseSlideContainer.layer else { return }
+        let transition = CATransition()
+        transition.duration = 0.20
+        transition.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            transition.type = .fade
+        } else {
+            transition.type = .push
+            transition.subtype = direction > 0 ? .fromRight : .fromLeft
+        }
+        layer.add(transition, forKey: "klik-pro-mouse-mapping-browse")
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if SettingsContentView.deviceCard.contains(point),
+           mouseProfileHeader.handleHorizontalScroll(event) {
+            return
+        }
+        super.scrollWheel(with: event)
+    }
 
     func setSpecialFeatureAvailability(_ available: Bool, isOn: Bool) {
         chatGPTIcon = Self.installedAppIcon(.chatGPT)
@@ -2473,14 +2688,6 @@ final class SettingsContentView: NSView {
         // their callouts; Native Apps + App Profiles fill two columns underneath.
         drawDeviceCard(in: SettingsContentView.deviceCard)
 
-        // Title for the thumb-wheel callout (its toggle + browsers pull-down are subviews).
-        ("Horizontal Thumb Wheel" as NSString).draw(
-            at: NSPoint(x: 380, y: 43),
-            withAttributes: [
-                .font: NSFont.systemFont(ofSize: 12, weight: .medium),
-                .foregroundColor: NSColor.appTextPrimary,
-            ]
-        )
     }
 
     private func drawCard(_ rect: NSRect) {
@@ -2512,18 +2719,18 @@ final class SettingsContentView: NSView {
         cardBorder.stroke()
 
         // Group title, parallel to "NATIVE APPS" / "APP PROFILES" on the cards below.
-        drawSectionLabel("Mouse Profile", x: 18, y: 16)
+        drawSectionLabel("Mouse Mappings", x: 18, y: 16)
 
         guard let image = image else { return }
         let imageAspect = image.size.height > 0 ? image.size.width / image.size.height : 1
         // Inset chosen so the mouse keeps its v1.4.3 size (267x198) while centred in the
         // taller guide card; the four button controls sit in the card's corners around it.
-        let available = card.insetBy(dx: 190, dy: 81)
+        let available = card.insetBy(dx: 190, dy: 59)
         let drawHeight = min(available.height, available.width / imageAspect)
         let drawWidth = drawHeight * imageAspect
         let rect = NSRect(
             x: card.midX - drawWidth / 2,
-            y: card.midY - drawHeight / 2 + 16,   // nudged down to clear the header title strip
+            y: card.midY - drawHeight / 2 + 10,   // nudged down to clear the header title strip
             width: drawWidth,
             height: drawHeight
         )
@@ -2552,15 +2759,15 @@ final class SettingsContentView: NSView {
     // fx/fy are fractions of the drawn mouse rect (top-left origin), measured on the
     // 1000x742 device artwork. controlAnchor points match the narrow corner controls set in
     // init: the top row's inner edges are x 282 (left) / x 590 (right) with centre y 88 (the
-    // top row sits below the "Mouse Profile" header strip); the bottom row is pulled in a
-    // little further — inner edges x 300 (left) / x 574 (right) with centre y 264. Each anchor
+    // top row sits below the "Mouse Mappings" header strip); the bottom row is pulled in a
+    // little further — inner edges x 300 (left) / x 574 (right) with centre y 224. Each anchor
     // is the control edge nearest the mouse, so the leader runs from there to the button.
     private static let deviceCallouts: [DeviceCallout] = [
         DeviceCallout(title: "Middle Button (Scroll Wheel)", fx: 0.245, fy: 0.413, controlAnchor: NSPoint(x: 282, y: 88)),
-        DeviceCallout(title: "Forward Button",               fx: 0.584, fy: 0.546, controlAnchor: NSPoint(x: 300, y: 264)),
+        DeviceCallout(title: "Forward Button",               fx: 0.584, fy: 0.546, controlAnchor: NSPoint(x: 300, y: 224)),
         DeviceCallout(title: "Horizontal Thumb Wheel",       fx: 0.594, fy: 0.422, controlAnchor: NSPoint(x: 436, y: 94)),
         DeviceCallout(title: "Back Button",                  fx: 0.692, fy: 0.447, controlAnchor: NSPoint(x: 590, y: 88)),
-        DeviceCallout(title: "Gesture Button",               fx: 0.755, fy: 0.745, controlAnchor: NSPoint(x: 574, y: 264)),
+        DeviceCallout(title: "Gesture Button",               fx: 0.755, fy: 0.745, controlAnchor: NSPoint(x: 574, y: 224)),
     ]
 
     private func drawDeviceCallouts(in mouseRect: NSRect) {
@@ -3792,7 +3999,10 @@ final class ToggleView: NSView {
             advancedView.setDataRoot(persistedConfig.dataRoot)
             advancedView.setLocked(true)
             scrollView.documentView = advancedView
-        default: scrollView.documentView = contentView
+        default:
+            viewedMouseProfileID = config.activeMouseProfileID
+            refreshMouseProfileEditor()
+            scrollView.documentView = contentView
         }
         needsDisplay = true
     }
@@ -3949,6 +4159,12 @@ final class ToggleView: NSView {
         // Sync persistedConfig too so this doesn't read as an unsaved change.
         config.instances = expandedInstances
         if var previewProfile = activeMouseProfile(in: config) {
+            previewProfile.name = "Office"
+            previewProfile.deviceIdentity = MouseDeviceIdentity(
+                vendorID: 0x046D,
+                productID: 0xB02A,
+                serialNumber: "PREVIEW-M650"
+            )
             previewProfile.launchAssignments.removeAll()
             for instance in expandedInstances {
                 guard let button = instance.mouseButton else { continue }
@@ -3959,10 +4175,23 @@ final class ToggleView: NSView {
                 )
             }
             config = replacingMouseProfile(previewProfile, in: config)
+            let travel = MouseProfile.quietDefault(
+                id: UUID(uuidString: "30000000-0000-0000-0000-000000000002")!,
+                name: "Travel"
+            )
+            let studio = MouseProfile.quietDefault(
+                id: UUID(uuidString: "30000000-0000-0000-0000-000000000003")!,
+                name: "Studio"
+            )
+            if let withTravel = addingMouseProfile(travel, to: config),
+               let withStudio = addingMouseProfile(studio, to: withTravel) {
+                config = withStudio
+            }
         }
         persistedConfig = config
         refreshOriginalAssignmentViews()
         refreshQuickLaunchAssignments()
+        refreshMouseProfileEditor()
     }
 
     func showEmptyAppProfilesPreview() {
@@ -3970,6 +4199,23 @@ final class ToggleView: NSView {
         appProfilesView.setInstances([])
         appProfilesView.setSupportedCandidates([])
         appProfilesView.setStatus("")
+    }
+
+    func showMouseMappingPreview(index: Int) {
+        guard previewRenderingIsActive,
+              config.mouseProfiles.indices.contains(index) else { return }
+        viewedMouseProfileID = config.mouseProfiles[index].id
+        refreshMouseProfileEditor()
+    }
+
+    func showSingleMouseMappingPreview() {
+        guard previewRenderingIsActive,
+              let active = activeMouseProfile(in: config) else { return }
+        config.mouseProfiles = [active]
+        config.activeMouseProfileID = active.id
+        persistedConfig = config
+        viewedMouseProfileID = active.id
+        refreshMouseProfileEditor()
     }
 
     required init?(coder: NSCoder) {
@@ -4084,8 +4330,16 @@ final class ToggleView: NSView {
         }
         header.onRescanDevices = { [weak self] in
             guard let self else { return }
-            self.availableMouseDevices = previewRenderingIsActive ? [] : connectedMouseDevices()
-            self.refreshMouseProfileEditor()
+            header.setScanningDevices(true)
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let devices = previewRenderingIsActive ? [] : connectedMouseDevices()
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.availableMouseDevices = devices
+                    header.setScanningDevices(false)
+                    self.refreshMouseProfileEditor()
+                }
+            }
         }
         header.onRename = { [weak self] id in self?.renameMouseProfile(id) }
         header.onDuplicate = { [weak self] id in self?.duplicateMouseProfile(id) }
@@ -4121,8 +4375,9 @@ final class ToggleView: NSView {
         let field = NSTextField(string: profile.name)
         field.frame = NSRect(x: 0, y: 0, width: 320, height: 26)
         let alert = NSAlert()
-        alert.messageText = "Rename Mouse Profile"
-        alert.informativeText = "Choose a short name that identifies this mouse or workflow."
+        alert.messageText = "Rename Mapping"
+        alert.informativeText =
+            "Choose a short name for this mapping set. The physical mouse name will not change."
         alert.accessoryView = field
         alert.addButton(withTitle: "Rename")
         alert.addButton(withTitle: "Cancel")
@@ -4172,7 +4427,7 @@ final class ToggleView: NSView {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Delete \(profile.name)?"
-        alert.informativeText = "Only this Mouse Profile's mappings and assignments are removed."
+        alert.informativeText = "Only this mapping set and its assignments are removed."
         alert.addButton(withTitle: "Delete")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn,
@@ -4193,7 +4448,7 @@ final class ToggleView: NSView {
             alert.alertStyle = .warning
             alert.messageText = "Move this mouse from \(other.name)?"
             alert.informativeText =
-                "A physical mouse can identify only one Mouse Profile. Its mappings are not deleted."
+                "A physical mouse can be assigned to only one mapping set. Its mappings are not deleted."
             alert.addButton(withTitle: "Move Mouse")
             alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else {
@@ -4216,7 +4471,7 @@ final class ToggleView: NSView {
               mouseProfileIsValid(selected, in: config),
               let activated = activatingMouseProfile(id: id, in: config) else {
             showAppProfileAlert(
-                title: "Mouse Profile was not activated",
+                title: "Mouse mapping was not activated",
                 message: "Resolve its duplicate or reserved assignments first."
             )
             return
@@ -7746,8 +8001,8 @@ final class ToggleView: NSView {
         let profileID = mouseProfileID ?? persistedConfig.activeMouseProfileID
         guard var assignmentProfile = mouseProfile(id: profileID, in: persistedConfig) else {
             showAppProfileAlert(
-                title: "Mouse Profile is unavailable",
-                message: "Reload the Mouse Profile and try again."
+                title: "Mouse mapping is unavailable",
+                message: "Reload the mouse mapping and try again."
             )
             return
         }
@@ -8954,7 +9209,7 @@ final class ToggleView: NSView {
         guard !saveInProgress else { return }
         if !mouseProfilesAreValid(config) {
             saveStatusMessage =
-                "A Mouse Profile has an invalid or duplicate device/button assignment."
+                "A mouse mapping has an invalid or duplicate device/button assignment."
             needsDisplay = true
             return
         }

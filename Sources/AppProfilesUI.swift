@@ -1938,6 +1938,7 @@ final class MappingAppProfilesView: NSView {
     func setOriginals(_ originals: [MappingNativeApp]) {
         self.originals = originals
         originalsLoaded = true
+        nativeCard.setRefreshing(false)
         rebuildRows()
     }
 
