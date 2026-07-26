@@ -351,7 +351,10 @@ struct AppProfileManager {
 
         var updated = config
         updated.instances.removeAll { $0.id == legacy.id }
-        updated.suppressedLegacyInstanceIDs.insert(target.legacyInstanceID)
+        // Only v1.x targets carry a legacy row worth suppressing.
+        if let legacyID = target.legacyInstanceID {
+            updated.suppressedLegacyInstanceIDs.insert(legacyID)
+        }
         updated.instances.append(managed)
         guard appProfileAssignmentsAreValid(updated) else {
             generator.rollbackNewMaterialization(for: managed)

@@ -143,11 +143,14 @@ enum QuickLaunchMouseButton: String, Codable, CaseIterable, Equatable {
 enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
     case chatGPT
     case claude
+    // Appended, so the existing raw values stay stable for already-persisted configs.
+    case gemini
 
     var title: String {
         switch self {
         case .chatGPT: return "ChatGPT / Codex"
         case .claude: return "Claude"
+        case .gemini: return "Gemini"
         }
     }
 
@@ -155,6 +158,7 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
         switch self {
         case .chatGPT: return .chatGPTHotkey
         case .claude: return .claudeHotkey
+        case .gemini: return .geminiHotkey
         }
     }
 
@@ -162,6 +166,7 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
         switch self {
         case .chatGPT: return "com.openai.codex"
         case .claude: return "com.anthropic.claudefordesktop"
+        case .gemini: return "com.google.GeminiMacOS"
         }
     }
 
@@ -169,6 +174,7 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
         switch self {
         case .chatGPT: return "/Applications/ChatGPT.app"
         case .claude: return "/Applications/Claude.app"
+        case .gemini: return "/Applications/Gemini.app"
         }
     }
 
@@ -182,6 +188,10 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
             return NSString(
                 string: "~/Library/Application Support/Claude Launchers/Claude.app"
             ).expandingTildeInPath
+        case .gemini:
+            return NSString(
+                string: "~/Library/Application Support/Gemini Launchers/Gemini.app"
+            ).expandingTildeInPath
         }
     }
 
@@ -190,6 +200,7 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
         switch self {
         case .chatGPT: fileName = "ChatGPT.app"
         case .claude: fileName = "Claude.app"
+        case .gemini: fileName = "Gemini.app"
         }
         return NSString(
             string: "~/Applications/Klik PRO Originals/\(fileName)"
@@ -200,15 +211,19 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
         switch self {
         case .chatGPT: return "local.klik-pro.original.chatgpt"
         case .claude: return "local.klik-pro.original.claude"
+        case .gemini: return "local.klik-pro.original.gemini"
         }
     }
 
     /// Stable migration identity. These UUIDs identify the two v1.x legacy wrapper
     /// rows and never depend on a user-editable label or filesystem spelling.
-    var legacyInstanceID: UUID {
+    /// Gemini never shipped a v1.x wrapper row, so it has no legacy identity to
+    /// migrate or suppress — nil rather than a synthetic UUID that would claim one.
+    var legacyInstanceID: UUID? {
         switch self {
         case .chatGPT: return UUID(uuidString: "9E4FB42E-0D73-4D66-B94E-92E13934C53D")!
         case .claude: return UUID(uuidString: "6D7052E2-747A-448F-85D0-75E36DA46040")!
+        case .gemini: return nil
         }
     }
 }
@@ -528,10 +543,12 @@ struct KlikProConfig: Codable, Equatable {
     // mapping remains stored independently underneath.
     var chatGPTHotkey: ShortcutMapping
     var claudeHotkey: ShortcutMapping
+    var geminiHotkey: ShortcutMapping
     // Optional reversible overlays. The four ordinary button mappings remain stored
     // untouched underneath, so None/OFF/unavailable restores the user's prior action.
     var chatGPTMouseButton: QuickLaunchMouseButton?
     var claudeMouseButton: QuickLaunchMouseButton?
+    var geminiMouseButton: QuickLaunchMouseButton?
     var forwardButton: ShortcutMapping
     var backButton: ShortcutMapping
     var thumbWheel: ThumbWheelConfig
@@ -571,6 +588,7 @@ struct KlikProConfig: Codable, Equatable {
         case specialFeatureEnabled, caffeinateMenuEnabled
         case middleButton, gestureButton
         case chatGPTHotkey, claudeHotkey, chatGPTMouseButton, claudeMouseButton
+        case geminiHotkey, geminiMouseButton
         case forwardButton, backButton, thumbWheel, instances
         case suppressedLegacyInstanceIDs, dataRoot, knownDataRoots, menuBarPinnedOriginals
         case originalDockCustomNames
@@ -603,6 +621,18 @@ struct KlikProConfig: Codable, Equatable {
         gestureButton = try container.decode(ShortcutMapping.self, forKey: .gestureButton)
         chatGPTHotkey = try container.decode(ShortcutMapping.self, forKey: .chatGPTHotkey)
         claudeHotkey = try container.decode(ShortcutMapping.self, forKey: .claudeHotkey)
+        // Schema 13 adds Gemini. Older configs have neither key, and a disabled
+        // hotkey with no mouse button is the correct inherited state for them.
+        geminiHotkey = try container.decodeIfPresent(
+            ShortcutMapping.self, forKey: .geminiHotkey
+        ) ?? ShortcutMapping(
+            enabled: false,
+            combo: KeyCombo(keyCode: UInt16(kVK_ANSI_G), keyDisplay: "G",
+                            command: true, option: true, control: true, shift: false)
+        )
+        geminiMouseButton = try container.decodeIfPresent(
+            QuickLaunchMouseButton.self, forKey: .geminiMouseButton
+        )
         let decodedChatGPTButton = try container.decodeIfPresent(
             QuickLaunchMouseButton.self, forKey: .chatGPTMouseButton
         )
@@ -674,8 +704,10 @@ struct KlikProConfig: Codable, Equatable {
         gestureButton: ShortcutMapping,
         chatGPTHotkey: ShortcutMapping,
         claudeHotkey: ShortcutMapping,
+        geminiHotkey: ShortcutMapping,
         chatGPTMouseButton: QuickLaunchMouseButton?,
         claudeMouseButton: QuickLaunchMouseButton?,
+        geminiMouseButton: QuickLaunchMouseButton?,
         forwardButton: ShortcutMapping,
         backButton: ShortcutMapping,
         thumbWheel: ThumbWheelConfig,
@@ -696,8 +728,10 @@ struct KlikProConfig: Codable, Equatable {
         self.gestureButton = gestureButton
         self.chatGPTHotkey = chatGPTHotkey
         self.claudeHotkey = claudeHotkey
+        self.geminiHotkey = geminiHotkey
         self.chatGPTMouseButton = chatGPTMouseButton
         self.claudeMouseButton = claudeMouseButton
+        self.geminiMouseButton = geminiMouseButton
         self.forwardButton = forwardButton
         self.backButton = backButton
         self.thumbWheel = thumbWheel
@@ -724,7 +758,7 @@ let defaultBrowserForwardCombo = KeyCombo(
 extension KlikProConfig {
     static let `default`: KlikProConfig = {
         var config = KlikProConfig(
-            schemaVersion: 12,
+            schemaVersion: 13,
             onboardingCompleted: false,
             // Fresh installs begin with every Settings toggle OFF. First-run onboarding
             // asks the user to turn each on (or skip). Existing configs keep their stored
@@ -752,8 +786,14 @@ extension KlikProConfig {
             combo: KeyCombo(keyCode: UInt16(kVK_ANSI_C), keyDisplay: "C",
                             command: true, option: true, control: true, shift: false)
         ),
+            geminiHotkey: ShortcutMapping(
+            enabled: false,
+            combo: KeyCombo(keyCode: UInt16(kVK_ANSI_G), keyDisplay: "G",
+                            command: true, option: true, control: true, shift: false)
+        ),
             chatGPTMouseButton: .forward,
             claudeMouseButton: .back,
+            geminiMouseButton: nil,
             forwardButton: ShortcutMapping(
             enabled: true,
             combo: defaultBrowserForwardCombo
@@ -1431,7 +1471,7 @@ enum ShortcutConflictStatus: String {
 
 enum ShortcutSlot: CaseIterable, Equatable {
     case middleButton, gestureButton, forwardButton, backButton
-    case chatGPTHotkey, claudeHotkey
+    case chatGPTHotkey, claudeHotkey, geminiHotkey
 }
 
 /// Maps macOS's zero-based CGEvent mouse-button numbers to the semantic shortcut
@@ -1598,7 +1638,7 @@ func isReservedKeyboardCommandTab(_ combo: KeyCombo) -> Bool {
 }
 
 func configuredGlobalHotKeyUsingReservedCommandTab(in config: KlikProConfig) -> ShortcutSlot? {
-    let globalSlots: [ShortcutSlot] = [.chatGPTHotkey, .claudeHotkey]
+    let globalSlots: [ShortcutSlot] = [.chatGPTHotkey, .claudeHotkey, .geminiHotkey]
     return globalSlots.first { slot in
         let shortcut = mapping(for: slot, in: config)
         return shortcut.enabled && isReservedKeyboardCommandTab(shortcut.combo)
@@ -1830,6 +1870,7 @@ func quickLaunchMouseButton(
     switch target {
     case .chatGPT: return config.chatGPTMouseButton
     case .claude: return config.claudeMouseButton
+    case .gemini: return config.geminiMouseButton
     }
 }
 
@@ -1849,6 +1890,7 @@ func launchAssignmentOwner(
     var owners: [LaunchAssignmentTarget] = []
     if config.chatGPTMouseButton == button { owners.append(.original(.chatGPT)) }
     if config.claudeMouseButton == button { owners.append(.original(.claude)) }
+    if config.geminiMouseButton == button { owners.append(.original(.gemini)) }
     owners.append(contentsOf: config.instances.compactMap { instance in
         guard instance.state == .active,
               instance.legacyQuickLaunchTarget == nil,
@@ -1893,9 +1935,13 @@ func assigningMouseButton(
     if updated.claudeMouseButton == button || target == .original(.claude) {
         updated.claudeMouseButton = nil
     }
+    if updated.geminiMouseButton == button || target == .original(.gemini) {
+        updated.geminiMouseButton = nil
+    }
     switch target {
     case .original(.chatGPT): updated.chatGPTMouseButton = button
     case .original(.claude): updated.claudeMouseButton = button
+    case .original(.gemini): updated.geminiMouseButton = button
     case .profile(let id):
         if let index = updated.instances.firstIndex(where: {
             $0.id == id && $0.state == .active && $0.legacyQuickLaunchTarget == nil
@@ -1914,6 +1960,7 @@ func clearingMouseButton(
     switch target {
     case .original(.chatGPT): updated.chatGPTMouseButton = nil
     case .original(.claude): updated.claudeMouseButton = nil
+    case .original(.gemini): updated.geminiMouseButton = nil
     case .profile(let id):
         if let index = updated.instances.firstIndex(where: { $0.id == id }) {
             updated.instances[index].mouseButton = nil
@@ -1932,6 +1979,7 @@ func quickLaunchMouseAssignmentsAreValid(_ config: KlikProConfig) -> Bool {
 
 private func legacyQuickLaunchInstance(
     for target: QuickLaunchTarget,
+    legacyID: UUID,
     in config: KlikProConfig,
     preserving existing: AppProfileInstance?
 ) -> AppProfileInstance {
@@ -1942,7 +1990,7 @@ private func legacyQuickLaunchInstance(
         : (preservedLabel ?? defaultLabel)
 
     return AppProfileInstance(
-        id: existing?.id ?? target.legacyInstanceID,
+        id: existing?.id ?? legacyID,
         label: displayLabel,
         launcherKind: .legacyExternal,
         launcherPath: target.launcherWrapperPath,
@@ -2073,14 +2121,16 @@ func synchronizedLegacyQuickLaunchInstances(in config: KlikProConfig) -> [AppPro
             && !legacyBundleIdentifiers.contains(instance.source.bundleIdentifier)
     }
     let legacy = QuickLaunchTarget.allCases.compactMap { target -> AppProfileInstance? in
-        guard !config.suppressedLegacyInstanceIDs.contains(target.legacyInstanceID) else {
+        // Targets introduced after v1.x have no legacy wrapper row to migrate.
+        guard let legacyID = target.legacyInstanceID else { return nil }
+        guard !config.suppressedLegacyInstanceIDs.contains(legacyID) else {
             return nil
         }
         let existing = config.instances.first { instance in
-            instance.id == target.legacyInstanceID
+            instance.id == legacyID
                 || instance.legacyQuickLaunchTarget == target
         }
-        return legacyQuickLaunchInstance(for: target, in: config, preserving: existing)
+        return legacyQuickLaunchInstance(for: target, legacyID: legacyID, in: config, preserving: existing)
     }
     return legacy + nonLegacy
 }
@@ -2224,6 +2274,9 @@ func activeQuickLaunchTarget(
     switch target {
     case .chatGPT: return chatGPTAvailable ? target : nil
     case .claude: return claudeAvailable ? target : nil
+    case .gemini:
+        return FileManager.default.fileExists(atPath: target.standardApplicationPath)
+            ? target : nil
     }
 }
 
@@ -2235,6 +2288,7 @@ func baseMapping(for slot: ShortcutSlot, in config: KlikProConfig) -> ShortcutMa
     case .backButton: return config.backButton
     case .chatGPTHotkey: return config.chatGPTHotkey
     case .claudeHotkey: return config.claudeHotkey
+    case .geminiHotkey: return config.geminiHotkey
     }
 }
 
@@ -2440,7 +2494,7 @@ func evaluateShortcutConflicts(
             continue
         }
 
-        if (slot == .chatGPTHotkey || slot == .claudeHotkey),
+        if (slot == .chatGPTHotkey || slot == .claudeHotkey || slot == .geminiHotkey),
            isReservedKeyboardCommandTab(mine.combo) {
             result[slot] = .unavailable
             continue

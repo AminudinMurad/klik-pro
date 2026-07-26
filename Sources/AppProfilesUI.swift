@@ -249,15 +249,16 @@ final class AppProfileGearButton: NSButton {
 }
 
 private final class DualAppGeneratorCard: NSView {
+    /// Two rows: name + badge, then the action buttons. The icon spans both.
+    /// The lists pin each card to this, so keep them in sync.
+    static let cardHeight: CGFloat = 86
     private let iconView = NSImageView()
     private let nameField = NSTextField(labelWithString: "")
-    private let statusField = NSTextField(labelWithString: "")
+    private let badgeField = NSTextField(labelWithString: "")
     private let openButton = AppProfileButton(title: "Open", frame: .zero)
     private let generateButton = AppProfileButton(title: "+ New Profile", frame: .zero)
     private let assignButton = AppProfileButton(title: "Assign Button", frame: .zero)
     private let dockGearButton = AppProfileGearButton(frame: .zero)
-    private let menuBarLabel = NSTextField(labelWithString: "Menu Bar Icon")
-    private let menuBarToggle = ToggleSwitchView(isOn: false, frame: .zero)
     private(set) var candidate: AppProfileCandidate?
     private var dockPinned = false
     private var menuBarPinned = false
@@ -285,43 +286,37 @@ private final class DualAppGeneratorCard: NSView {
     init(bundleIdentifier: String, fallbackName: String, width: CGFloat) {
         self.bundleIdentifier = bundleIdentifier
         self.fallbackName = fallbackName
-        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 112))
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: Self.cardHeight))
         wantsLayer = true
         layer?.cornerRadius = innerCardCornerRadius
         layer?.backgroundColor = innerCardFillColor.cgColor
         layer?.borderColor = NSColor.separatorColor.cgColor
         layer?.borderWidth = 1
 
-        iconView.frame = NSRect(x: 14, y: 14, width: 48, height: 48)
+        // The icon spans both rows and is vertically centred, so the name row and
+        // the action row read as one block beside it.
+        let iconSize: CGFloat = 56
+        iconView.frame = NSRect(
+            x: 14, y: (Self.cardHeight - iconSize) / 2, width: iconSize, height: iconSize
+        )
         iconView.imageScaling = .scaleProportionallyUpOrDown
         let dockGearSize: CGFloat = 26
         // A gear at the card's top-right manages the original app's Klik PRO Dock
-        // icon (create / delete). It never touches the native vendor Dock tile.
+        // icon (create / delete) and now also carries the menu-bar toggle. It never
+        // touches the native vendor Dock tile.
         dockGearButton.frame = NSRect(
-            x: width - 14 - dockGearSize, y: 13, width: dockGearSize, height: dockGearSize
+            x: width - 14 - dockGearSize, y: 12, width: dockGearSize, height: dockGearSize
         )
-        dockGearButton.toolTip = "Create or delete Klik PRO's Dock icon for this app"
-        // A "Menu Bar Icon" toggle mirrors the App Profiles list: it sits on the top
-        // row immediately left of the gear. When on, the background helper shows a
-        // menu-bar icon that opens the original app.
-        let menuToggleW: CGFloat = 40
-        let menuCaptionW: CGFloat = 82
-        let menuGap: CGFloat = 8
-        let menuToggleX = dockGearButton.frame.minX - menuGap - menuToggleW
-        menuBarToggle.frame = NSRect(x: menuToggleX, y: 15, width: menuToggleW, height: 22)
-        menuBarToggle.setAccessibilityLabel("Show in menu bar")
-        let menuLabelX = menuToggleX - 6 - menuCaptionW
-        menuBarLabel.frame = NSRect(x: menuLabelX, y: 18, width: menuCaptionW, height: 16)
-        menuBarLabel.font = .systemFont(ofSize: 11, weight: .medium)
-        menuBarLabel.textColor = .appTextSecondary
-        menuBarLabel.alignment = .right
-        // The name owns the rest of the top row, ending before the menu-bar label.
-        nameField.frame = NSRect(
-            x: 76, y: 14, width: max(60, menuLabelX - 76 - menuGap), height: 24
-        )
+        dockGearButton.toolTip = "Manage this app's Klik PRO Dock icon and menu-bar icon"
+        // Row 1: name, then the compatibility badge, ending before the gear.
+        let nameX: CGFloat = 14 + iconSize + 12
+        nameField.frame = NSRect(x: nameX, y: 14, width: 140, height: 22)
         nameField.font = .systemFont(ofSize: 15, weight: .semibold)
-        statusField.frame = NSRect(x: 76, y: 40, width: width - 90, height: 20)
-        statusField.font = .systemFont(ofSize: 11, weight: .medium)
+        badgeField.font = .systemFont(ofSize: 10, weight: .semibold)
+        badgeField.alignment = .center
+        badgeField.wantsLayer = true
+        badgeField.layer?.cornerRadius = 4
+        badgeField.isHidden = true
         assignButton.font = .systemFont(ofSize: 11, weight: .semibold)
         // The three actions (Open, + New Profile, Assign) are laid out right-flushed
         // in relayoutActionButtons(); the assignment pill sizes to its own label
@@ -336,17 +331,9 @@ private final class DualAppGeneratorCard: NSView {
         }
         assignButton.onPress = { [weak self] in self?.onAssign?() }
         dockGearButton.onPress = { [weak self] in self?.presentDockMenu() }
-        menuBarToggle.onChange = { [weak self] _ in
-            guard let self else { return }
-            // The controller owns the real menu-bar state and pushes it back via
-            // setMenuBarPinned on a successful change; revert the optimistic flip so a
-            // blocked change (e.g. unsaved edits) never leaves the toggle out of sync.
-            self.menuBarToggle.isOn = self.menuBarPinned
-            self.onToggleMenuBar?()
-        }
         [
-            iconView, nameField, statusField, openButton, generateButton,
-            assignButton, dockGearButton, menuBarLabel, menuBarToggle,
+            iconView, nameField, badgeField, openButton, generateButton,
+            assignButton, dockGearButton,
         ]
             .forEach(addSubview)
         showLoading()
@@ -359,8 +346,7 @@ private final class DualAppGeneratorCard: NSView {
         nameField.stringValue = fallbackName
         iconView.image = NSImage(systemSymbolName: "hourglass", accessibilityDescription: "Loading")
             ?? NSImage(systemSymbolName: "app.dashed", accessibilityDescription: nil)
-        statusField.stringValue = "Loading apps…"
-        statusField.textColor = .appTextSecondary
+        badgeField.isHidden = true
         generateButton.isEnabled = false
         openButton.isEnabled = false
         assignButton.isEnabled = false
@@ -381,8 +367,44 @@ private final class DualAppGeneratorCard: NSView {
     /// the controller (persisted config state), so the toggle always mirrors reality.
     func setMenuBarPinned(_ pinned: Bool) {
         menuBarPinned = pinned
-        menuBarToggle.isOn = pinned
-        menuBarToggle.setAccessibilityLabel(pinned ? "Hide from menu bar" : "Show in menu bar")
+    }
+
+    /// The compatibility badge shown beside the app name. `verified` picks the
+    /// green treatment; anything else reads as amber. Passing nil hides it, which
+    /// is what a card with no candidate does.
+    func setCompatibility(verified: Bool?) {
+        guard let verified else {
+            badgeField.isHidden = true
+            layoutNameRow()
+            return
+        }
+        badgeField.isHidden = false
+        badgeField.stringValue = verified ? "Verified" : "Unverified"
+        badgeField.textColor = verified
+            ? NSColor.systemGreen.blended(withFraction: 0.35, of: .black) ?? .systemGreen
+            : NSColor.systemOrange.blended(withFraction: 0.4, of: .black) ?? .systemOrange
+        badgeField.layer?.backgroundColor = (verified ? NSColor.systemGreen : NSColor.systemOrange)
+            .withAlphaComponent(0.16).cgColor
+        layoutNameRow()
+    }
+
+    /// Sizes the name to its text so the badge can sit immediately after it, with
+    /// both kept clear of the gear.
+    private func layoutNameRow() {
+        let nameX: CGFloat = 14 + 56 + 12
+        let font = nameField.font ?? .systemFont(ofSize: 15, weight: .semibold)
+        let textW = ceil((nameField.stringValue as NSString)
+            .size(withAttributes: [.font: font]).width) + 2
+        let badgeGap: CGFloat = 8
+        let badgeW: CGFloat = badgeField.isHidden ? 0 : 66
+        let available = dockGearButton.frame.minX - 10 - nameX
+        let nameW = max(40, min(textW, available - (badgeW > 0 ? badgeW + badgeGap : 0)))
+        nameField.frame = NSRect(x: nameX, y: 14, width: nameW, height: 22)
+        if !badgeField.isHidden {
+            badgeField.frame = NSRect(
+                x: nameX + nameW + badgeGap, y: 17, width: badgeW, height: 16
+            )
+        }
     }
 
     private func updateDockGear() {
@@ -391,7 +413,6 @@ private final class DualAppGeneratorCard: NSView {
         // until the card has a candidate.
         dockGearButton.isEnabled = candidate != nil
         dockGearButton.setAccessibilityLabel("Manage the Dock icon")
-        menuBarToggle.isEnabled = candidate != nil
     }
 
     /// Gear menu: create (or replace) the original app's Klik PRO Dock icon, delete it,
@@ -476,8 +497,39 @@ private final class DualAppGeneratorCard: NSView {
             ? "Removes the app's own Dock tile; the app stays in Launchpad."
             : "Create Klik PRO's Dock icon first, then this can remove the native tile."
         menu.addItem(removeNative)
+        // The menu-bar control is last, after a divider. It is a real switch rather
+        // than a checkmark item, so an NSMenuItem custom view hosts the same
+        // ToggleSwitchView the cards used to show inline.
+        menu.addItem(.separator())
+        menu.addItem(makeMenuBarToggleItem())
         let origin = NSPoint(x: dockGearButton.frame.minX, y: dockGearButton.frame.maxY + 4)
         menu.popUp(positioning: nil, at: origin, in: self)
+    }
+
+    /// A menu row carrying a live toggle switch. The controller owns the real state
+    /// and pushes it back via setMenuBarPinned, so the switch is reverted to the
+    /// known value immediately and only the request is forwarded.
+    private func makeMenuBarToggleItem() -> NSMenuItem {
+        let item = NSMenuItem()
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 240, height: 30))
+        let label = NSTextField(labelWithString: "Menu Bar Icon")
+        label.font = .systemFont(ofSize: 13)
+        label.frame = NSRect(x: 14, y: 7, width: 140, height: 17)
+        let toggle = ToggleSwitchView(
+            isOn: menuBarPinned, frame: NSRect(x: 186, y: 4, width: 40, height: 22)
+        )
+        toggle.isEnabled = candidate != nil
+        toggle.setAccessibilityLabel(menuBarPinned ? "Hide from menu bar" : "Show in menu bar")
+        toggle.onChange = { [weak self] _ in
+            guard let self else { return }
+            toggle.isOn = self.menuBarPinned
+            self.onToggleMenuBar?()
+            self.dockGearButton.menu?.cancelTracking()
+        }
+        container.addSubview(label)
+        container.addSubview(toggle)
+        item.view = container
+        return item
     }
 
     @objc private func menuCreateDock() { onCreateDock?() }
@@ -491,16 +543,14 @@ private final class DualAppGeneratorCard: NSView {
     func update(candidate: AppProfileCandidate?, alternativesAvailable: Bool) {
         self.candidate = candidate
         nameField.stringValue = candidate?.app.displayName ?? fallbackName
+        layoutNameRow()
         if let candidate {
             iconView.image = NSWorkspace.shared.icon(forFile: candidate.app.bundleURL.path)
-            statusField.stringValue = "Installed"
-            statusField.textColor = .systemGreen
             generateButton.isEnabled = true
             openButton.isEnabled = true
         } else {
             iconView.image = NSImage(systemSymbolName: "app.dashed", accessibilityDescription: nil)
-            statusField.stringValue = "Not installed"
-            statusField.textColor = .appTextSecondary
+            badgeField.isHidden = true
             generateButton.isEnabled = false
             openButton.isEnabled = false
         }
@@ -553,7 +603,7 @@ private final class DualAppGeneratorCard: NSView {
     /// assignment like "Back Button" doesn't leave a stretched control. A right inset
     /// keeps the actions clear of a list scroll bar.
     private func relayoutActionButtons() {
-        let actionY: CGFloat = 70
+        let actionY: CGFloat = 46
         let actionH: CGFloat = 28
         let gap: CGFloat = 8
         let openW: CGFloat = 52
@@ -1260,7 +1310,7 @@ final class AppProfilesContentView: NSView {
         explanationField.font = .systemFont(ofSize: 12)
         explanationField.textColor = .appTextSecondary
         chatGPTCard.frame.origin = NSPoint(x: 18, y: 154)
-        claudeCard.frame.origin = NSPoint(x: 18, y: 154 + 112 + innerCardSpacing)
+        claudeCard.frame.origin = NSPoint(x: 18, y: 154 + DualAppGeneratorCard.cardHeight + innerCardSpacing)
         loadingView.frame = NSRect(x: 18, y: 154, width: generatorWidth, height: 224 + innerCardSpacing)
         loadingView.wantsLayer = true
         loadingView.layer?.cornerRadius = innerCardCornerRadius

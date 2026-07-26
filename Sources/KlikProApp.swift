@@ -7833,7 +7833,7 @@ final class ToggleView: NSView {
             refreshQuickLaunchAssignments()
             return
         }
-        let current = target == .chatGPT ? config.chatGPTMouseButton : config.claudeMouseButton
+        let current = quickLaunchMouseButton(for: target, in: config)
         guard button != current else {
             refreshQuickLaunchAssignments()
             return
@@ -7841,6 +7841,7 @@ final class ToggleView: NSView {
         switch target {
         case .chatGPT: config.chatGPTMouseButton = button
         case .claude: config.claudeMouseButton = button
+        case .gemini: config.geminiMouseButton = button
         }
         configurationDidChange()
         refreshButtonAssignmentViews()
