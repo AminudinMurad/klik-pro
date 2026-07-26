@@ -1,8 +1,45 @@
 # Mouse slide UI redesign — implementation handoff
 
-Status: pending implementation  
+Status: implementation completed; continuation QA handoff
 Owner decisions recorded: 2026-07-26  
 Branch: `release/v1.5.0`
+
+## Current continuation state (2026-07-27)
+
+The latest source commits are:
+
+```text
+be6ac3b fix: keep mouse mapping gear menu visible
+00b3126 fix: polish mouse mapping controls and spacing
+```
+
+Implemented in the current source:
+
+- Mouse slide card height increased to 344 points, with the mouse artwork and
+  controls vertically rebalanced.
+- Native-app and App Profile list content starts closer to its section title,
+  returning useful height to the slide/list area.
+- Refresh controls use a native `NSProgressIndicator` spinner instead of the
+  earlier rotating glyph animation.
+- The mouse gear menu uses deferred AppKit menu tracking and a retained menu,
+  so the button mouse-up event cannot immediately dismiss it.
+- The gear menu contains activation, assignment/rescan/unassignment, add,
+  rename, duplicate, reset and delete actions as specified below.
+
+Live QA already confirmed the DMG build displays the improved spacing and native
+spinner treatment. The next agent must re-build or launch the latest source and
+verify that clicking **Manage <mapping> mapping** visibly leaves the menu open;
+the earlier synchronous implementation did not. Use an isolated temporary
+configuration and do not install or publish the app.
+
+The latest full check before the deferred-menu change passed. A subsequent
+`./tools/check.sh` reached the preview stage but failed because macOS reported
+`kLSNoExecutableErr` while opening a generated preview bundle; treat that as an
+environment/preview-launch failure and rerun after closing stale preview/app
+instances. Do not claim the full suite is green until a clean exit 0 is obtained.
+
+The DMG background/arrow remains unresolved in the mounted Finder view. Do not
+claim that the DMG arrow is fixed without fresh visual verification.
 
 Read this document before changing the Mappings mouse slide. Also read:
 
@@ -371,4 +408,3 @@ Finally report:
 - Automatically disabling Gesture/thumb wheel based on mouse model.
 - Renaming physical hardware when a mapping is renamed.
 - Changing App Profile behavior unrelated to the mouse-slide layout.
-
