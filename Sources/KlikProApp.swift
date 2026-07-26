@@ -699,6 +699,24 @@ private enum ShortcutRowLayout {
     }
 }
 
+/// A row showing "No shortcut" hides both its Reset control and its conflict badge.
+/// Reset, because there is no default to return to — and on rows whose default IS unset,
+/// Reset doubles as "clear", which is how a recorded shortcut gets back to blank at all.
+/// The badge, because an unset combo cannot conflict, so `✓ OK` beside it would assert a
+/// validated state for a shortcut that does not exist.
+///
+/// Applied AFTER the caller's own show/hide pass, so Open-App mode (which hides all three)
+/// still wins.
+func applyUnsetShortcutPresentation(
+    recorder: ShortcutRecorderView,
+    resetButton: ShortcutResetButton,
+    badge: ConflictBadgeView
+) {
+    guard !recorder.isHidden, !recorder.combo.isSet else { return }
+    resetButton.isHidden = true
+    badge.isHidden = true
+}
+
 final class RecordableShortcutRowView: NSView {
     let titleLabel: String
     let toggle: ToggleSwitchView
@@ -857,6 +875,9 @@ final class RecordableShortcutRowView: NSView {
             badge.isHidden = false
             appPicker.isHidden = true
         }
+        applyUnsetShortcutPresentation(
+            recorder: recorder, resetButton: resetButton, badge: badge
+        )
         toggle.isHidden = false
         updatingActionControls = false
         needsDisplay = true
@@ -897,6 +918,9 @@ final class RecordableShortcutRowView: NSView {
         recorder.isHidden = false
         resetButton.isHidden = false
         badge.isHidden = false
+        applyUnsetShortcutPresentation(
+            recorder: recorder, resetButton: resetButton, badge: badge
+        )
         setAccessibilityElement(false)
         if let target = target {
             let state = targetReadiness == .ready
@@ -993,13 +1017,29 @@ final class RecorderOnlyRowView: NSView {
         super.init(frame: frame)
         addSubview(recorder); addSubview(resetButton); addSubview(badge)
         recorder.setAccessibilityLabel("\(title) shortcut")
-        recorder.onChange = { [weak self] combo in self?.onComboChange?(combo) }
+        recorder.onChange = { [weak self] combo in
+            guard let self else { return }
+            self.onComboChange?(combo)
+            // Recording a shortcut on a previously blank row brings Reset and the badge
+            // back; clearing one takes them away again.
+            applyUnsetShortcutPresentation(
+                recorder: self.recorder, resetButton: self.resetButton, badge: self.badge
+            )
+        }
         resetButton.onPress = { [weak self] in
             guard let self = self,
                   self.recorder.combo.signature != self.defaultCombo.signature else { return }
             self.recorder.setCombo(self.defaultCombo)
             self.onComboChange?(self.defaultCombo)
+            // These hotkeys default to unset, so Reset here means clear — which changes
+            // what the row should show.
+            applyUnsetShortcutPresentation(
+                recorder: self.recorder, resetButton: self.resetButton, badge: self.badge
+            )
         }
+        applyUnsetShortcutPresentation(
+            recorder: recorder, resetButton: resetButton, badge: badge
+        )
     }
     required init?(coder: NSCoder) { nil }
     override var isFlipped: Bool { true }

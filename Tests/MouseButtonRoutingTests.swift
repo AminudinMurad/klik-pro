@@ -311,6 +311,7 @@ private struct MouseButtonRoutingTests {
         var legacyConfig = KlikProConfig.default
         legacyConfig.schemaVersion = 4
         legacyConfig.middleButton.enabled = false
+        legacyConfig.middleButton.enabled = true
         legacyConfig.middleButton.combo = KeyCombo(
             keyCode: UInt16(kVK_ANSI_M), keyDisplay: "M",
             command: true, option: true, control: false, shift: false
@@ -502,6 +503,7 @@ private struct MouseButtonRoutingTests {
             claudeAvailable: true
         ) == originalMiddle,
         "a missing ChatGPT launcher must not steal its assigned mouse button")
+        quickLaunchConfig.chatGPTHotkey.enabled = true
         quickLaunchConfig.chatGPTHotkey.combo = KeyCombo(
             keyCode: UInt16(kVK_ANSI_L), keyDisplay: "L",
             command: true, option: true, control: true, shift: false
@@ -585,6 +587,7 @@ private struct MouseButtonRoutingTests {
         // Open-App mode, so its dormant stored shortcut must NOT raise a false
         // Duplicate against an identical real shortcut on another button.
         var dormantAppProfileConflict = instanceNativeConfig
+        dormantAppProfileConflict.middleButton.enabled = true
         dormantAppProfileConflict.middleButton.combo =
             dormantAppProfileConflict.gestureButton.combo
         let dormantAppProfileStatuses = evaluateShortcutConflicts(
@@ -597,8 +600,12 @@ private struct MouseButtonRoutingTests {
                && dormantAppProfileStatuses[.gestureButton] == .ok,
                "an Open-App (managed-instance) button's dormant shortcut must not be a Duplicate")
         var duplicateHotkeyConfig = instanceNativeConfig
+        // `chatGPTHotkey` now ships unset and disabled (owner call 2026-07-26), and an unset
+        // combo is deliberately not treated as a registration — so inheriting it would no
+        // longer collide with anything and this assertion would pass vacuously. Collide with
+        // Forward instead, which is one of the two rows a fresh install still maps.
         duplicateHotkeyConfig.instances[duplicateHotkeyConfig.instances.count - 1].hotkey
-            = duplicateHotkeyConfig.chatGPTHotkey
+            = ShortcutMapping(enabled: true, combo: duplicateHotkeyConfig.forwardButton.combo)
         expect(!appProfileAssignmentsAreValid(duplicateHotkeyConfig),
                "duplicate enabled instance hotkeys must fail closed")
         var archivedConfig = instanceNativeConfig
@@ -856,6 +863,17 @@ private struct MouseButtonRoutingTests {
         expect(missingLauncherStatuses[.middleButton] == .duplicate,
                "a missing launcher must expose the restored base mapping's conflicts")
 
+        // `chatGPTHotkey` now ships unset AND disabled (owner call 2026-07-26), and conflict
+        // evaluation short-circuits a disabled row to .ok before the extension check runs —
+        // so inheriting the default would make this assert nothing. State the precondition:
+        // the rule under test is warning inheritance, not what a fresh install enables.
+        linkedConflictCandidate.chatGPTHotkey = ShortcutMapping(
+            enabled: true,
+            combo: KeyCombo(
+                keyCode: 40, keyDisplay: "K",
+                command: true, option: true, control: true, shift: false
+            )
+        )
         let chatGPTSignature = linkedConflictCandidate.chatGPTHotkey.combo.signature
         linkedStatuses = evaluateShortcutConflicts(
             candidate: linkedConflictCandidate,
@@ -1022,6 +1040,9 @@ private struct MouseButtonRoutingTests {
 
         var linkedSentinelCandidate = KlikProConfig.default
         linkedSentinelCandidate.chatGPTHotkey.combo = sentinelCandidate.gestureButton.combo
+        // These hotkeys now ship disabled, and a disabled row short-circuits to .ok before
+        // the reserved-F20 check, so the fixture enables what it is testing.
+        linkedSentinelCandidate.chatGPTHotkey.enabled = true
         linkedSentinelCandidate.chatGPTMouseButton = .forward
         let linkedSentinelStatuses = evaluateShortcutConflicts(
             candidate: linkedSentinelCandidate,
@@ -1040,6 +1061,7 @@ private struct MouseButtonRoutingTests {
                "exact keyboard Command-Tab must be recognized as reserved for app switching")
 
         var commandTabCandidate = KlikProConfig.default
+        commandTabCandidate.chatGPTHotkey.enabled = true
         commandTabCandidate.chatGPTHotkey.combo = commandTab
         expect(configuredGlobalHotKeyUsingReservedCommandTab(in: commandTabCandidate) == .chatGPTHotkey,
                "a global ChatGPT Command-Tab hotkey must be rejected")
@@ -1061,6 +1083,7 @@ private struct MouseButtonRoutingTests {
                "a linked mouse row must inherit Command-Tab protection from its launcher")
 
         commandTabCandidate = KlikProConfig.default
+        commandTabCandidate.middleButton.enabled = true
         commandTabCandidate.middleButton.combo = commandTab
         expect(configuredGlobalHotKeyUsingReservedCommandTab(in: commandTabCandidate) == nil,
                "a mouse-button output may deliberately invoke normal app switching")

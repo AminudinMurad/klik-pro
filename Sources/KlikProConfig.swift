@@ -27,6 +27,25 @@ struct KeyCombo: Codable, Equatable {
         Signature(keyCode: keyCode, command: command, option: option, control: control, shift: shift)
     }
 
+    /// "No shortcut recorded." Real virtual key codes are small (kVK_* are all < 0x80),
+    /// so 0xFFFF cannot collide with a key a user could press.
+    ///
+    /// Deliberately a sentinel rather than making `ShortcutMapping.combo` optional: an
+    /// optional would touch ~90 call sites, and — because `ShortcutMapping` uses
+    /// synthesized `Codable` with a non-optional `combo` — a config written with a null
+    /// combo would fail to decode wholesale on an older build. This shape keeps older
+    /// builds decoding (they just show an inert combo on a row that is off anyway).
+    ///
+    /// Anything that compares or registers a combo MUST check `isSet` first: two unset
+    /// combos share one `signature`, so an unguarded duplicate check would report every
+    /// blank row as conflicting with every other.
+    static let unset = KeyCombo(
+        keyCode: 0xFFFF, keyDisplay: "",
+        command: false, option: false, control: false, shift: false
+    )
+
+    var isSet: Bool { keyCode != KeyCombo.unset.keyCode }
+
     var carbonModifiers: UInt32 {
         var mask = 0
         if command { mask |= cmdKey }
@@ -88,6 +107,11 @@ struct KeyCombo: Codable, Equatable {
     /// Canonical macOS modifier order ⌃ ⌥ ⇧ ⌘, matching the existing drawShortcut()
     /// glyph convention already used in KlikProApp.swift (e.g. "⌃⌥⌘G").
     var displayString: String {
+        // An unset row reads as absence, matching the app's other empty states
+        // ("No browsers", "No image chosen") rather than showing a blank control that
+        // looks broken. Not a dash: a bare "—" inside a field that normally holds
+        // keystrokes reads as though it were the keystroke.
+        guard isSet else { return "No shortcut" }
         var symbols = ""
         if control { symbols += "⌃" }
         if option  { symbols += "⌥" }
@@ -856,31 +880,26 @@ extension KlikProConfig {
             showMenuBarIcon: false,
             showQuickLaunchMenuIcons: true,
             specialFeatureEnabled: false,
-            middleButton: ShortcutMapping(
-            enabled: false,
-            combo: KeyCombo(keyCode: UInt16(kVK_ANSI_7), keyDisplay: "7",
-                            command: true, option: false, control: false, shift: true)
-        ),
-            gestureButton: ShortcutMapping(
-            enabled: false,
-            combo: KeyCombo(keyCode: UInt16(kVK_ANSI_6), keyDisplay: "6",
-                            command: true, option: false, control: false, shift: true)
-        ),
-            chatGPTHotkey: ShortcutMapping(
-            enabled: true,
-            combo: KeyCombo(keyCode: UInt16(kVK_ANSI_G), keyDisplay: "G",
-                            command: true, option: true, control: true, shift: false)
-        ),
-            claudeHotkey: ShortcutMapping(
-            enabled: true,
-            combo: KeyCombo(keyCode: UInt16(kVK_ANSI_C), keyDisplay: "C",
-                            command: true, option: true, control: true, shift: false)
-        ),
-            geminiHotkey: ShortcutMapping(
-            enabled: false,
-            combo: KeyCombo(keyCode: UInt16(kVK_ANSI_G), keyDisplay: "G",
-                            command: true, option: true, control: true, shift: false)
-        ),
+            // Owner call 2026-07-26: a fresh install ships NO default shortcut on these.
+            // An unset row shows "No shortcut" and hides its Reset control — there is no
+            // default to return to. Existing configs keep their stored combos; this is a
+            // fresh-install default, not a migration.
+            //
+            // Only Forward and Back arrive mapped, and the reason is hardware: beyond the
+            // scroll wheel, the two side buttons are the pair that essentially every
+            // advanced mouse actually has, so they are the only controls Klik PRO can
+            // safely assume exist. Middle, Gesture and the thumb wheel vary by model, so
+            // pre-mapping them would claim shortcuts on hardware that cannot reach them.
+            middleButton: ShortcutMapping(enabled: false, combo: .unset),
+            gestureButton: ShortcutMapping(enabled: false, combo: .unset),
+            // No global keyboard shortcut is claimed on a fresh install (owner call
+            // 2026-07-26): "starts quiet" covers the keyboard too, so Klik PRO registers
+            // no system-wide combo until the user records one. Unset rather than merely
+            // disabled, so nothing suggests a shortcut the user never chose — and it also
+            // clears the old duplicate, where ChatGPT and Gemini both defaulted to ⌃⌥⌘G.
+            chatGPTHotkey: ShortcutMapping(enabled: false, combo: .unset),
+            claudeHotkey: ShortcutMapping(enabled: false, combo: .unset),
+            geminiHotkey: ShortcutMapping(enabled: false, combo: .unset),
             chatGPTMouseButton: nil,
             claudeMouseButton: nil,
             geminiMouseButton: nil,
@@ -2246,12 +2265,17 @@ func synchronizedLegacyQuickLaunchInstances(in config: KlikProConfig) -> [AppPro
 /// config persistence or helper registration.
 func appProfileAssignmentsAreValid(_ config: KlikProConfig) -> Bool {
     var mouseOwners = Set<QuickLaunchMouseButton>()
+    // `isSet` matters as much as `enabled` here: an unset combo is not a registration and
+    // owns nothing, and since every unset combo shares one signature, seeding them would
+    // make two blank rows collide and fail this validator closed — silently blocking
+    // `save()` for a config that is perfectly legal. A row can legitimately be enabled
+    // with no combo when it is in Open-App mode, where the combo is dormant anyway.
     var hotkeyOwners = Set([
         config.middleButton,
         config.gestureButton,
         config.forwardButton,
         config.backButton,
-    ].filter(\.enabled).map { $0.combo.signature })
+    ].filter { $0.enabled && $0.combo.isSet }.map { $0.combo.signature })
     var instanceIDs = Set<UUID>()
     for instance in config.instances {
         guard instanceIDs.insert(instance.id).inserted else { return false }
@@ -2638,7 +2662,15 @@ func evaluateShortcutConflicts(
             )
             return otherMapping.enabled && otherMapping.combo.signature == mine.combo.signature
         }
-        if isDuplicate { result[slot] = .duplicate; continue }
+        // `isSet` gates ONLY the duplicate verdict, and deliberately not the whole slot:
+        // every unset combo shares one signature, so an unguarded duplicate check would
+        // report each blank row as duplicating every other blank row. It must not become an
+        // early `continue` for the slot, though — a row linked to a launcher still has to
+        // inherit that launcher's reserved/extension warnings, which are about the
+        // launcher's combo rather than this row's. The reserved and extension checks below
+        // are safe to fall through for an unset combo: its signature matches nothing in
+        // either set.
+        if isDuplicate, mine.combo.isSet { result[slot] = .duplicate; continue }
 
         if isGestureSentinelOutput(mine.combo) {
             result[slot] = .unavailable

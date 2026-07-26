@@ -1560,7 +1560,11 @@ private struct KlikProInputMain {
             }
             if activeChatGPT != nil && isReservedKeyboardCommandTab(config.chatGPTHotkey.combo) {
                 logMessage("Refused ChatGPT / Codex global Command-Tab hotkey; keyboard app switching remains native")
-            } else if let activeChatGPT, activeChatGPT.hotkey.enabled {
+            // `isSet` is as load-bearing as `enabled`: RegisterEventHotKey would reject the
+            // unset sentinel key code, and the failure path below calls exit(1) — so an
+            // unset-but-enabled hotkey would take the whole helper down.
+            } else if let activeChatGPT, activeChatGPT.hotkey.enabled,
+                      activeChatGPT.hotkey.combo.isSet {
                 let chatGPTRegistrationStatus = RegisterEventHotKey(
                     UInt32(activeChatGPT.hotkey.combo.keyCode),
                     activeChatGPT.hotkey.combo.carbonModifiers,
@@ -1578,7 +1582,8 @@ private struct KlikProInputMain {
 
             if activeClaude != nil && isReservedKeyboardCommandTab(config.claudeHotkey.combo) {
                 logMessage("Refused Claude global Command-Tab hotkey; keyboard app switching remains native")
-            } else if let activeClaude, activeClaude.hotkey.enabled {
+            } else if let activeClaude, activeClaude.hotkey.enabled,
+                      activeClaude.hotkey.combo.isSet {
                 let claudeRegistrationStatus = RegisterEventHotKey(
                     UInt32(activeClaude.hotkey.combo.keyCode),
                     activeClaude.hotkey.combo.carbonModifiers,
@@ -1598,6 +1603,9 @@ private struct KlikProInputMain {
                 $0.state == .active
                     && $0.launcherKind == .managed
                     && $0.hotkey.enabled
+                    // Same reason as the two legacy registrations above: an unset combo
+                    // cannot be registered, and the failure path exits the helper.
+                    && $0.hotkey.combo.isSet
                     && activeAppProfileInstanceIDs.contains($0.id)
             }
             for (index, instance) in managedInstances.enumerated() {

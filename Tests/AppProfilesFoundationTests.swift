@@ -4087,7 +4087,18 @@ private struct AppProfilesFoundationTests {
         // duplicate badge should appear, not what a fresh install enables.
         config.middleButton.enabled = true
         config.gestureButton.enabled = true
-        // Reproduce the report: Middle carries the Gesture slot's default base combo.
+        // These rows now also ship with NO combo (owner call 2026-07-26), and conflict
+        // evaluation deliberately skips an unset combo — every unset combo shares one
+        // signature, so comparing them would make each blank row duplicate every other.
+        // The fixture therefore states its own combo instead of inheriting a default: the
+        // rule under test is when a duplicate badge appears, not what a fresh install ships.
+        // An arbitrary set combo, deliberately not ⌘[ / ⌘] so Forward and Back stay clean —
+        // this test asserts Forward reads .ok. Only "is set and distinct" matters here.
+        config.gestureButton.combo = KeyCombo(
+            keyCode: 40, keyDisplay: "K",
+            command: true, option: true, control: true, shift: false
+        )
+        // Reproduce the report: Middle carries the Gesture slot's base combo.
         config.middleButton.combo = config.gestureButton.combo
         expect(config.middleButton.combo.signature == config.gestureButton.combo.signature,
                "fixture must pit Middle against the Gesture slot's stale base combo")

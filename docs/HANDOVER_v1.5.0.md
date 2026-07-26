@@ -516,6 +516,186 @@ so a shorter card degrades rather than computing a negative origin.
   but the visual is unverified. Worth an eyeball on a machine with three-plus catalogue apps
   installed.
 
+## 4e. Mouse Profiles — SPEC ONLY, not built (owner decisions 2026-07-26)
+
+The Mappings tab's device card already carries a carousel scaffold: `drawDeviceCard`
+(`KlikProApp.swift`) draws disabled prev/next chevrons and one active page dot, with a comment
+pointing at `mouse-profile-carousel`. This is the spec for filling it in.
+
+**Owner decisions:**
+
+- **Up to 3 mouse profiles**, one per carousel slide. Same cap as the list-order pin, so
+  `clampedTopPins`-style clamping in `normalizedQuickLaunchConfig` is the precedent to copy.
+- **Every profile exposes every control** — Middle, Gesture, Forward, Back, thumb wheel. No
+  per-device filtering and **no HID detection work**: it is up to the user which controls they
+  actually set. This composes with the blank defaults in §5: an unused control reads
+  "No shortcut", so it is visibly unused rather than pre-claimed.
+- **Two-step activation.** Chevrons/swipe browse; an explicit Activate commits. Switching
+  rewrites hotkey registrations and kickstarts the helper, so it must not fire on every chevron
+  press. The live profile carries an "Active" badge; the tab opens on the active profile, not on
+  slide 1. Keep "viewed" (page dot) and "active" (badge) visually distinct.
+
+**Owner decision NOT yet made:** whether the three app hotkeys (`chatGPTHotkey`, `claudeHotkey`,
+`geminiHotkey`) belong per-profile or stay global. They are keyboard shortcuts, so having them
+switch when the user slides to a different *mouse* profile may surprise. This changes the struct,
+so settle it before writing the model.
+
+### Implementation notes (the cheap path)
+
+**Do not rewrite the ~150 call sites.** Extract `MouseProfile`, then keep today's property names
+as computed proxies onto the active profile:
+
+```swift
+extension KlikProConfig {
+    var middleButton: ShortcutMapping {
+        get { activeMouseProfile.middleButton }
+        set { mouseProfiles[activeMouseProfileIndex].middleButton = newValue }
+    }
+}
+```
+
+Every existing reader — the whole conflict engine and `KlikProInput`'s registration path — keeps
+compiling and automatically operates on the active profile. That reduces the change to ~20 proxy
+properties plus the storage layer.
+
+**Boundary:** only the button/key surface belongs in a profile. App Profile instances, the vault,
+`dataRoot`, menu-bar prefs and `topPinned*` stay global. Splitting this wrong later is expensive,
+because mouse assignments reference instances by UUID.
+
+**Traps, in order of how much they will cost:**
+
+1. **The schema pin.** `normalizedQuickLaunchConfig` sets `schemaVersion = 12` unconditionally on
+   every write and `tools/check.sh` greps that literal. This is the first change that genuinely
+   needs a bump, so the pin must be lifted deliberately. Migration wraps today's top-level fields
+   into `mouseProfiles[0]`, named "Default".
+2. **Downgrade.** Dual-write for one release — keep the legacy top-level fields mirroring the
+   active profile so a v1.5.x build still reads a sane config. Drop the mirror one release later.
+3. **Validation becomes per-profile.** `appProfileAssignmentsAreValid` currently fails `save()`
+   closed on any conflict. An *inactive* profile holding a duplicate is harmless: validate the
+   active profile on save, and validate a profile on activation. Otherwise the user cannot save
+   while editing a profile that is not live yet.
+4. **Naming.** "App Profiles" already means isolated app instances. Use `MouseProfile` everywhere
+   and never abbreviate to `Profile`, or `AppProfileInstance` vs `Profile` becomes unreadable.
+
+**Leave one door open:** the natural successor is auto-switching per frontmost app. Keep
+`activeMouseProfileID` as the single source of truth that either the user or a future rule engine
+sets, rather than scattering "which profile is live" into the view. Costs nothing today.
+
+**A new profile starts like a fresh install** — Forward/Back mapped, everything else unset. So
+§4f's blank defaults become the new-profile template.
+
+### Registering a physical mouse to a profile — FEASIBILITY PROVEN 2026-07-26
+
+Owner question: can Klik PRO scan every connected mouse and let the user bind one to a profile?
+**Yes for identity; the hard part is per-event routing.** Verified by running an `IOHIDManager`
+probe (usage page 1 / usage 2) on the owner's Mac with two mice connected:
+
+| Mouse | VID/PID | Transport | Serial |
+|---|---|---|---|
+| Logi M650 | `0x046D` / `0xB02A` | Bluetooth LE | `9A519428` |
+| MX Master 3 Mac | `0x046D` / `0xB023` | Bluetooth LE | `3D4ED8C35E2A8362` |
+
+- **Scanning is easy** — ~40 lines, no new dependency (`IOKit` is already imported by
+  `KlikProInput.swift`).
+- **Serials are present and unique**, so identity can be VID+PID+serial. That removes the "two
+  identical mice are indistinguishable" worry.
+- **The scan needs a filter.** The same match also returned `Apple Internal Keyboard / Trackpad`
+  and `MX Keys Mac` — exclude built-ins (transport `SPI`) and beware keyboards advertising a
+  pointer usage, or the UI would offer a keyboard as a registrable mouse.
+- `0xb023` is confirmed as the MX Master 3 Mac — the model hardcoded in
+  `gestureServiceMatchingDictionary()` (`KlikProInput.swift`) and in `KlikProConfig.swift`. The
+  M650 at `0xB02A` therefore gets the generic controls but **no Gesture**, which matches
+  `README.md`'s "Gesture isolation currently targets only the tested MX Master 3 Mac".
+
+**Per-event attribution is the architectural risk.** Input flows through a `CGEventTap` reading
+`.mouseEventButtonNumber`, and a `CGEvent` carries no reliable identifier for which physical mouse
+produced it. Getting that needs `IOHIDManager` input-value callbacks (each value carries its source
+device) — but the `CGEventTap` is also what lets Klik PRO *suppress* the original click, so you would
+need both paths correlated by timestamp. That correlation is racy.
+
+**Recommended path — avoid the rewrite.** Bind profiles to devices and switch the *active* profile on
+device arrival/removal. The codebase already has that exact pattern:
+`installGestureServiceArrivalObserver` / `gestureServiceDidMatch` watch IORegistry for the MX Master
+arriving and re-apply configuration. Generalising it from one hardcoded VID/PID to a registered set
+is incremental work on proven code. So "connect the M650 → its profile activates" is cheap; "both
+mice in use simultaneously with different mappings" is what needs the input-path rewrite. With a
+3-profile cap and one mouse in hand at a time, the cheap version is very likely sufficient.
+
+## 4f. Blank shortcuts — DONE 2026-07-26
+
+**Owner decision, final:** a fresh install maps **only Forward (`⌘]`) and Back (`⌘[`)**. Middle,
+Gesture and all three app hotkeys ship with **no shortcut at all** — not merely disabled.
+
+**Rationale (owner):** beyond the scroll wheel, the two side buttons are the pair essentially every
+advanced mouse actually has, so they are the only controls Klik PRO can assume exist. Middle,
+Gesture and the thumb wheel vary by model, so pre-mapping them would claim shortcuts on hardware
+that cannot reach them. Klik PRO is explicitly not aimed at basic mice.
+
+### How "no shortcut" is represented
+
+`KeyCombo.unset` — a sentinel with `keyCode 0xFFFF` (real `kVK_*` codes are all `< 0x80`), plus
+`var isSet: Bool`. **Not** `combo: KeyCombo?`, for two reasons measured at the time: an optional
+touches ~90 call sites, and because `ShortcutMapping` uses synthesized `Codable` with a
+non-optional `combo`, a config written with a null combo **fails to decode wholesale on an older
+build**. The sentinel degrades gracefully instead.
+
+`KeyCombo.displayString` returns **"No shortcut"** for an unset combo, matching the app's existing
+empty-state idiom (`No browsers`, `No image chosen`, `No native apps installed`). Rejected `—`: a
+bare dash inside a field that normally holds keystrokes reads as though it were the keystroke.
+
+### THE RULE, if you touch any of this
+
+**Anything that compares or registers a combo must check `isSet` first.** Every unset combo shares
+one `signature`, so an unguarded comparison makes each blank row duplicate every other blank row.
+Three guards exist and all three are load-bearing:
+
+1. `evaluateShortcutConflicts` — `isSet` gates **only the duplicate verdict**
+   (`if isDuplicate, mine.combo.isSet`). It must **not** be an early `continue` for the slot: a row
+   linked to a launcher still has to inherit that launcher's reserved/extension warnings, which are
+   about the launcher's combo, not this row's. An early return broke exactly that and was caught by
+   `a linked mouse row must inherit its launcher's extension warning`.
+2. `appProfileAssignmentsAreValid` — seeds `hotkeyOwners` from `{ $0.enabled && $0.combo.isSet }`.
+   Without `isSet`, two blank rows collide and the validator fails **`save()` closed silently** for
+   a perfectly legal config. Note a row can legitimately be enabled with no combo when it is in
+   Open-App mode, where the combo is dormant.
+3. `KlikProInput` — all three `RegisterEventHotKey` sites require `combo.isSet`. This is the most
+   severe one: the sentinel key code would be rejected and the failure path calls **`exit(1)`**, so
+   an enabled-but-unset hotkey would take the whole input helper down.
+
+### UI
+
+`applyUnsetShortcutPresentation` hides both the Reset control and the conflict badge on a blank row.
+Reset because there is no default to return to; the badge because an unset combo cannot conflict, so
+`✓ OK` beside it asserts a validated state for a shortcut that does not exist.
+
+**Reset doubles as Clear, for free.** The existing handler sets the recorder to
+`KlikProConfig.default.<x>.combo`, which is now `.unset` for these five rows — so `↺` on a
+customised row means "back to nothing". That is the only route back to blank once a shortcut has
+been recorded; without it, blank would exist solely on a fresh install. Forward/Back are unaffected
+and still reset to `Browser →`/`Browser ←`.
+
+### Test fixtures — expect this to bite again
+
+Conflict evaluation short-circuits a **disabled** row to `.ok`, and now also ignores an **unset**
+combo. So any fixture built from `KlikProConfig.default` that expects a Duplicate/reserved/extension
+verdict must **state its own preconditions** — set `enabled = true` *and* an explicit combo. Six
+fixtures in `Tests/MouseButtonRoutingTests.swift` and one in `Tests/AppProfilesFoundationTests.swift`
+needed this. Symptom is a cascade: fix one assertion and the next one down fails for the same
+reason. `git show HEAD:` on the test file plus a compile is the fastest way to confirm a failure is
+yours rather than pre-existing.
+
+### Not done
+
+- **No fixture renders a blank row.** The `No shortcut` presentation, the hidden Reset/badge, and
+  Reset-as-clear are unverified in pixels. Reachable now: `open -n --env
+  KLIK_PRO_CONFIG_DIRECTORY=/tmp/kf "/Applications/Klik PRO.app"` writes a fresh config, and
+  `PreviewMain` accepts `INSTALLED_TARGETS=all`.
+- **The DMG in `releases/` predates all of this** — it is the 15:37 build with hotkeys still ON.
+  Rebuild before shipping.
+- **A fresh install still auto-creates 7 App Profiles** (`ChatGPT 1`, `Claude 1`, `Canva 1`,
+  `Spotify 1`, `Gemini 1` + two legacy rows). Pre-existing, unrelated to this work, and arguably
+  contradicts "starts quiet". Owner has not ruled on it.
+
 ## 5. Mouse Profile defaults (owner request, do next)
 
 Change `KlikProConfig.default` (`Sources/KlikProConfig.swift`, the `static let default` block) so a

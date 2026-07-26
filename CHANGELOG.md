@@ -45,6 +45,18 @@ The app lists on Mappings and App Profiles now use one card, and a fresh install
   wheel all arrive off, and every thumb-wheel browser checkbox is off. Only Forward and Back
   arrive mapped, to browser Back/Forward. No mouse button is pre-assigned to an app.
   Existing setups keep their current mappings.
+- **No shortcut is suggested where you never chose one.** Middle, Gesture and the three app
+  hotkeys now arrive with *no* shortcut at all rather than a pre-filled one, and read
+  **No shortcut**. Only Forward and Back arrive mapped — beyond the scroll wheel, the two side
+  buttons are the pair essentially every advanced mouse has, so they are the only controls
+  Klik PRO assumes exist.
+  - Those rows hide their Reset arrow, since there is no default to go back to, and show no
+    conflict badge, since a shortcut that does not exist cannot clash with anything.
+  - On a row where you *have* recorded a shortcut, the Reset arrow now clears it back to
+    empty. Previously it reset to a combo nobody picked, and there was no way back to blank.
+  - This also removes a collision the old defaults carried, where ChatGPT and Gemini were both
+    pre-filled with ⌃⌥⌘G.
+  - Existing setups keep every shortcut they have.
 - **Fixed: long app names truncated early.** Names such as "ChatGPT / Codex" were cut short
   with empty space still next to them.
 - **Assign is no longer offered where it cannot work.** Canva, Zoom and Spotify have nowhere
