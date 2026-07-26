@@ -1839,12 +1839,12 @@ final class MouseProfileHeaderView: NSView {
     private let previousButton = MouseSlideNavigationButton(
         symbolName: "chevron.left",
         accessibility: "Previous mouse mapping",
-        frame: NSRect(x: 8, y: 132, width: 46, height: 52)
+        frame: NSRect(x: 8, y: 146, width: 46, height: 52)
     )
     private let nextButton = MouseSlideNavigationButton(
         symbolName: "chevron.right",
         accessibility: "Next mouse mapping",
-        frame: NSRect(x: 818, y: 132, width: 46, height: 52)
+        frame: NSRect(x: 818, y: 146, width: 46, height: 52)
     )
     private let menuButton = AppProfileGearButton(
         frame: NSRect(x: 826, y: 12, width: 30, height: 28)
@@ -2049,8 +2049,8 @@ final class MouseProfileHeaderView: NSView {
         menu.addItem(delete)
         menu.popUp(
             positioning: nil,
-            at: NSPoint(x: menuButton.frame.minX, y: menuButton.frame.maxY + 3),
-            in: self
+            at: NSPoint(x: menuButton.bounds.minX, y: menuButton.bounds.maxY + 3),
+            in: menuButton
         )
     }
 
@@ -2288,7 +2288,7 @@ final class SettingsContentView: NSView {
     let thumbWheelToggle: ToggleSwitchView
     let thumbWheelBrowsers: ThumbWheelBrowsersButton
     let mouseProfileHeader = MouseProfileHeaderView(
-        frame: NSRect(x: 0, y: 0, width: 872, height: 316)
+        frame: NSRect(x: 0, y: 0, width: 872, height: 344)
     )
     private let mouseSlideContainer: MouseSlideContainerView
     var onThumbWheelToggle: ((Bool) -> Void)?
@@ -2326,9 +2326,9 @@ final class SettingsContentView: NSView {
     // The mouse-guide + callouts row is prioritised (it's the point of this tab); the
     // bottom two columns are a quick-access companion — full management lives on the
     // App Profiles tab — so the guide gets the larger share of the height.
-    static let deviceCard         = NSRect(x: 0, y: 0, width: rightCardX + rightCardW, height: 316)
+    static let deviceCard         = NSRect(x: 0, y: 0, width: rightCardX + rightCardW, height: 344)
     // Native apps + App Profiles, side by side across the full width, below the guide.
-    static let mappingBottomCard  = NSRect(x: 0, y: 332, width: rightCardX + rightCardW, height: 396)
+    static let mappingBottomCard  = NSRect(x: 0, y: 360, width: rightCardX + rightCardW, height: 368)
 
     private static func previewAppIcon(for target: QuickLaunchTarget) -> NSImage {
         let label = target == .chatGPT ? "G" : "C"
@@ -2400,7 +2400,7 @@ final class SettingsContentView: NSView {
         let shortcutBottomLeftX: CGFloat = 110   // bottom-left (Forward); inner edge ≈ x 300
         let shortcutBottomRightX: CGFloat = 574  // bottom-right (Gesture); symmetric
         let shortcutTopY: CGFloat = 40    // leaves a header strip for the "Mouse Mappings" title
-        let shortcutBottomY: CGFloat = 176
+        let shortcutBottomY: CGFloat = 204
         middleButtonRow = RecordableShortcutRowView(
             title: "Middle Button",
             mapping: config.middleButton,
@@ -2773,7 +2773,7 @@ final class SettingsContentView: NSView {
         let imageAspect = image.size.height > 0 ? image.size.width / image.size.height : 1
         // Inset chosen so the mouse keeps its v1.4.3 size (267x198) while centred in the
         // taller guide card; the four button controls sit in the card's corners around it.
-        let available = card.insetBy(dx: 190, dy: 59)
+        let available = card.insetBy(dx: 190, dy: 73)
         let drawHeight = min(available.height, available.width / imageAspect)
         let drawWidth = drawHeight * imageAspect
         let rect = NSRect(
@@ -2808,14 +2808,14 @@ final class SettingsContentView: NSView {
     // 1000x742 device artwork. controlAnchor points match the narrow corner controls set in
     // init: the top row's inner edges are x 282 (left) / x 590 (right) with centre y 88 (the
     // top row sits below the "Mouse Mappings" header strip); the bottom row is pulled in a
-    // little further — inner edges x 300 (left) / x 574 (right) with centre y 224. Each anchor
+    // little further — inner edges x 300 (left) / x 574 (right) with centre y 252. Each anchor
     // is the control edge nearest the mouse, so the leader runs from there to the button.
     private static let deviceCallouts: [DeviceCallout] = [
         DeviceCallout(title: "Middle Button (Scroll Wheel)", fx: 0.245, fy: 0.413, controlAnchor: NSPoint(x: 282, y: 88)),
-        DeviceCallout(title: "Forward Button",               fx: 0.584, fy: 0.546, controlAnchor: NSPoint(x: 300, y: 224)),
+        DeviceCallout(title: "Forward Button",               fx: 0.584, fy: 0.546, controlAnchor: NSPoint(x: 300, y: 252)),
         DeviceCallout(title: "Horizontal Thumb Wheel",       fx: 0.594, fy: 0.422, controlAnchor: NSPoint(x: 436, y: 94)),
         DeviceCallout(title: "Back Button",                  fx: 0.692, fy: 0.447, controlAnchor: NSPoint(x: 590, y: 88)),
-        DeviceCallout(title: "Gesture Button",               fx: 0.755, fy: 0.745, controlAnchor: NSPoint(x: 574, y: 224)),
+        DeviceCallout(title: "Gesture Button",               fx: 0.755, fy: 0.745, controlAnchor: NSPoint(x: 574, y: 252)),
     ]
 
     private func drawDeviceCallouts(in mouseRect: NSRect) {

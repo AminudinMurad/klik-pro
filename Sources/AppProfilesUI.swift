@@ -835,11 +835,12 @@ class AppProfileButton: NSButton {
     @objc private func pressed() { onPress?() }
 }
 
-/// Refresh-specific button whose glyph visibly rotates for the full discovery
-/// operation. The glyph owns the animation rather than the button layer, so the
-/// rounded hover background stays still.
+/// Refresh-specific button that swaps its static arrow for the native macOS
+/// spinner during discovery. Rotating the asymmetric arrow glyph looked like a
+/// wobble; the centered progress indicator stays visually stable.
 final class RefreshIconButton: AppProfileButton {
     private let glyphView = NSImageView()
+    private let spinner = NSProgressIndicator()
     private(set) var isRefreshing = false
 
     override init(title: String, frame: NSRect) {
@@ -866,7 +867,12 @@ final class RefreshIconButton: AppProfileButton {
             sized.isTemplate = true
             glyphView.image = sized
         }
-        addSubview(glyphView)
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.isIndeterminate = true
+        spinner.isDisplayedWhenStopped = false
+        spinner.isHidden = true
+        [glyphView, spinner].forEach(addSubview)
     }
 
     required init?(coder: NSCoder) { nil }
@@ -875,6 +881,12 @@ final class RefreshIconButton: AppProfileButton {
         super.layout()
         let side = min(16, min(bounds.width, bounds.height))
         glyphView.frame = NSRect(
+            x: (bounds.width - side) / 2,
+            y: (bounds.height - side) / 2,
+            width: side,
+            height: side
+        )
+        spinner.frame = NSRect(
             x: (bounds.width - side) / 2,
             y: (bounds.height - side) / 2,
             width: side,
@@ -889,17 +901,12 @@ final class RefreshIconButton: AppProfileButton {
         isEnabled = !refreshing
         toolTip = refreshing ? "Refreshing…" : "Refresh App List"
         setAccessibilityLabel(refreshing ? "Refreshing app list" : "Refresh App List")
+        glyphView.isHidden = refreshing
+        spinner.isHidden = !refreshing
         if refreshing {
-            let rotation = CABasicAnimation(keyPath: "transform.rotation.z")
-            rotation.fromValue = 0
-            rotation.toValue = Double.pi * 2
-            rotation.duration = 0.8
-            rotation.repeatCount = .infinity
-            rotation.isRemovedOnCompletion = false
-            glyphView.layer?.add(rotation, forKey: "klik-pro-refresh-rotation")
+            spinner.startAnimation(nil)
         } else {
-            glyphView.layer?.removeAnimation(forKey: "klik-pro-refresh-rotation")
-            glyphView.layer?.transform = CATransform3DIdentity
+            spinner.stopAnimation(nil)
         }
     }
 
@@ -1820,7 +1827,9 @@ private final class MappingSectionCardView: NSView {
         let visibleRows: CGFloat = 3
         let listHeight = visibleRows * AppCardMetrics.height
             + (visibleRows - 1) * innerCardSpacing
-        let listY = max(42, frame.height - listHeight - 12)
+        // Keep the first card close to its section title. Extra column height belongs
+        // below the visible rows, not as a large dead band above them.
+        let listY: CGFloat = 50
         listView.frame = NSRect(x: 12, y: listY, width: frame.width - 24, height: listHeight)
         listView.setAccessibilityLabel("\(title) list")
 

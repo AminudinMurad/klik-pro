@@ -983,9 +983,10 @@ require_source_literal \
   "$ROOT/Sources/AppProfilesUI.swift" \
   "Your App Profiles must use the shared scroll list"
 
-# Every refresh arrow rotates for the complete scan, and every list receives the
-# same dimmed-card spinner overlay. Three source declarations create four runtime
-# buttons because MappingSectionCardView is instantiated twice.
+# Every refresh button swaps its arrow for the native spinner during a scan, and
+# every list receives the same dimmed-card spinner overlay. Three source
+# declarations create four runtime buttons because MappingSectionCardView is
+# instantiated twice.
 refresh_button_declarations="$(awk '
   /= makeRefreshIconButton\(\)/ { count++ }
   END { print count + 0 }
@@ -997,27 +998,27 @@ fi
 require_source_literal \
   'final class RefreshIconButton: AppProfileButton' \
   "$ROOT/Sources/AppProfilesUI.swift" \
-  "App-list refresh controls must use the rotating RefreshIconButton"
+  "App-list refresh controls must use RefreshIconButton"
 require_source_literal \
-  'let rotation = CABasicAnimation(keyPath: "transform.rotation.z")' \
+  'private let spinner = NSProgressIndicator()' \
   "$ROOT/Sources/AppProfilesUI.swift" \
-  "Refresh arrows must animate their rotation"
+  "Refresh buttons must use the native macOS progress indicator"
 require_source_literal \
-  'rotation.toValue = Double.pi * 2' \
+  'glyphView.isHidden = refreshing' \
   "$ROOT/Sources/AppProfilesUI.swift" \
-  "Refresh arrows must complete a full rotation"
+  "Refresh buttons must hide the static arrow while loading"
 require_source_literal \
-  'rotation.repeatCount = .infinity' \
+  'spinner.isHidden = !refreshing' \
   "$ROOT/Sources/AppProfilesUI.swift" \
-  "Refresh arrows must keep rotating until discovery finishes"
+  "Refresh buttons must show the spinner only while loading"
 require_source_literal \
-  'glyphView.layer?.add(rotation, forKey: "klik-pro-refresh-rotation")' \
+  'spinner.startAnimation(nil)' \
   "$ROOT/Sources/AppProfilesUI.swift" \
-  "Refresh must start the arrow-layer animation"
+  "Refresh must start the native spinner"
 require_source_literal \
-  'glyphView.layer?.removeAnimation(forKey: "klik-pro-refresh-rotation")' \
+  'spinner.stopAnimation(nil)' \
   "$ROOT/Sources/AppProfilesUI.swift" \
-  "Refresh completion must stop the arrow-layer animation"
+  "Refresh completion must stop the native spinner"
 require_source_literal \
   'private final class AppCardRefreshOverlayView: NSView' \
   "$ROOT/Sources/AppProfilesUI.swift" \
@@ -1134,11 +1135,13 @@ grep -q 'recorder.setCombo(self.defaultCombo)' "$ROOT/Sources/KlikProApp.swift"
 grep -Eq 'static let deviceCard +=' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'drawDeviceCard(in: SettingsContentView.deviceCard)' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'drawSectionLabel("Mouse Mappings"' "$ROOT/Sources/KlikProApp.swift"
-grep -Eq 'static let deviceCard += NSRect\(x: 0, y: 0, width: .* height: 316\)' \
+grep -Eq 'static let deviceCard += NSRect\(x: 0, y: 0, width: .* height: 344\)' \
   "$ROOT/Sources/KlikProApp.swift"
-grep -Eq 'static let mappingBottomCard += NSRect\(x: 0, y: 332,' \
+grep -Eq 'static let mappingBottomCard += NSRect\(x: 0, y: 360,' \
   "$ROOT/Sources/KlikProApp.swift"
 grep -q 'private let menuButton = AppProfileGearButton' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'in: menuButton' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'let listY: CGFloat = 50' "$ROOT/Sources/AppProfilesUI.swift"
 grep -Fq '"Activate “\(profile.name)”"' "$ROOT/Sources/KlikProApp.swift"
 grep -q '"Assign Mouse…"' "$ROOT/Sources/KlikProApp.swift"
 grep -q '"Change Mouse…"' "$ROOT/Sources/KlikProApp.swift"
