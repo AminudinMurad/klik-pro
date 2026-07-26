@@ -919,7 +919,6 @@ final class RecordableShortcutRowView: NSView {
             self.onComboChange?(self.defaultCombo)
         }
         if !showsShortcutControls {
-            toggle.isHidden = true
             recorder.isHidden = true
             resetButton.isHidden = true
             badge.isHidden = true
@@ -984,7 +983,9 @@ final class RecordableShortcutRowView: NSView {
         applyUnsetShortcutPresentation(
             recorder: recorder, resetButton: resetButton, badge: badge
         )
-        toggle.isHidden = !showsShortcutControls
+        // The enable switch is always part of the mouse-control affordance. The
+        // compact action-picker layout hides only the shortcut recorder controls.
+        toggle.isHidden = false
         updatingActionControls = false
         needsDisplay = true
     }
@@ -999,7 +1000,6 @@ final class RecordableShortcutRowView: NSView {
             recorder: recorder, resetButton: resetButton, badge: badge
         )
         if !showsShortcutControls {
-            toggle.isHidden = true
             recorder.isHidden = true
             resetButton.isHidden = true
             badge.isHidden = true
@@ -1034,7 +1034,7 @@ final class RecordableShortcutRowView: NSView {
         targetReadiness: QuickLaunchTargetReadiness = .appNotInstalled
     ) {
         guard showsShortcutControls else {
-            toggle.isHidden = true
+            toggle.isHidden = false
             recorder.isHidden = true
             resetButton.isHidden = true
             badge.isHidden = true
@@ -2393,6 +2393,23 @@ final class SettingsContentView: NSView {
             safari: thumbWheel.safariEnabled
         )
         thumbWheelBrowsers.isEnabled = thumbWheel.enabled
+    }
+
+    /// Mouse models are deliberately not capability-gated. Once the user assigns
+    /// any mouse, every control is available for them to test and configure.
+    func setMouseControlsAvailable(_ available: Bool) {
+        [
+            middleButtonRow.toggle,
+            gestureButtonRow.toggle,
+            forwardRow.toggle,
+            backRow.toggle,
+            thumbWheelToggle,
+        ].forEach {
+            $0.isHidden = false
+            $0.isEnabled = available
+            window?.invalidateCursorRects(for: $0)
+        }
+        thumbWheelBrowsers.isEnabled = available && thumbWheelToggle.isOn
     }
 
     required init?(coder: NSCoder) { nil }
@@ -3993,6 +4010,7 @@ final class ToggleView: NSView {
         contentView.forwardRow.setMapping(profile.forwardButton)
         contentView.backRow.setMapping(profile.backButton)
         contentView.setThumbWheel(profile.thumbWheel)
+        contentView.setMouseControlsAvailable(profile.deviceIdentity != nil)
 
         // Reuse the established assignment presentation by activating a temporary
         // copy only. This repaints the viewed slide's app targets without changing
