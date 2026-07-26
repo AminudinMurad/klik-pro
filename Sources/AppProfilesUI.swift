@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import UniformTypeIdentifiers
 
 extension NSColor {
@@ -41,7 +42,7 @@ enum AppCardMetrics {
     static let gearY: CGFloat = 12
     /// The list-order pin, right-most on row 1. Same box as the gear so the two read
     /// as one control cluster rather than two unrelated affordances.
-    static let pinSize: CGFloat = 26
+    static let pinSize: CGFloat = gearSize
     /// Deliberately tighter than `buttonGap`: the pin and gear are a pair.
     static let gearPinGap: CGFloat = 2
     static let nameY: CGFloat = 14
@@ -210,28 +211,16 @@ func makeMenuBarToggleItem(
 /// `onRefreshApps` — a duplicated affordance, not duplicated behaviour, so
 /// whichever column the user is reading has the control to hand. Sitting inline
 /// with the section title it also costs no vertical space.
-func makeRefreshIconButton() -> AppProfileButton {
-    let button = AppProfileButton(title: "", frame: .zero)
-    button.imagePosition = .imageOnly
-    // There is no label any more, so the tooltip carries the name.
+func makeRefreshIconButton() -> RefreshIconButton {
+    let button = RefreshIconButton(frame: .zero)
     button.toolTip = "Refresh App List"
     button.setAccessibilityLabel("Refresh App List")
-    if let base = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil),
-       let sized = base.withSymbolConfiguration(
-           NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
-       ) {
-        sized.isTemplate = true
-        button.image = sized
-    }
     return button
 }
 
-/// Keeps a refresh icon's state in step with the others: all four must disable
-/// together during a rescan, or one will look broken.
-func applyRefreshIconState(_ button: AppProfileButton, refreshing: Bool) {
-    button.isEnabled = !refreshing
-    button.toolTip = refreshing ? "Refreshing…" : "Refresh App List"
-    button.setAccessibilityLabel(refreshing ? "Refreshing app list" : "Refresh App List")
+/// Keeps a refresh icon's animation and state in step with the others.
+func applyRefreshIconState(_ button: RefreshIconButton, refreshing: Bool) {
+    button.setRefreshing(refreshing)
 }
 
 /// Stable-partitions a list so pinned entries lead, in the order the user pinned them,
@@ -271,21 +260,47 @@ func topPinnedFirst<Element, Key: Hashable>(
 /// The icon-only list-order pin that sits right of each card's gear. Both tabs carry
 /// it, because the pin the user sets on either one decides which cards lead the list
 /// everywhere — one preference, two places to set it.
-func makePinIconButton() -> AppProfileButton {
-    let button = AppProfileButton(title: "", frame: .zero)
-    button.imagePosition = .imageOnly
-    return button
+final class AppProfilePinButton: NSButton {
+    var onPress: (() -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        isBordered = false
+        imagePosition = .imageOnly
+        wantsLayer = true
+        // The pin is intentionally a bare glyph, not a pill. Rotate the whole
+        // square control so every card uses the same 20° clockwise treatment.
+        layer?.transform = CATransform3DMakeRotation(
+            -20 * .pi / 180, 0, 0, 1
+        )
+        target = self
+        action = #selector(pressed)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func resetCursorRects() {
+        if isEnabled {
+            addCursorRect(bounds, cursor: .pointingHand)
+        }
+    }
+
+    @objc private func pressed() { onPress?() }
+}
+
+func makePinIconButton() -> AppProfilePinButton {
+    AppProfilePinButton(frame: .zero)
 }
 
 /// Applies a pin's three states. `atLimit` is the case worth being careful with: the
 /// cap never silently evicts an existing pin, so an unpinned card in a full list shows
 /// a disabled pin that says why, rather than a live control that quietly swaps
 /// something else out.
-func applyPinIconState(_ button: AppProfileButton, pinned: Bool, atLimit: Bool) {
+func applyPinIconState(_ button: AppProfilePinButton, pinned: Bool, atLimit: Bool) {
     let symbol = pinned ? "pin.fill" : "pin"
     if let base = NSImage(systemSymbolName: symbol, accessibilityDescription: nil),
        let sized = base.withSymbolConfiguration(
-           NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+           NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
        ) {
         sized.isTemplate = true
         button.image = sized
@@ -297,7 +312,7 @@ func applyPinIconState(_ button: AppProfileButton, pinned: Bool, atLimit: Bool) 
     // only 0.03 alpha lighter than its resting one, which on a 26pt control is far too
     // subtle to read as "no slots left" without hovering for the tooltip.
     if pinned {
-        button.contentTintColor = .controlAccentColor
+        button.contentTintColor = .black
     } else {
         button.contentTintColor = button.isEnabled ? .appTextSecondary : .tertiaryLabelColor
     }
@@ -306,16 +321,343 @@ func applyPinIconState(_ button: AppProfileButton, pinned: Bool, atLimit: Bool) 
         button.setAccessibilityLabel("Unpin from the top of the list")
     } else if atLimit {
         button.toolTip =
-            "\(KlikProConfig.topPinLimit) cards are already pinned. Unpin one to free a slot."
-        button.setAccessibilityLabel("Cannot pin: the list already has three pinned cards")
+            "One card is already pinned. Unpin it before pinning another."
+        button.setAccessibilityLabel("Cannot pin: this list already has a pinned card")
     } else {
         button.toolTip = "Keep this card at the top of the list."
         button.setAccessibilityLabel("Pin to the top of the list")
     }
 }
 
-private final class FlippedProfileStackView: NSStackView {
+/// A frame-laid-out document view keeps the list height equal to its actual cards.
+/// There are deliberately no top/bottom insets and no viewport-sized filler.
+private final class AppCardDocumentView: NSView {
     override var isFlipped: Bool { true }
+}
+
+/// A deterministic scrollbar for the four app lists. AppKit's overlay scroller can
+/// disappear based on a system preference and its knob length is proportional to the
+/// document; the product requirement is the opposite: always visible, with a handle
+/// exactly one app card high.
+private final class FixedAppCardScrollbarView: NSView {
+    static let width: CGFloat = 10
+    static let gap: CGFloat = 8
+
+    private weak var scrollView: NSScrollView?
+    private var boundsObserver: NSObjectProtocol?
+    private var dragOffset: CGFloat?
+    private var interactionEnabled = true
+
+    override var isFlipped: Bool { true }
+
+    init(scrollView: NSScrollView) {
+        self.scrollView = scrollView
+        super.init(frame: .zero)
+        wantsLayer = true
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        boundsObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification,
+            object: scrollView.contentView,
+            queue: .main
+        ) { [weak self] _ in
+            self?.synchronize()
+        }
+        setAccessibilityElement(true)
+        setAccessibilityRole(.scrollBar)
+        setAccessibilityLabel("App list scroll bar")
+        setAccessibilityOrientation(.vertical)
+        synchronize()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    deinit {
+        if let boundsObserver {
+            NotificationCenter.default.removeObserver(boundsObserver)
+        }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+
+    func setInteractionEnabled(_ enabled: Bool) {
+        interactionEnabled = enabled
+        setAccessibilityEnabled(enabled && maximumOffset > 0)
+        needsDisplay = true
+    }
+
+    func synchronize() {
+        let value = maximumOffset > 0
+            ? min(1, max(0, currentOffset / maximumOffset))
+            : 0
+        setAccessibilityMinValue(0.0)
+        setAccessibilityMaxValue(1.0)
+        setAccessibilityValue(Double(value))
+        setAccessibilityEnabled(interactionEnabled && maximumOffset > 0)
+        needsDisplay = true
+    }
+
+    private var currentOffset: CGFloat {
+        scrollView?.contentView.bounds.origin.y ?? 0
+    }
+
+    private var maximumOffset: CGFloat {
+        guard let scrollView, let documentView = scrollView.documentView else { return 0 }
+        return max(0, documentView.frame.height - scrollView.contentView.bounds.height)
+    }
+
+    private var thumbRect: NSRect {
+        let track = bounds.insetBy(dx: 2, dy: 0)
+        let thumbHeight = min(AppCardMetrics.height, track.height)
+        let travel = max(0, track.height - thumbHeight)
+        let fraction = maximumOffset > 0
+            ? min(1, max(0, currentOffset / maximumOffset))
+            : 0
+        return NSRect(
+            x: track.minX,
+            y: track.minY + fraction * travel,
+            width: track.width,
+            height: thumbHeight
+        )
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let track = bounds.insetBy(dx: 3, dy: 0)
+        let trackPath = NSBezierPath(roundedRect: track, xRadius: 2, yRadius: 2)
+        NSColor.appTextPrimary.withAlphaComponent(0.08).setFill()
+        trackPath.fill()
+
+        let thumb = thumbRect
+        let thumbPath = NSBezierPath(roundedRect: thumb, xRadius: thumb.width / 2, yRadius: 4)
+        let active = interactionEnabled && maximumOffset > 0
+        NSColor.appTextPrimary.withAlphaComponent(active ? 0.42 : 0.20).setFill()
+        thumbPath.fill()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard interactionEnabled, maximumOffset > 0 else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        let thumb = thumbRect
+        if thumb.contains(point) {
+            dragOffset = point.y - thumb.minY
+        } else {
+            dragOffset = thumb.height / 2
+            scrollThumb(to: point.y)
+        }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard dragOffset != nil else { return }
+        scrollThumb(to: convert(event.locationInWindow, from: nil).y)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        dragOffset = nil
+    }
+
+    private func scrollThumb(to pointerY: CGFloat) {
+        guard let scrollView else { return }
+        let thumb = thumbRect
+        let travel = max(0, bounds.height - thumb.height)
+        guard travel > 0 else { return }
+        let proposedY = pointerY - (dragOffset ?? thumb.height / 2)
+        let fraction = min(1, max(0, proposedY / travel))
+        let clipView = scrollView.contentView
+        clipView.scroll(to: NSPoint(x: clipView.bounds.origin.x, y: fraction * maximumOffset))
+        scrollView.reflectScrolledClipView(clipView)
+        synchronize()
+    }
+
+    override func accessibilityPerformIncrement() -> Bool {
+        scrollByOneCard(direction: 1)
+    }
+
+    override func accessibilityPerformDecrement() -> Bool {
+        scrollByOneCard(direction: -1)
+    }
+
+    private func scrollByOneCard(direction: CGFloat) -> Bool {
+        guard interactionEnabled, maximumOffset > 0, let scrollView else { return false }
+        let clipView = scrollView.contentView
+        let next = min(
+            maximumOffset,
+            max(0, currentOffset + direction * (AppCardMetrics.height + innerCardSpacing))
+        )
+        clipView.scroll(to: NSPoint(x: clipView.bounds.origin.x, y: next))
+        scrollView.reflectScrolledClipView(clipView)
+        synchronize()
+        return true
+    }
+}
+
+/// The busy veil for one list. It intentionally leaves the cards visible beneath
+/// it, while blocking edits and adding a spinner/caption over the dimmed rows.
+private final class AppCardRefreshOverlayView: NSView {
+    private let spinner = NSProgressIndicator()
+    private let label = NSTextField(labelWithString: "Refreshing…")
+
+    override var isFlipped: Bool { true }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        spinner.style = .spinning
+        spinner.isIndeterminate = true
+        spinner.isDisplayedWhenStopped = false
+        label.font = .systemFont(ofSize: 12, weight: .medium)
+        label.textColor = .appTextPrimary
+        label.alignment = .center
+        [spinner, label].forEach(addSubview)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
+        setAccessibilityLabel("Refreshing app list")
+        isHidden = true
+        updateBackground()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func layout() {
+        super.layout()
+        let centerY = bounds.midY
+        spinner.frame = NSRect(x: bounds.midX - 10, y: centerY - 24, width: 20, height: 20)
+        label.frame = NSRect(x: 8, y: centerY + 4, width: max(0, bounds.width - 16), height: 18)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateBackground()
+    }
+
+    private func updateBackground() {
+        layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.28).cgColor
+    }
+
+    func setActive(_ active: Bool, message: String) {
+        label.stringValue = message
+        setAccessibilityLabel(message)
+        isHidden = !active
+        if active {
+            spinner.startAnimation(nil)
+        } else {
+            spinner.stopAnimation(nil)
+        }
+    }
+}
+
+/// Shared by all four user-facing app lists. It owns the exact 86-point row
+/// geometry, 10-point spacing, deterministic scrollbar, and per-list busy state.
+private final class AppCardListView: NSView {
+    static func contentWidth(for outerWidth: CGFloat) -> CGFloat {
+        max(1, outerWidth - FixedAppCardScrollbarView.gap - FixedAppCardScrollbarView.width)
+    }
+
+    private let scrollView = NSScrollView()
+    private let documentView = AppCardDocumentView()
+    private let scrollbar: FixedAppCardScrollbarView
+    private let refreshOverlay = AppCardRefreshOverlayView(frame: .zero)
+    private var rows: [NSView] = []
+    private var emptyField: NSTextField?
+
+    override var isFlipped: Bool { true }
+
+    override init(frame frameRect: NSRect) {
+        scrollbar = FixedAppCardScrollbarView(scrollView: scrollView)
+        super.init(frame: frameRect)
+        scrollView.drawsBackground = false
+        scrollView.hasHorizontalScroller = false
+        scrollView.hasVerticalScroller = false
+        scrollView.autohidesScrollers = false
+        scrollView.borderType = .noBorder
+        scrollView.documentView = documentView
+        [scrollView, scrollbar, refreshOverlay].forEach(addSubview)
+        layoutList()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    var rowContentWidth: CGFloat {
+        Self.contentWidth(for: bounds.width)
+    }
+
+    override func layout() {
+        super.layout()
+        layoutList()
+    }
+
+    private func layoutList() {
+        let contentWidth = rowContentWidth
+        scrollView.frame = NSRect(x: 0, y: 0, width: contentWidth, height: bounds.height)
+        scrollbar.frame = NSRect(
+            x: bounds.width - FixedAppCardScrollbarView.width,
+            y: 0,
+            width: FixedAppCardScrollbarView.width,
+            height: bounds.height
+        )
+        refreshOverlay.frame = scrollView.frame
+        layoutRows()
+    }
+
+    func setRows(_ newRows: [NSView], emptyMessage: String) {
+        rows.forEach { $0.removeFromSuperview() }
+        rows = newRows
+        emptyField?.removeFromSuperview()
+        emptyField = nil
+
+        if rows.isEmpty {
+            let empty = NSTextField(labelWithString: emptyMessage)
+            empty.font = .systemFont(ofSize: 13)
+            empty.textColor = .appTextSecondary
+            empty.alignment = .center
+            documentView.addSubview(empty)
+            emptyField = empty
+        } else {
+            rows.forEach {
+                $0.isHidden = false
+                documentView.addSubview($0)
+            }
+        }
+        layoutRows()
+    }
+
+    private func layoutRows() {
+        let width = rowContentWidth
+        if rows.isEmpty {
+            documentView.frame = NSRect(x: 0, y: 0, width: width, height: AppCardMetrics.height)
+            emptyField?.frame = NSRect(x: 0, y: 0, width: width, height: AppCardMetrics.height)
+        } else {
+            let pitch = AppCardMetrics.height + innerCardSpacing
+            for (index, row) in rows.enumerated() {
+                row.frame = NSRect(
+                    x: 0,
+                    y: CGFloat(index) * pitch,
+                    width: width,
+                    height: AppCardMetrics.height
+                )
+            }
+            let exactHeight = CGFloat(rows.count) * AppCardMetrics.height
+                + CGFloat(max(0, rows.count - 1)) * innerCardSpacing
+            documentView.frame = NSRect(x: 0, y: 0, width: width, height: exactHeight)
+        }
+        scrollView.contentView.scroll(to: NSPoint(
+            x: 0,
+            y: min(
+                scrollView.contentView.bounds.origin.y,
+                max(0, documentView.frame.height - scrollView.contentView.bounds.height)
+            )
+        ))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        scrollbar.synchronize()
+    }
+
+    func setRefreshing(_ refreshing: Bool, message: String = "Refreshing…") {
+        scrollView.alphaValue = refreshing ? 0.44 : 1
+        scrollbar.alphaValue = refreshing ? 0.64 : 1
+        scrollbar.setInteractionEnabled(!refreshing)
+        refreshOverlay.setActive(refreshing, message: message)
+    }
 }
 
 /// Returns the icon that represents one App Profile everywhere in Klik PRO.
@@ -337,7 +679,7 @@ private func appProfileDisplayIcon(for instance: AppProfileInstance) -> NSImage 
     return NSWorkspace.shared.icon(forFile: instance.source.bundleURL)
 }
 
-final class AppProfileButton: NSButton {
+class AppProfileButton: NSButton {
     var onPress: (() -> Void)?
 
     private var hoverTrackingArea: NSTrackingArea?
@@ -491,6 +833,80 @@ final class AppProfileButton: NSButton {
 
     required init?(coder: NSCoder) { nil }
     @objc private func pressed() { onPress?() }
+}
+
+/// Refresh-specific button whose glyph visibly rotates for the full discovery
+/// operation. The glyph owns the animation rather than the button layer, so the
+/// rounded hover background stays still.
+final class RefreshIconButton: AppProfileButton {
+    private let glyphView = NSImageView()
+    private(set) var isRefreshing = false
+
+    override init(title: String, frame: NSRect) {
+        super.init(title: title, frame: frame)
+        configureGlyph()
+    }
+
+    init(frame: NSRect) {
+        super.init(title: "", frame: frame)
+        configureGlyph()
+    }
+
+    private func configureGlyph() {
+        image = nil
+        imagePosition = .noImage
+        glyphView.imageScaling = .scaleProportionallyUpOrDown
+        glyphView.wantsLayer = true
+        if let base = NSImage(
+            systemSymbolName: "arrow.clockwise",
+            accessibilityDescription: nil
+        ), let sized = base.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+        ) {
+            sized.isTemplate = true
+            glyphView.image = sized
+        }
+        addSubview(glyphView)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func layout() {
+        super.layout()
+        let side = min(16, min(bounds.width, bounds.height))
+        glyphView.frame = NSRect(
+            x: (bounds.width - side) / 2,
+            y: (bounds.height - side) / 2,
+            width: side,
+            height: side
+        )
+    }
+
+    /// Keeps the button visibly busy until the controller ends the refresh.
+    func setRefreshing(_ refreshing: Bool) {
+        guard refreshing != isRefreshing else { return }
+        isRefreshing = refreshing
+        isEnabled = !refreshing
+        toolTip = refreshing ? "Refreshing…" : "Refresh App List"
+        setAccessibilityLabel(refreshing ? "Refreshing app list" : "Refresh App List")
+        if refreshing {
+            let rotation = CABasicAnimation(keyPath: "transform.rotation.z")
+            rotation.fromValue = 0
+            rotation.toValue = Double.pi * 2
+            rotation.duration = 0.8
+            rotation.repeatCount = .infinity
+            rotation.isRemovedOnCompletion = false
+            glyphView.layer?.add(rotation, forKey: "klik-pro-refresh-rotation")
+        } else {
+            glyphView.layer?.removeAnimation(forKey: "klik-pro-refresh-rotation")
+            glyphView.layer?.transform = CATransform3DIdentity
+        }
+    }
+
+    /// The decorative image view must never steal the button's hit target.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        bounds.contains(point) ? self : nil
+    }
 }
 
 /// The small gear at a managed profile card's top-right corner. It holds the
@@ -927,7 +1343,7 @@ private final class DualAppGeneratorCard: NSView {
 
 final class AppProfileInstanceRowView: NSView {
     /// The card height. The list pins each row to this, so keep them in sync.
-    static let rowHeight: CGFloat = 92
+    static let rowHeight: CGFloat = AppCardMetrics.height
     private let iconView = NSImageView()
     private let titleField = NSTextField(labelWithString: "")
     private let openButton = AppProfileButton(title: "Open", frame: .zero)
@@ -958,17 +1374,14 @@ final class AppProfileInstanceRowView: NSView {
         // (top) carries the app name (left) and the gear (right); row 2 (bottom)
         // carries the action buttons, right-flushed. The menu-bar control lives inside
         // the gear menu, not inline, so the name owns the whole of row 1.
-        let rowHeight = Self.rowHeight
-        let vpad: CGFloat = 16           // even top & bottom padding for both rows
-        super.init(frame: NSRect(x: 0, y: 0, width: width, height: rowHeight))
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: Self.rowHeight))
         wantsLayer = true
         layer?.cornerRadius = innerCardCornerRadius
         layer?.backgroundColor = innerCardFillColor.cgColor
         layer?.borderColor = NSColor.separatorColor.cgColor
         layer?.borderWidth = 1
 
-        let iconSize: CGFloat = 54
-        iconView.frame = NSRect(x: 14, y: (rowHeight - iconSize) / 2, width: iconSize, height: iconSize)
+        iconView.frame = AppCardMetrics.iconFrame()
         iconView.imageScaling = .scaleProportionallyUpOrDown
         iconView.image = appProfileDisplayIcon(for: instance)
         titleField.font = .systemFont(ofSize: 14, weight: .semibold)
@@ -978,36 +1391,11 @@ final class AppProfileInstanceRowView: NSView {
 
         let managed = instance.launcherKind == .managed
 
-        let gap: CGFloat = 8
-        let buttonH: CGFloat = 28
-        let openW: CGFloat = 52
-        // Wider than the other controls so the assignment label ("Gesture Button")
-        // fits alongside the chain-link indicator without truncating.
-        let assignW: CGFloat = 132
-        let gearSize: CGFloat = 26
-        let rightEdge = width - 18   // right padding so controls clear the card border
-
-        // Row 1 (top): the pin is right-most, with the gear immediately left of it; the
-        // menu-bar toggle is inside the gear. This card keeps its own geometry literals
-        // (it is 92pt tall, not the shared 86), so the pin is placed by hand here rather
-        // than through AppCardMetrics.
-        let pinSize = AppCardMetrics.pinSize
-        pinButton.frame = NSRect(
-            x: rightEdge - pinSize, y: vpad - 2, width: pinSize, height: pinSize
-        )
+        // Row 1 (top): pin and gear use the same geometry as the other three cards.
+        pinButton.frame = AppCardMetrics.pinFrame(cardWidth: width)
         applyPinIconState(pinButton, pinned: topPinned, atLimit: topPinAtLimit)
         gearButton.isHidden = !managed
-        gearButton.frame = NSRect(
-            x: pinButton.frame.minX - AppCardMetrics.gearPinGap - gearSize,
-            y: vpad - 2, width: gearSize, height: gearSize
-        )
-
-        // Row 2 (bottom): Open and Assign remain right-flushed.
-        let buttonY = rowHeight - vpad - buttonH
-        let assignX = rightEdge - assignW
-        let openX = assignX - gap - openW
-        openButton.frame = NSRect(x: openX, y: buttonY, width: openW, height: buttonH)
-        assignButton.frame = NSRect(x: assignX, y: buttonY, width: assignW, height: buttonH)
+        gearButton.frame = AppCardMetrics.gearFrame(cardWidth: width)
 
         // The assign control shows the assignment IN its own label (normal color,
         // no separate green caption) with a chain-link indicator: linked when a
@@ -1027,14 +1415,20 @@ final class AppProfileInstanceRowView: NSView {
             )
             assignButton.setAccessibilityLabel("Assign a mouse button")
         }
+        layoutOpenAndAssign(
+            openButton: openButton,
+            assignButton: assignButton,
+            cardWidth: width
+        )
         // The name owns row 1 beside the icon, ending before the gear (or before the
         // pin on external rows, which have no gear but are still pinnable), so long
         // labels get far more room than when they shared the row with the toggle.
-        let nameX = iconView.frame.maxX + 14
+        let nameX = AppCardMetrics.nameX
         let nameRightLimit = managed ? gearButton.frame.minX : pinButton.frame.minX
         titleField.frame = NSRect(
-            x: nameX, y: vpad,
-            width: max(80, nameRightLimit - nameX - gap), height: 22
+            x: nameX, y: AppCardMetrics.nameY,
+            width: max(80, nameRightLimit - nameX - AppCardMetrics.buttonGap),
+            height: AppCardMetrics.nameHeight
         )
         openButton.onPress = { [weak self] in
             guard let self else { return }; self.onOpen?(self.instance)
@@ -1391,10 +1785,7 @@ private final class MappingOriginalAppRowView: NSView {
 /// own vertical scroller.
 private final class MappingSectionCardView: NSView {
     private let titleField = NSTextField(labelWithString: "")
-    private let scrollView = NSScrollView()
-    private let stackView = FlippedProfileStackView()
-    private let spinner = NSProgressIndicator()
-    private let loadingLabel = NSTextField(labelWithString: "Loading apps…")
+    private let listView = AppCardListView(frame: .zero)
     /// The rescan control, inline at the right of this card's section header.
     let refreshButton = makeRefreshIconButton()
     var onRefresh: (() -> Void)?
@@ -1424,118 +1815,44 @@ private final class MappingSectionCardView: NSView {
         titleField.textColor = .appTextSecondary
         titleField.stringValue = title
 
-        // Each card scrolls its own group. The scroller auto-hides when everything
-        // fits, so a card holding three or fewer rows shows no stub handle; it appears
-        // with a proportional handle only when the list overflows.
-        //
-        // The viewport is sized to exactly `KlikProConfig.topPinLimit` cards, which is
-        // what makes the pin worth having: the three pinned cards are the three visible
-        // without scrolling. Longer lists still scroll — nothing is hidden, and an app
-        // that is not pinned is one scroll away, not gone. The height this frees at the
-        // top becomes the gap between the refresh icon and the first card.
-        let rowSpacing: CGFloat = 8
-        let stackInsets = NSEdgeInsets(top: 1, left: 0, bottom: 2, right: 0)
-        let visibleRows = CGFloat(KlikProConfig.topPinLimit)
-        let scrollH = stackInsets.top + stackInsets.bottom
-            + visibleRows * AppCardMetrics.height
-            + (visibleRows - 1) * rowSpacing
-        // Floored at the old 36pt so a shorter card degrades to the previous tight
-        // layout instead of computing a negative origin.
-        let scrollY = max(36, frame.height - scrollH - 12)
-        scrollView.frame = NSRect(x: 12, y: scrollY, width: frame.width - 24, height: scrollH)
-        scrollView.hasVerticalScroller = true
-        scrollView.autohidesScrollers = true
-        scrollView.drawsBackground = false
-        stackView.orientation = .vertical
-        stackView.alignment = .leading
-        stackView.spacing = rowSpacing
-        stackView.edgeInsets = stackInsets
-        scrollView.documentView = stackView
+        // Pin capacity and viewport size are separate product choices: only one card
+        // may be sticky, while three cards remain visible without scrolling.
+        let visibleRows: CGFloat = 3
+        let listHeight = visibleRows * AppCardMetrics.height
+            + (visibleRows - 1) * innerCardSpacing
+        let listY = max(42, frame.height - listHeight - 12)
+        listView.frame = NSRect(x: 12, y: listY, width: frame.width - 24, height: listHeight)
+        listView.setAccessibilityLabel("\(title) list")
 
-        // Loading state (mirrors the App Profiles tab): a centered spinner + caption
-        // shown until the first data arrives, so first launch never flashes a
-        // misleading empty/"No native apps" state over empty space during the scan.
-        spinner.frame = NSRect(
-            x: frame.width / 2 - 12, y: scrollY + scrollH / 2 - 26, width: 24, height: 24
-        )
-        spinner.style = .spinning
-        spinner.isIndeterminate = true
-        spinner.isDisplayedWhenStopped = false
-        loadingLabel.frame = NSRect(
-            x: 0, y: scrollY + scrollH / 2 + 6, width: frame.width, height: 18
-        )
-        loadingLabel.font = .systemFont(ofSize: 12, weight: .medium)
-        loadingLabel.textColor = .appTextSecondary
-        loadingLabel.alignment = .center
-        loadingLabel.isHidden = true
-
-        [titleField, refreshButton, scrollView, spinner, loadingLabel].forEach(addSubview)
+        [titleField, refreshButton, listView].forEach(addSubview)
     }
 
     required init?(coder: NSCoder) { nil }
 
     /// Row content width inside this card, mirroring the sizing the single Mappings
     /// list used before the column split into two cards.
-    var rowContentWidth: CGFloat { max(320, scrollView.contentSize.width - 4) }
+    var rowContentWidth: CGFloat { max(320, listView.rowContentWidth) }
 
     /// Replaces the card's rows. Rows are prebuilt by the owner (so their Open/Assign
     /// callbacks are already wired) at `rowContentWidth`; an empty group shows a
     /// centered caption instead.
     func setRows(_ rows: [NSView], rowHeight: CGFloat, emptyMessage: String) {
-        // Leaving the loading state: stop the spinner and reveal the list.
-        spinner.stopAnimation(nil)
-        loadingLabel.isHidden = true
-        scrollView.isHidden = false
-        stackView.arrangedSubviews.forEach {
-            stackView.removeArrangedSubview($0)
-            $0.removeFromSuperview()
-        }
-        let width = rowContentWidth
-        let emptyRowHeight: CGFloat = 56
-        if rows.isEmpty {
-            let empty = NSTextField(labelWithString: emptyMessage)
-            empty.font = .systemFont(ofSize: 13)
-            empty.textColor = .appTextSecondary
-            empty.alignment = .center
-            stackView.addArrangedSubview(empty)
-            empty.widthAnchor.constraint(equalToConstant: width).isActive = true
-            empty.heightAnchor.constraint(equalToConstant: emptyRowHeight).isActive = true
-        } else {
-            for row in rows {
-                stackView.addArrangedSubview(row)
-                row.widthAnchor.constraint(equalToConstant: width).isActive = true
-                row.heightAnchor.constraint(equalToConstant: rowHeight).isActive = true
-            }
-        }
-        // Accurate content height (no trailing spacing) so a group that fits does NOT
-        // overflow by a few points — which is what produced a near-full-height,
-        // barely-scrollable handle. With autohide, an exact fit shows no scroller.
-        let itemCount = rows.isEmpty ? 1 : rows.count
-        let perItemHeight = rows.isEmpty ? emptyRowHeight : rowHeight
-        let contentHeight = stackView.edgeInsets.top + stackView.edgeInsets.bottom
-            + CGFloat(itemCount) * perItemHeight
-            + CGFloat(max(0, itemCount - 1)) * stackView.spacing
-        // The document is exactly as tall as its rows — never stretched up to the
-        // viewport. Stretching it made the scroller's handle length meaningless: the
-        // handle is drawn as viewport/document, so padding the document toward the
-        // viewport height forced a nearly full-length handle that barely moved. With
-        // the true height the handle is proportional (a list one card taller than the
-        // viewport shows a handle one card short of full), and autohidesScrollers hides
-        // it outright when everything fits.
-        stackView.frame = NSRect(x: 0, y: 0, width: width, height: contentHeight)
+        precondition(
+            rowHeight == AppCardMetrics.height,
+            "Every app list row must use the shared 86-point card height"
+        )
+        listView.setRows(rows, emptyMessage: emptyMessage)
     }
 
-    /// Shows the centered spinner + caption and clears any rows — for the window on
-    /// first launch before the app scan first reports data. Cleared by `setRows`.
+    /// Initial discovery and manual refresh share the same non-destructive busy veil:
+    /// existing cards stay visible and dim instead of disappearing.
     func showLoading(_ message: String = "Loading apps…") {
-        stackView.arrangedSubviews.forEach {
-            stackView.removeArrangedSubview($0)
-            $0.removeFromSuperview()
-        }
-        scrollView.isHidden = true
-        loadingLabel.stringValue = message
-        loadingLabel.isHidden = false
-        spinner.startAnimation(nil)
+        setRefreshing(true, message: message)
+    }
+
+    func setRefreshing(_ refreshing: Bool, message: String = "Refreshing…") {
+        applyRefreshIconState(refreshButton, refreshing: refreshing)
+        listView.setRefreshing(refreshing, message: message)
     }
 }
 
@@ -1599,10 +1916,10 @@ final class MappingAppProfilesView: NSView {
         rebuildRows()
     }
 
-    /// Keeps both header icons in step during a rescan.
-    func setRefreshing(_ refreshing: Bool) {
-        applyRefreshIconState(nativeCard.refreshButton, refreshing: refreshing)
-        applyRefreshIconState(profilesCard.refreshButton, refreshing: refreshing)
+    /// Keeps both header icons and both list overlays in step during a rescan.
+    func setRefreshing(_ refreshing: Bool, message: String = "Refreshing…") {
+        nativeCard.setRefreshing(refreshing, message: message)
+        profilesCard.setRefreshing(refreshing, message: message)
     }
 
     required init?(coder: NSCoder) { nil }
@@ -1719,16 +2036,13 @@ final class AppProfilesContentView: NSView {
     /// One generator card per launch target, built from QuickLaunchTarget.allCases so
     /// a new target needs no wiring here. Kept in allCases order for stable layout.
     private let generatorCards: [(target: QuickLaunchTarget, card: DualAppGeneratorCard)]
-    private let loadingView = NSView()
-    private let loadingSpinner = NSProgressIndicator()
-    private let loadingField = NSTextField(labelWithString: "Scanning installed apps…")
+    private let generatorList = AppCardListView(frame: .zero)
+    private let profilesList = AppCardListView(frame: .zero)
     /// One rescan icon per column, inline at the right of each section header, so
     /// whichever column the user is reading has the control to hand. Both call the
     /// same onRefreshApps and are kept in the same enabled state.
     private let generatorRefreshButton = makeRefreshIconButton()
     private let profilesRefreshButton = makeRefreshIconButton()
-    private let scrollView = NSScrollView()
-    private let stackView = FlippedProfileStackView()
     var onGenerate: ((AppProfileCandidate) -> Void)?
     var onOpenOriginal: ((QuickLaunchTarget) -> Void)?
     var onAssignOriginal: ((QuickLaunchTarget) -> Void)?
@@ -1766,7 +2080,8 @@ final class AppProfilesContentView: NSView {
 
     init(instances: [AppProfileInstance], width: CGFloat) {
         let generatorColumnWidth = floor(width * Self.generatorColumnRatio)
-        let generatorWidth = generatorColumnWidth - 36
+        let generatorListWidth = generatorColumnWidth - 36
+        let generatorWidth = AppCardListView.contentWidth(for: generatorListWidth)
         let profilesX = generatorColumnWidth + 16
         generatorCards = QuickLaunchTarget.allCases.map { target in
             (target, DualAppGeneratorCard(
@@ -1780,36 +2095,10 @@ final class AppProfilesContentView: NSView {
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: 702))
 
         explanationField.frame = NSRect(
-            x: 18, y: Self.headerTopY + 26, width: generatorWidth, height: 64
+            x: 18, y: Self.headerTopY + 26, width: generatorListWidth, height: 64
         )
         explanationField.font = .systemFont(ofSize: 12)
         explanationField.textColor = .appTextSecondary
-        let cardPitch = DualAppGeneratorCard.cardHeight + innerCardSpacing
-        for (index, entry) in generatorCards.enumerated() {
-            entry.card.frame.origin = NSPoint(
-                x: 18, y: Self.columnContentY + CGFloat(index) * cardPitch
-            )
-        }
-        loadingView.frame = NSRect(
-            x: 18, y: Self.columnContentY,
-            width: generatorWidth, height: 224 + innerCardSpacing
-        )
-        loadingView.wantsLayer = true
-        loadingView.layer?.cornerRadius = innerCardCornerRadius
-        loadingView.layer?.backgroundColor = innerCardFillColor.cgColor
-        loadingView.layer?.borderColor = NSColor.separatorColor.cgColor
-        loadingView.layer?.borderWidth = 1
-        loadingSpinner.frame = NSRect(x: generatorWidth / 2 - 12, y: 88, width: 24, height: 24)
-        loadingSpinner.style = .spinning
-        loadingSpinner.controlSize = .regular
-        loadingSpinner.isIndeterminate = true
-        loadingField.frame = NSRect(x: 0, y: 122, width: generatorWidth, height: 20)
-        loadingField.font = .systemFont(ofSize: 12, weight: .medium)
-        loadingField.textColor = .appTextSecondary
-        loadingField.alignment = .center
-        loadingView.setAccessibilityLabel("Scanning installed apps")
-        loadingView.addSubview(loadingSpinner)
-        loadingView.addSubview(loadingField)
         // The transient status line ("… is ready.", "… was generated") is
         // intentionally hidden: the list itself shows the profiles, and failures
         // already surface as an alert. The field is kept (off-screen text sink)
@@ -1836,27 +2125,28 @@ final class AppProfilesContentView: NSView {
         generatorRefreshButton.onPress = { [weak self] in self?.onRefreshApps?() }
         profilesRefreshButton.onPress = { [weak self] in self?.onRefreshApps?() }
 
-        // Starts on the same line as the generator's first card and absorbs the space
-        // the tightened header reclaimed, so the list shows one more row.
-        scrollView.frame = NSRect(
-            x: generatorColumnWidth + 12,
-            y: Self.columnContentY - 12,
-            width: width - generatorColumnWidth - 28,
-            height: 574
+        // Both columns use the same scroll primitive, top line, card height, spacing,
+        // fixed-size handle, and refresh veil.
+        let listHeight = bounds.height - Self.columnContentY - 14
+        generatorList.frame = NSRect(
+            x: 18,
+            y: Self.columnContentY,
+            width: generatorListWidth,
+            height: listHeight
         )
-        scrollView.hasVerticalScroller = true
-        scrollView.autohidesScrollers = true
-        scrollView.drawsBackground = false
-        stackView.orientation = .vertical
-        stackView.alignment = .leading
-        stackView.spacing = innerCardSpacing
-        stackView.edgeInsets = NSEdgeInsets(top: 2, left: 0, bottom: 2, right: 0)
-        scrollView.documentView = stackView
+        profilesList.frame = NSRect(
+            x: generatorColumnWidth + 12,
+            y: Self.columnContentY,
+            width: width - generatorColumnWidth - 28,
+            height: listHeight
+        )
+        generatorList.setAccessibilityLabel("App Profile Generator list")
+        profilesList.setAccessibilityLabel("Your App Profiles list")
 
         for (target, card) in generatorCards {
-            // A target with no ShortcutSlot has no config key to store a mouse-button
-            // assignment in, so its Assign control stays disabled.
-            card.setAssignable(target.shortcutSlot != nil)
+            // Mouse Profile launch assignments are target-based, so every declared
+            // native app can own a button even when it has no global hotkey slot.
+            card.setAssignable(true)
             card.onGenerate = { [weak self] in self?.onGenerate?($0) }
             card.onOpen = { [weak self] _ in self?.onOpenOriginal?(target) }
             card.onAssign = { [weak self] in self?.onAssignOriginal?(target) }
@@ -1871,10 +2161,9 @@ final class AppProfilesContentView: NSView {
             card.onTogglePin = { [weak self] in self?.onTogglePinOriginal?(target) }
         }
         ([
-            explanationField, loadingView, statusField,
-            generatorRefreshButton, profilesRefreshButton, scrollView,
-        ] as [NSView]
-            + generatorCards.map(\.card)).forEach(addSubview)
+            explanationField, statusField,
+            generatorRefreshButton, profilesRefreshButton, generatorList, profilesList,
+        ] as [NSView]).forEach(addSubview)
         setAppDiscoveryLoading()
         setInstances(instances)
     }
@@ -1888,17 +2177,14 @@ final class AppProfilesContentView: NSView {
         onInstancesChange?(instances)
     }
 
-    /// Stacks the visible cards from the top so a hidden one leaves no gap, with the
-    /// pinned ones first — the same ordering the Mappings lists use, so a pin set on
-    /// either tab reads the same on both.
+    /// Sends the installed cards to the shared scroll list, pinned first. Filtering
+    /// before `setRows` means an absent app leaves neither a row nor spacing behind.
     private func relayoutGeneratorCards() {
-        let pitch = DualAppGeneratorCard.cardHeight + innerCardSpacing
         let ordered = topPinnedFirst(generatorCards, pins: topPinnedOriginals) { $0.target }
-        var row = 0
-        for (_, card) in ordered where !card.isHidden {
-            card.frame.origin = NSPoint(x: 18, y: Self.columnContentY + CGFloat(row) * pitch)
-            row += 1
+        let visibleCards = ordered.compactMap { entry in
+            entry.card.candidate == nil ? nil : entry.card
         }
+        generatorList.setRows(visibleCards, emptyMessage: "No supported apps installed")
     }
 
     /// Reflects which native apps are pinned to the top of the app lists, and pushes the
@@ -1949,8 +2235,6 @@ final class AppProfilesContentView: NSView {
         let alternatives = supportedCandidates.filter {
             !cardBundleIDs.contains($0.app.bundleIdentifier)
         }
-        loadingSpinner.stopAnimation(nil)
-        loadingView.isHidden = true
         setRefreshing(false)
         // A card only appears when its app is actually installed; a listed-but-absent
         // app would otherwise show a card whose every action is dead.
@@ -1960,8 +2244,8 @@ final class AppProfilesContentView: NSView {
             }
             card.isHidden = candidate == nil
             card.update(candidate: candidate, alternativesAvailable: !alternatives.isEmpty)
-            // The badge reports the matched rule's assurance, which eligibility already
-            // carries: a verified rule yields .verified, an untested one .experimental.
+            // Exact catalogue rules are owner-declared Verified; generic engine-only
+            // detections never reach this list.
             card.setCompatibility(verified: candidate.map { $0.eligibility.kind == .verified })
         }
         relayoutGeneratorCards()
@@ -1970,29 +2254,24 @@ final class AppProfilesContentView: NSView {
         }
     }
 
-    func setOriginalAssignments(chatGPT: QuickLaunchMouseButton?, claude: QuickLaunchMouseButton?) {
+    func setOriginalAssignments(
+        _ assignments: [QuickLaunchTarget: QuickLaunchMouseButton]
+    ) {
         for (target, card) in generatorCards {
-            switch target {
-            case .chatGPT: card.updateAssignment(chatGPT)
-            case .claude: card.updateAssignment(claude)
-            case .gemini, .canva, .zoom, .spotify,
-                 .antigravity, .antigravityIDE, .chrome, .brave: break
-            }
+            card.updateAssignment(assignments[target])
         }
     }
 
-    /// Keeps both column icons in step during a rescan — if one disabled without the
-    /// other, the idle one would look broken.
-    func setRefreshing(_ refreshing: Bool) {
+    /// Keeps both column icons and both per-list overlays in step during a rescan.
+    func setRefreshing(_ refreshing: Bool, message: String = "Refreshing…") {
         applyRefreshIconState(generatorRefreshButton, refreshing: refreshing)
         applyRefreshIconState(profilesRefreshButton, refreshing: refreshing)
+        generatorList.setRefreshing(refreshing, message: message)
+        profilesList.setRefreshing(refreshing, message: message)
     }
 
     func setAppDiscoveryLoading() {
-        for (_, card) in generatorCards { card.isHidden = true }
-        loadingView.isHidden = false
-        loadingSpinner.startAnimation(nil)
-        setRefreshing(true)
+        setRefreshing(true, message: "Scanning installed apps…")
         setStatus("Scanning installed apps…")
     }
 
@@ -2003,72 +2282,44 @@ final class AppProfilesContentView: NSView {
     }
 
     private func rebuildRows() {
-        stackView.arrangedSubviews.forEach {
-            stackView.removeArrangedSubview($0); $0.removeFromSuperview()
-        }
-        // Leave a right margin so the cards clear the vertical scroller instead of
-        // sitting right against it.
-        let rowWidth = max(320, scrollView.contentSize.width - 20)
+        let rowWidth = max(320, profilesList.rowContentWidth)
         let visible = instances.filter { instance in
             instance.state == .active
                 && (instance.launcherKind == .managed
                 || previewRenderingIsActive
                 || FileManager.default.fileExists(atPath: instance.launcherPath))
         }
-        if visible.isEmpty {
-            let empty = NSTextField(labelWithString: "No App Profiles yet")
-            empty.font = .systemFont(ofSize: 13)
-            empty.textColor = .appTextSecondary
-            empty.alignment = .center
-            stackView.addArrangedSubview(empty)
-            empty.widthAnchor.constraint(equalToConstant: rowWidth).isActive = true
-            empty.heightAnchor.constraint(equalToConstant: 70).isActive = true
-        } else {
-            // Pinned profiles lead, then the rest alphabetically — the same ordering the
-            // Mappings profiles list uses, so both tabs agree.
-            let sorted = visible.sorted {
-                $0.label.localizedStandardCompare($1.label) == .orderedAscending
-            }
-            // Only pins for profiles present in this list consume a slot — see the same
-            // note in MappingAppProfilesView.rebuildRows.
-            let liveIDs = Set(visible.map(\.id))
-            let atLimit = topPinnedProfileIDs.filter(liveIDs.contains).count
-                >= KlikProConfig.topPinLimit
-            for instance in topPinnedFirst(sorted, pins: topPinnedProfileIDs, key: { $0.id }) {
-                let row = AppProfileInstanceRowView(
-                    instance: instance,
-                    health: runtimeHealth[instance.id],
-                    width: rowWidth,
-                    topPinned: topPinnedProfileIDs.contains(instance.id),
-                    topPinAtLimit: atLimit
-                )
-                row.onOpen = { [weak self] in self?.onOpen?($0) }
-                row.onAssign = { [weak self] in self?.onAssign?($0) }
-                row.onToggleMenuBar = { [weak self] in self?.onToggleMenuBar?($0) }
-                row.onRename = { [weak self] in self?.onRename?($0) }
-                row.onRemove = { [weak self] in self?.onRemove?($0) }
-                row.onChangeIcon = { [weak self] in self?.onChangeIcon?($0) }
-                row.onAddToDock = { [weak self] in self?.onAddToDock?($0) }
-                row.onTogglePin = { [weak self] in self?.onTogglePinProfile?($0) }
-                stackView.addArrangedSubview(row)
-                row.widthAnchor.constraint(equalToConstant: rowWidth).isActive = true
-                // Must match AppProfileInstanceRowView's rowHeight, or the card is
-                // clipped and the bottom row loses its padding.
-                row.heightAnchor.constraint(
-                    equalToConstant: AppProfileInstanceRowView.rowHeight
-                ).isActive = true
-            }
+        // Pinned profiles lead, then the rest alphabetically — the same ordering the
+        // Mappings profiles list uses, so both tabs agree.
+        let sorted = visible.sorted {
+            $0.label.localizedStandardCompare($1.label) == .orderedAscending
         }
-        // Exact document height, derived from the real row height rather than a
-        // hard-coded pitch, and never stretched up to the viewport — see the note in
-        // MappingSectionCardView.setRows: padding it makes the scroller handle's length
-        // meaningless. autohidesScrollers hides the scroller when everything fits.
-        let itemCount = max(1, visible.count)
-        let perItemHeight = visible.isEmpty ? 70 : AppProfileInstanceRowView.rowHeight
-        let contentHeight = stackView.edgeInsets.top + stackView.edgeInsets.bottom
-            + CGFloat(itemCount) * perItemHeight
-            + CGFloat(itemCount - 1) * stackView.spacing
-        stackView.frame = NSRect(x: 0, y: 0, width: rowWidth, height: contentHeight)
+        let liveIDs = Set(visible.map(\.id))
+        let atLimit = topPinnedProfileIDs.filter(liveIDs.contains).count
+            >= KlikProConfig.topPinLimit
+        let profileRows: [NSView] = topPinnedFirst(
+            sorted,
+            pins: topPinnedProfileIDs,
+            key: { $0.id }
+        ).map { instance in
+            let row = AppProfileInstanceRowView(
+                instance: instance,
+                health: runtimeHealth[instance.id],
+                width: rowWidth,
+                topPinned: topPinnedProfileIDs.contains(instance.id),
+                topPinAtLimit: atLimit
+            )
+            row.onOpen = { [weak self] in self?.onOpen?($0) }
+            row.onAssign = { [weak self] in self?.onAssign?($0) }
+            row.onToggleMenuBar = { [weak self] in self?.onToggleMenuBar?($0) }
+            row.onRename = { [weak self] in self?.onRename?($0) }
+            row.onRemove = { [weak self] in self?.onRemove?($0) }
+            row.onChangeIcon = { [weak self] in self?.onChangeIcon?($0) }
+            row.onAddToDock = { [weak self] in self?.onAddToDock?($0) }
+            row.onTogglePin = { [weak self] in self?.onTogglePinProfile?($0) }
+            return row
+        }
+        profilesList.setRows(profileRows, emptyMessage: "No App Profiles yet")
     }
 
     func setStatus(_ message: String, color: NSColor = .appTextSecondary) {

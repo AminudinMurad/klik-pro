@@ -23,7 +23,7 @@ private struct PreviewMain {
             quickLaunchInstalledTargetsPreviewOverride = [.chatGPT, .claude]
         case "all":
             // Every catalogue target treated as installed. The other values top out at two
-            // native rows, which cannot exercise the list-order pin cap (three pins) or the
+            // native rows, which cannot exercise the list-order pin cap (one pin) or the
             // scrolling that starts at the fourth row.
             quickLaunchInstalledTargetsPreviewOverride = Set(QuickLaunchTarget.allCases)
         default:

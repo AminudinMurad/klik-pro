@@ -46,12 +46,53 @@ compile() {
     -o "$output"
 }
 
+require_source_literal() {
+  local needle="$1"
+  local file="$2"
+  local message="$3"
+  if ! grep -qF "$needle" "$file"; then
+    echo "$message" >&2
+    exit 1
+  fi
+}
+
+require_source_regex() {
+  local pattern="$1"
+  local file="$2"
+  local message="$3"
+  if ! grep -Eq "$pattern" "$file"; then
+    echo "$message" >&2
+    exit 1
+  fi
+}
+
+require_block_literal() {
+  local needle="$1"
+  local block="$2"
+  local message="$3"
+  if ! grep -qF "$needle" <<<"$block"; then
+    echo "$message" >&2
+    exit 1
+  fi
+}
+
 for plist in \
   "$ROOT/App/Info.plist" \
   "$ROOT/App/KlikProHelper-Info.plist" \
   "$ROOT/LaunchAgents/local.klik-pro.input.plist"
 do
   plutil -lint "$plist"
+done
+for product_plist in \
+  "$ROOT/App/Info.plist" \
+  "$ROOT/App/KlikProHelper-Info.plist"
+do
+  product_version="$(plutil -extract CFBundleShortVersionString raw -o - "$product_plist")"
+  product_build="$(plutil -extract CFBundleVersion raw -o - "$product_plist")"
+  if [[ "$product_version" != "1.5.0" || "$product_build" != "23" ]]; then
+    echo "$(basename "$product_plist") must remain version 1.5.0 build 23; found version $product_version build $product_build" >&2
+    exit 1
+  fi
 done
 if [[ -e "$ROOT/LaunchAgents/local.klik-pro.menu.plist" ]]; then
   echo "The obsolete separate menu LaunchAgent must not ship" >&2
@@ -65,29 +106,119 @@ if grep -Eq 'runMenu|runInput|quickLaunchServiceQueue' "$ROOT/Sources/KlikProInp
   echo "The input helper must not contain a split menu/input service path" >&2
   exit 1
 fi
-[[ "${#DUPLICATION_SOURCES[@]}" -eq 9 ]]
-# Pin the production registry's exact intent: Claude remains evidence-backed
-# Verified, while ChatGPT is explicitly owner-enabled as Untested with its
-# required isolation environment and no tested-version claim.
+if [[ "${#DUPLICATION_SOURCES[@]}" -ne 9 ]]; then
+  echo "Expected exactly 9 duplication source files, found ${#DUPLICATION_SOURCES[@]}" >&2
+  exit 1
+fi
+# Pin the production registry against docs/COMPATIBILITY.md, the sole source of
+# truth for both the shipping catalogue and badge (owner decision 2026-07-26).
+# Test evidence and historical rule-ID suffixes never promote or demote an app.
+#
+# These use `if ... exit 1` rather than a bare `[[ ]]`: /bin/bash on macOS is 3.2,
+# where `set -e` does NOT abort on a failing `[[ ]]` compound command, so a bare
+# bracket assertion is a silent no-op. That is how this registry drifted out of
+# sync with the document unnoticed.
 production_block="$(sed -n '/static let production = AppCompatibilityRegistry(rules: \[/,/^    \])/p' \
   "$ROOT/Sources/Duplication/EngineDetector.swift")"
-[[ -n "$production_block" ]]
-[[ "$(printf '%s\n' "$production_block" | grep -c 'AppCompatibilityRule(')" -eq 2 ]]
-printf '%s\n' "$production_block" | grep -qF 'id: "com-anthropic-claudefordesktop-verified"'
-printf '%s\n' "$production_block" | grep -qF 'bundleIdentifier: "com.anthropic.claudefordesktop"'
-printf '%s\n' "$production_block" | grep -qF 'teamIdentifier: "Q6L2SF6YDW"'
-printf '%s\n' "$production_block" | grep -qF 'testedVersions: ["1.21459.0", "1.21459.1"]'
-printf '%s\n' "$production_block" | grep -qF 'id: "com-openai-codex-untested"'
-printf '%s\n' "$production_block" | grep -qF 'bundleIdentifier: "com.openai.codex"'
-printf '%s\n' "$production_block" | grep -qF 'teamIdentifier: "2DC432GLL2"'
-printf '%s\n' "$production_block" | grep -qF 'assurance: .untested'
-printf '%s\n' "$production_block" | grep -qF 'acceptsAnyVersion: true'
-[[ "$(printf '%s\n' "$production_block" | grep -cF 'acceptsAnyVersion: true')" -eq 2 ]]
-printf '%s\n' "$production_block" | grep -qF '"CODEX_HOME": "{codexHomeDir}"'
-printf '%s\n' "$production_block" | grep -qF '"CODEX_ELECTRON_USER_DATA_PATH": "{profileDir}"'
-printf '%s\n' "$production_block" | grep -qF '"CLAUDE_CONFIG_DIR": "{codexHomeDir}"'
-printf '%s\n' "$production_block" | grep -qF 'homeSymlinkPrefix: "claude"'
-printf '%s\n' "$production_block" | grep -qF 'homeSymlinkPrefix: "codex"'
+if [[ -z "$production_block" ]]; then
+  echo "Production compatibility registry block was not found" >&2
+  exit 1
+fi
+production_rules="$(printf '%s\n' "$production_block" \
+  | awk '/AppCompatibilityRule\(/ { count++ } END { print count + 0 }')"
+if [[ "$production_rules" -ne 16 ]]; then
+  echo "Production registry must ship exactly 16 rules, found $production_rules" >&2
+  exit 1
+fi
+compatibility_verified="$OUT/compatibility-verified.txt"
+registry_catalogue="$OUT/registry-catalogue.txt"
+awk -F '|' '
+  /^## Verified$/ { verified = 1; next }
+  /^## Unverified$/ { verified = 0 }
+  verified && /^\|/ {
+    for (column = 2; column < NF; column++) {
+      value = $column
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      if (value != "" && value != "App" && value !~ /^-+$/) print value
+    }
+  }
+' "$ROOT/docs/COMPATIBILITY.md" | LC_ALL=C sort > "$compatibility_verified"
+printf '%s\n' "$production_block" \
+  | sed -n 's/^[[:space:]]*catalogueName: "\(.*\)",$/\1/p' \
+  | LC_ALL=C sort > "$registry_catalogue"
+compatibility_verified_count="$(wc -l < "$compatibility_verified" | tr -d '[:space:]')"
+registry_catalogue_count="$(wc -l < "$registry_catalogue" | tr -d '[:space:]')"
+if [[ "$compatibility_verified_count" -ne 16
+      || "$registry_catalogue_count" -ne 16 ]]; then
+  echo "COMPATIBILITY.md and the production registry must each contain exactly 16 Verified apps; found $compatibility_verified_count and $registry_catalogue_count" >&2
+  exit 1
+fi
+if ! cmp -s "$compatibility_verified" "$registry_catalogue"; then
+  echo "Production registry catalogue names differ from docs/COMPATIBILITY.md" >&2
+  diff -u "$compatibility_verified" "$registry_catalogue" >&2 || :
+  exit 1
+fi
+compatibility_unverified="$(awk '
+  /^## Unverified$/ { unverified = 1; next }
+  /^## Pending$/ { unverified = 0 }
+  unverified {
+    value = $0
+    gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+    if (value != "") print value
+  }
+' "$ROOT/docs/COMPATIBILITY.md")"
+if [[ "$compatibility_unverified" != "None yet." ]]; then
+  echo "The compiled registry currently models every shipping rule as Verified; the COMPATIBILITY.md Unverified section must remain 'None yet.'" >&2
+  exit 1
+fi
+if grep -Eq 'assurance:|testedVersions:|acceptsAnyVersion:' <<<"$production_block"; then
+  echo "Production compatibility badges must not depend on assurance, tested versions, or version acceptance evidence" >&2
+  exit 1
+fi
+require_block_literal \
+  'id: "com-anthropic-claudefordesktop-verified"' \
+  "$production_block" \
+  "Claude's frozen production rule ID is missing"
+require_block_literal \
+  'bundleIdentifier: "com.anthropic.claudefordesktop"' \
+  "$production_block" \
+  "Claude's production bundle identity is missing"
+require_block_literal \
+  'teamIdentifier: "Q6L2SF6YDW"' \
+  "$production_block" \
+  "Claude's production Team ID is missing"
+require_block_literal \
+  'id: "com-openai-codex-untested"' \
+  "$production_block" \
+  "ChatGPT / Codex's frozen historical rule ID is missing"
+require_block_literal \
+  'bundleIdentifier: "com.openai.codex"' \
+  "$production_block" \
+  "ChatGPT / Codex's production bundle identity is missing"
+require_block_literal \
+  'teamIdentifier: "2DC432GLL2"' \
+  "$production_block" \
+  "ChatGPT / Codex's production Team ID is missing"
+require_block_literal \
+  '"CODEX_HOME": "{codexHomeDir}"' \
+  "$production_block" \
+  "ChatGPT / Codex must retain its isolated CODEX_HOME"
+require_block_literal \
+  '"CODEX_ELECTRON_USER_DATA_PATH": "{profileDir}"' \
+  "$production_block" \
+  "ChatGPT / Codex must retain its isolated Electron profile path"
+require_block_literal \
+  '"CLAUDE_CONFIG_DIR": "{codexHomeDir}"' \
+  "$production_block" \
+  "Claude must retain its isolated config home"
+require_block_literal \
+  'homeSymlinkPrefix: "claude"' \
+  "$production_block" \
+  "Claude must retain its stable home-symlink prefix"
+require_block_literal \
+  'homeSymlinkPrefix: "codex"' \
+  "$production_block" \
+  "ChatGPT / Codex must retain its stable home-symlink prefix"
 grep -q 'M1 removes only Klik PRO' "$ROOT/Sources/Duplication/LauncherGenerator.swift"
 grep -q 'currentCandidate.canCreate' "$ROOT/Sources/Duplication/AppProfileManager.swift"
 grep -q 'eligibility.allowsManagedProfile' "$ROOT/Sources/Duplication/AppProfileRuntime.swift"
@@ -134,8 +265,12 @@ grep -A1 'if let target = instance.legacyQuickLaunchTarget {' \
 # Reopen Apple events require a purpose string in both the main app and every
 # generated launcher. Existing launchers embed their own runner and metadata, so
 # healing must update both in place without touching profile data.
-[[ "$(plutil -extract NSAppleEventsUsageDescription raw -o - "$ROOT/App/Info.plist")" \
-  == "Klik PRO reopens the selected App Profile's existing window without launching a duplicate." ]]
+apple_events_usage="$(plutil -extract NSAppleEventsUsageDescription raw -o - "$ROOT/App/Info.plist")"
+if [[ "$apple_events_usage" != \
+  "Klik PRO reopens the selected App Profile's existing window without launching a duplicate." ]]; then
+  echo "Unexpected NSAppleEventsUsageDescription" >&2
+  exit 1
+fi
 grep -q '"NSAppleEventsUsageDescription": Self.appleEventsUsageDescription' \
   "$ROOT/Sources/Duplication/LauncherGenerator.swift"
 grep -q 'func refreshLauncherRuntimeIfStale' "$ROOT/Sources/Duplication/LauncherGenerator.swift"
@@ -151,7 +286,13 @@ grep -q 'app.hasProvisioningProfile && app.sandboxEntitlement == nil' \
 grep -qF '"CODEX_HOME",' "$ROOT/Sources/Duplication/LauncherGenerator.swift"
 grep -qF '"CODEX_ELECTRON_USER_DATA_PATH",' "$ROOT/Sources/Duplication/LauncherGenerator.swift"
 grep -qF '"CLAUDE_CONFIG_DIR",' "$ROOT/Sources/Duplication/LauncherGenerator.swift"
-[[ "$(grep -cE '^        "[A-Z_]+",$' "$ROOT/Sources/Duplication/LauncherGenerator.swift")" -eq 3 ]]
+grep -qF '"CFFIXED_USER_HOME",' "$ROOT/Sources/Duplication/LauncherGenerator.swift"
+launcher_environment_keys="$(grep -cE '^        "[A-Z_]+",$' \
+  "$ROOT/Sources/Duplication/LauncherGenerator.swift")"
+if [[ "$launcher_environment_keys" -ne 4 ]]; then
+  echo "Launcher environment allowlist must contain exactly 4 keys, found $launcher_environment_keys" >&2
+  exit 1
+fi
 if grep -q 'environmentOverrides: \[:\]' "$ROOT/Sources/Duplication/AppProfileManager.swift"; then
   echo "Managed construction sites must derive the rule environment, never hardcode empty" >&2
   exit 1
@@ -175,7 +316,45 @@ if sed -n '/func resolvedEnvironment/,/^    }/p' "$ROOT/Sources/Duplication/Engi
   echo "Rule environment expansion must never reference labels" >&2
   exit 1
 fi
-grep -q 'normalized.schemaVersion = 12' "$ROOT/Sources/KlikProConfig.swift"
+require_source_literal \
+  'static let currentSchemaVersion = 15' \
+  "$ROOT/Sources/KlikProConfig.swift" \
+  "KlikProConfig.currentSchemaVersion must remain 15"
+require_source_literal \
+  'schemaVersion: KlikProConfig.currentSchemaVersion' \
+  "$ROOT/Sources/KlikProConfig.swift" \
+  "New configurations must use KlikProConfig.currentSchemaVersion"
+require_source_literal \
+  'normalized.schemaVersion = KlikProConfig.currentSchemaVersion' \
+  "$ROOT/Sources/KlikProConfig.swift" \
+  "Config normalization must write the current schema rather than a stale literal"
+if grep -Eq 'normalized\.schemaVersion = (12|13)' "$ROOT/Sources/KlikProConfig.swift"; then
+  echo "Config normalization must not restore the historic schema 12/13 split" >&2
+  exit 1
+fi
+# Schema 14 mouse profiles: UUID-keyed, one active profile, and a hard maximum of
+# three. Guard both validation and mutation paths so changing the display alone
+# cannot accidentally permit a fourth persisted profile.
+require_source_literal \
+  'static let maximumCount = 3' \
+  "$ROOT/Sources/KlikProConfig.swift" \
+  "MouseProfile.maximumCount must remain 3"
+require_source_literal \
+  'var activeMouseProfileID: UUID' \
+  "$ROOT/Sources/KlikProConfig.swift" \
+  "Mouse profiles must persist one active UUID"
+require_source_literal \
+  'config.mouseProfiles.count <= MouseProfile.maximumCount' \
+  "$ROOT/Sources/KlikProConfig.swift" \
+  "Mouse-profile validation must enforce the three-profile maximum"
+require_source_literal \
+  'guard updated.mouseProfiles.count < MouseProfile.maximumCount,' \
+  "$ROOT/Sources/KlikProConfig.swift" \
+  "Adding a mouse profile must reject a fourth profile"
+require_source_literal \
+  'if profiles.count > MouseProfile.maximumCount {' \
+  "$ROOT/Sources/KlikProConfig.swift" \
+  "Mouse-profile normalization must clamp oversized collections"
 grep -q 'createPreV2BackupIfNeeded(originalData: data)' "$ROOT/Sources/KlikProConfig.swift"
 grep -q 'O_WRONLY | O_CREAT | O_EXCL' "$ROOT/Sources/KlikProConfig.swift"
 
@@ -345,7 +524,12 @@ if [[ "$(grep -ci 'copyright' "$ROOT/README.md")" -ne 1 ]]; then
   exit 1
 fi
 grep -q '^## Support development$' "$ROOT/README.md"
-[[ "$(grep -c 'This app is open source under the GNU General Public License v3.0.' "$ROOT/README.md")" -eq 2 ]]
+readme_license_mentions="$(grep -c \
+  'This app is open source under the GNU General' "$ROOT/README.md")"
+if [[ "$readme_license_mentions" -ne 2 ]]; then
+  echo "README must contain the GPL-3.0 statement exactly twice" >&2
+  exit 1
+fi
 grep -q 'https://github.com/sponsors/aminudinmurad' "$ROOT/README.md"
 grep -q 'https://ko-fi.com/aminudinmurad' "$ROOT/README.md"
 grep -q 'https://www.paypal.com/paypalme/aminudinmurad' "$ROOT/README.md"
@@ -360,16 +544,33 @@ fi
 # The Terminal installer must fail closed around the checked-in release trust root.
 bash -n "$ROOT/install.sh" "$ROOT/tools/sign-release-manifest.sh" "$ROOT/tools/build-release.sh"
 bash -n "$ROOT/tools/evidence-run.sh"
-[[ -x "$ROOT/install.sh" ]]
-[[ -x "$ROOT/tools/sign-release-manifest.sh" ]]
-[[ -x "$ROOT/tools/evidence-run.sh" ]]
+for executable_script in \
+  "$ROOT/install.sh" \
+  "$ROOT/tools/sign-release-manifest.sh" \
+  "$ROOT/tools/evidence-run.sh"
+do
+  if [[ ! -x "$executable_script" ]]; then
+    echo "Required script is not executable: $executable_script" >&2
+    exit 1
+  fi
+done
 installerPublicKey="$(sed -n 's/^readonly RELEASE_PUBLIC_KEY="\(.*\)"/\1/p' "$ROOT/install.sh")"
 signerPublicKey="$(sed -n 's/^readonly EXPECTED_PUBLIC_KEY="\(.*\)"/\1/p' "$ROOT/tools/sign-release-manifest.sh")"
 publishedPublicKey="$(awk '{ print $1 " " $2 }' "$ROOT/release-signing-key.pub")"
-[[ -n "$installerPublicKey" && "$installerPublicKey" == "$signerPublicKey" ]]
-[[ "$installerPublicKey" == "$publishedPublicKey" ]]
-[[ "$(ssh-keygen -lf "$ROOT/release-signing-key.pub" | awk '{ print $2 }')" \
-  == 'SHA256:Evg4ITqpPJY/aIT48Zv9Cp3psQfo977uCz/35a2k79E' ]]
+if [[ -z "$installerPublicKey" || "$installerPublicKey" != "$signerPublicKey" ]]; then
+  echo "Installer and manifest signer must embed the same non-empty release public key" >&2
+  exit 1
+fi
+if [[ "$installerPublicKey" != "$publishedPublicKey" ]]; then
+  echo "Embedded release public key must match release-signing-key.pub" >&2
+  exit 1
+fi
+release_key_fingerprint="$(ssh-keygen -lf "$ROOT/release-signing-key.pub" | awk '{ print $2 }')"
+if [[ "$release_key_fingerprint" != \
+  'SHA256:Evg4ITqpPJY/aIT48Zv9Cp3psQfo977uCz/35a2k79E' ]]; then
+  echo "Unexpected release signing key fingerprint" >&2
+  exit 1
+fi
 printf 'klik-pro-release %s\n' "$installerPublicKey" > "$OUT/release-allowed-signers"
 ssh-keygen -Y verify \
   -f "$OUT/release-allowed-signers" \
@@ -699,14 +900,169 @@ if grep -Eq 'AppProfilePicker|Search installed apps|Browse…|＋ Add app|Search
 fi
 grep -q 'KlikProManagedLauncher' "$ROOT/tools/build-release.sh"
 grep -q 'final class MappingAppProfilesView' "$ROOT/Sources/AppProfilesUI.swift"
-# Mappings cards auto-hide their scrollers so a group that fits shows no stub handle.
-grep -q 'scrollView.autohidesScrollers = true' "$ROOT/Sources/AppProfilesUI.swift"
-# The Mappings right column splits into two stacked, independently-scrolling cards —
-# the installed native apps on top and the generated App Profiles below — instead of
-# one combined list under a "YOUR APP PROFILES" heading.
-grep -q 'final class MappingSectionCardView' "$ROOT/Sources/AppProfilesUI.swift"
-grep -q 'title: "NATIVE APPS"' "$ROOT/Sources/AppProfilesUI.swift"
-grep -q 'title: "APP PROFILES"' "$ROOT/Sources/AppProfilesUI.swift"
+# All four app lists share one 86-point row geometry and one persistent custom
+# right-side scrollbar whose handle is exactly one card tall. AppKit's native
+# proportional/auto-hidden scroller is deliberately disabled.
+require_source_literal \
+  'static let height: CGFloat = 86' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "All app-list cards must use the shared 86-point AppCardMetrics height"
+app_card_row_types="$(awk '
+  /static let (cardHeight|rowHeight): CGFloat = AppCardMetrics.height/ { count++ }
+  END { print count + 0 }
+' "$ROOT/Sources/AppProfilesUI.swift")"
+if [[ "$app_card_row_types" -ne 4 ]]; then
+  echo "All four app card row types must use AppCardMetrics.height; found $app_card_row_types" >&2
+  exit 1
+fi
+require_source_literal \
+  'private final class FixedAppCardScrollbarView: NSView' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "The four app lists must use the deterministic fixed scrollbar"
+require_source_literal \
+  'private let scrollbar: FixedAppCardScrollbarView' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "The shared AppCardListView must own its fixed scrollbar"
+require_source_literal \
+  'let thumbHeight = min(AppCardMetrics.height, track.height)' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "The app-list scrollbar handle must stay one 86-point app card high"
+require_source_literal \
+  'x: bounds.width - FixedAppCardScrollbarView.width,' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "The fixed app-list scrollbar must remain on the right edge"
+require_source_literal \
+  'scrollView.autohidesScrollers = false' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "App-list scrollbars must remain visible regardless of macOS preferences"
+if grep -qF 'scrollView.autohidesScrollers = true' "$ROOT/Sources/AppProfilesUI.swift"; then
+  echo "The shared app-list scrollbar must never auto-hide" >&2
+  exit 1
+fi
+shared_list_declarations="$(awk '
+  /private let (listView|generatorList|profilesList) = AppCardListView\(frame: \.zero\)/ {
+    count++
+  }
+  END { print count + 0 }
+' "$ROOT/Sources/AppProfilesUI.swift")"
+mapping_section_instances="$(awk '
+  /= MappingSectionCardView\(/ { count++ }
+  END { print count + 0 }
+' "$ROOT/Sources/AppProfilesUI.swift")"
+if [[ "$shared_list_declarations" -ne 3 || "$mapping_section_instances" -ne 2 ]]; then
+  echo "Expected two App Profiles lists plus two Mappings lists to share AppCardListView; found $shared_list_declarations declarations and $mapping_section_instances Mappings sections" >&2
+  exit 1
+fi
+# The Mappings tab has two independently scrolling side-by-side sections, while
+# the App Profiles tab supplies the other two shared lists.
+require_source_literal \
+  'private final class MappingSectionCardView: NSView' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "Mappings must retain its shared app-list section component"
+require_source_literal \
+  'title: "NATIVE APPS"' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "Mappings must retain the Native Apps list"
+require_source_literal \
+  'title: "APP PROFILES"' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "Mappings must retain the App Profiles list"
+require_source_literal \
+  'private let generatorList = AppCardListView(frame: .zero)' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "The App Profile Generator must use the shared scroll list"
+require_source_literal \
+  'private let profilesList = AppCardListView(frame: .zero)' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "Your App Profiles must use the shared scroll list"
+
+# Every refresh arrow rotates for the complete scan, and every list receives the
+# same dimmed-card spinner overlay. Three source declarations create four runtime
+# buttons because MappingSectionCardView is instantiated twice.
+refresh_button_declarations="$(awk '
+  /= makeRefreshIconButton\(\)/ { count++ }
+  END { print count + 0 }
+' "$ROOT/Sources/AppProfilesUI.swift")"
+if [[ "$refresh_button_declarations" -ne 3 ]]; then
+  echo "Expected four runtime refresh arrows from three shared declarations; found $refresh_button_declarations" >&2
+  exit 1
+fi
+require_source_literal \
+  'final class RefreshIconButton: AppProfileButton' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "App-list refresh controls must use the rotating RefreshIconButton"
+require_source_literal \
+  'let rotation = CABasicAnimation(keyPath: "transform.rotation.z")' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "Refresh arrows must animate their rotation"
+require_source_literal \
+  'rotation.toValue = Double.pi * 2' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "Refresh arrows must complete a full rotation"
+require_source_literal \
+  'rotation.repeatCount = .infinity' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "Refresh arrows must keep rotating until discovery finishes"
+require_source_literal \
+  'glyphView.layer?.add(rotation, forKey: "klik-pro-refresh-rotation")' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "Refresh must start the arrow-layer animation"
+require_source_literal \
+  'glyphView.layer?.removeAnimation(forKey: "klik-pro-refresh-rotation")' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "Refresh completion must stop the arrow-layer animation"
+require_source_literal \
+  'private final class AppCardRefreshOverlayView: NSView' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "Every app list must retain the shared loading overlay"
+require_source_literal \
+  'private let refreshOverlay = AppCardRefreshOverlayView(frame: .zero)' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "AppCardListView must own its loading overlay"
+require_source_literal \
+  'spinner.startAnimation(nil)' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "The app-list loading overlay must animate its spinner"
+require_source_literal \
+  'spinner.stopAnimation(nil)' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "The app-list loading overlay must stop its spinner when refresh finishes"
+require_source_literal \
+  'refreshOverlay.setActive(refreshing, message: message)' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "The shared list busy state must drive its loading overlay"
+require_source_literal \
+  'nativeCard.setRefreshing(refreshing, message: message)' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "Mappings Native Apps must show the shared refresh state"
+require_source_literal \
+  'profilesCard.setRefreshing(refreshing, message: message)' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "Mappings App Profiles must show the shared refresh state"
+require_source_literal \
+  'generatorList.setRefreshing(refreshing, message: message)' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "App Profile Generator must show the shared refresh overlay"
+require_source_literal \
+  'profilesList.setRefreshing(refreshing, message: message)' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "Your App Profiles must show the shared refresh overlay"
+require_source_literal \
+  'appProfilesView.setRefreshing(busy)' \
+  "$ROOT/Sources/KlikProApp.swift" \
+  "The controller must synchronize both App Profiles refresh controls"
+require_source_literal \
+  'contentView.mappingProfilesView.setRefreshing(busy)' \
+  "$ROOT/Sources/KlikProApp.swift" \
+  "The controller must synchronize both Mappings refresh controls"
+require_source_literal \
+  'setRefreshControlsBusy(true)' \
+  "$ROOT/Sources/KlikProApp.swift" \
+  "App discovery must visibly enter the shared refresh state"
+require_source_literal \
+  'setRefreshControlsBusy(false)' \
+  "$ROOT/Sources/KlikProApp.swift" \
+  "App discovery must always leave the shared refresh state"
 # Both the full App Profiles rows and compact Mappings rows must use the same
 # direct launcher-icon loader. Loading the source bundle in Mappings would hide
 # every managed profile's custom/tinted/badged icon there.
@@ -723,8 +1079,10 @@ grep -q 'mappingProfilesView.setRuntimeHealth' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'mappingProfilesView.setStatus' "$ROOT/Sources/KlikProApp.swift"
 # The list-order pin. No test target compiles AppProfilesUI.swift or KlikProApp.swift,
 # so these greps are the only guard the pin has against a later refactor dropping it.
-grep -q 'static let topPinLimit = 3' "$ROOT/Sources/KlikProConfig.swift"
+grep -q 'static let topPinLimit = 1' "$ROOT/Sources/KlikProConfig.swift"
 grep -q 'static func pinFrame(cardWidth: CGFloat)' "$ROOT/Sources/AppProfilesUI.swift"
+grep -q -- '-20 \* .pi / 180' "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'button.contentTintColor = .black' "$ROOT/Sources/AppProfilesUI.swift"
 # All four card types carry a pin: the two Mappings rows, the generator card, and the
 # App Profiles tab's own row. Five hits = the factory's own declaration plus one
 # construction site per card.
@@ -754,7 +1112,7 @@ grep -A20 'private func refreshTopPinViews' "$ROOT/Sources/KlikProApp.swift" \
 # callout pickers immediately, not just the compact list — the onInstancesChange
 # fan-out rebuilds both, so a new label or a deleted profile never lingers in the
 # dropdown until relaunch.
-grep -A12 'onInstancesChange = { \[weak self\] instances in' \
+grep -A24 'onInstancesChange = { \[weak self\] instances in' \
   "$ROOT/Sources/KlikProApp.swift" | grep -q 'refreshQuickLaunchAssignments'
 grep -q 'systemSymbolName: "arrow.counterclockwise"' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'Reset .* shortcut to default' "$ROOT/Sources/KlikProApp.swift"
@@ -766,7 +1124,10 @@ grep -Eq 'static let deviceCard +=' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'drawDeviceCard(in: SettingsContentView.deviceCard)' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'drawSectionLabel("Mouse Profile"' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'thumbWheelCard = NSRect(x: leftX' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'actionPicker.addItems(withTitles: \["Shortcut", "Open App"\])' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'actionPicker.addItems(withTitles: \[baseActionTitle, "Open App"\])' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'baseActionTitle: "Browser Forward"' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'baseActionTitle: "Browser Back"' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'baseActionTitle: "No Action"' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'func setDualAppMapping(' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'target: LaunchAssignmentTarget?' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'static let dormantLinkGap: CGFloat = 6' "$ROOT/Sources/KlikProApp.swift"
@@ -871,7 +1232,10 @@ grep -q 'about.png' "$ROOT/tools/render-previews.sh"
 # reordered step can never leave a stale recording in the README.
 grep -q 'onboarding-flow.gif' "$ROOT/README.md"
 grep -Eq 'onboarding-flow\.gif[^\"]*" width="462"' "$ROOT/README.md"
-[[ -s "$ROOT/assets/onboarding-flow.gif" ]]
+if [[ ! -s "$ROOT/assets/onboarding-flow.gif" ]]; then
+  echo "Onboarding flow GIF is missing or empty" >&2
+  exit 1
+fi
 grep -q 'tools/render-onboarding-flow.swift' "$ROOT/tools/render-previews.sh"
 onboardingFlowFrames="$(sed -n '/^let frameNames = \[/,/^\]/p' \
   "$ROOT/tools/render-onboarding-flow.swift")"
@@ -889,7 +1253,10 @@ done
   exit 1
 }
 grep -q 'app-profiles-icon-showcase.gif' "$ROOT/README.md"
-[[ -s "$ROOT/assets/app-profiles-icon-showcase.gif" ]]
+if [[ ! -s "$ROOT/assets/app-profiles-icon-showcase.gif" ]]; then
+  echo "App Profiles icon showcase GIF is missing or empty" >&2
+  exit 1
+fi
 # The locked-state Advanced screenshot documents the new lock/warning gate.
 grep -q 'screenshot-advanced-locked.png' "$ROOT/README.md"
 grep -q 'roundedRect: borderRect' "$ROOT/tools/PreviewMain.swift"
@@ -1090,9 +1457,15 @@ lipo -create \
   "$OUT/klik-pro-original-launcher-x86_64" \
   -output "$OUT/KlikProOriginalLauncher"
 runnerArchs="$(lipo -archs "$OUT/KlikProManagedLauncher")"
-[[ "$runnerArchs" == "x86_64 arm64" || "$runnerArchs" == "arm64 x86_64" ]]
+if [[ "$runnerArchs" != "x86_64 arm64" && "$runnerArchs" != "arm64 x86_64" ]]; then
+  echo "Managed launcher must contain arm64 and x86_64, found: $runnerArchs" >&2
+  exit 1
+fi
 originalRunnerArchs="$(lipo -archs "$OUT/KlikProOriginalLauncher")"
-[[ "$originalRunnerArchs" == "x86_64 arm64" || "$originalRunnerArchs" == "arm64 x86_64" ]]
+if [[ "$originalRunnerArchs" != "x86_64 arm64" && "$originalRunnerArchs" != "arm64 x86_64" ]]; then
+  echo "Original launcher must contain arm64 and x86_64, found: $originalRunnerArchs" >&2
+  exit 1
+fi
 for arch in arm64 x86_64; do
   vtool -show-build -arch "$arch" "$OUT/KlikProManagedLauncher" | grep -q 'minos 13.0'
   vtool -show-build -arch "$arch" "$OUT/KlikProOriginalLauncher" | grep -q 'minos 13.0'
@@ -1110,9 +1483,20 @@ xcrun swiftc \
   "$OUT/device-reference.png"
 cmp "$OUT/device-reference.png" "$ROOT/assets/device-reference.png"
 
-[[ "$(sips -g hasAlpha "$ROOT/assets/Klik PRO mouse.png" 2>/dev/null | awk '/hasAlpha/ { print $2 }')" == "yes" ]]
-[[ "$(sips -g pixelWidth "$OUT/device-reference.png" 2>/dev/null | awk '/pixelWidth/ { print $2 }')" == "1000" ]]
-[[ "$(sips -g pixelHeight "$OUT/device-reference.png" 2>/dev/null | awk '/pixelHeight/ { print $2 }')" == "742" ]]
+mouse_has_alpha="$(sips -g hasAlpha "$ROOT/assets/Klik PRO mouse.png" 2>/dev/null \
+  | awk '/hasAlpha/ { print $2 }')"
+if [[ "$mouse_has_alpha" != "yes" ]]; then
+  echo "Klik PRO mouse source must retain its alpha channel" >&2
+  exit 1
+fi
+device_reference_width="$(sips -g pixelWidth "$OUT/device-reference.png" 2>/dev/null \
+  | awk '/pixelWidth/ { print $2 }')"
+device_reference_height="$(sips -g pixelHeight "$OUT/device-reference.png" 2>/dev/null \
+  | awk '/pixelHeight/ { print $2 }')"
+if [[ "$device_reference_width" != "1000" || "$device_reference_height" != "742" ]]; then
+  echo "Device reference must be 1000x742, found ${device_reference_width}x${device_reference_height}" >&2
+  exit 1
+fi
 
 xcrun swiftc \
   -sdk "$SDK" \
@@ -1144,8 +1528,12 @@ for representation in "${expectedIconRepresentations[@]}"; do
   filename="${representation%%:*}"
   expectedSize="${representation##*:}"
   iconPath="$OUT/KlikPRO.iconset/$filename"
-  [[ "$(sips -g pixelWidth "$iconPath" 2>/dev/null | awk '/pixelWidth/ { print $2 }')" == "$expectedSize" ]]
-  [[ "$(sips -g pixelHeight "$iconPath" 2>/dev/null | awk '/pixelHeight/ { print $2 }')" == "$expectedSize" ]]
+  icon_width="$(sips -g pixelWidth "$iconPath" 2>/dev/null | awk '/pixelWidth/ { print $2 }')"
+  icon_height="$(sips -g pixelHeight "$iconPath" 2>/dev/null | awk '/pixelHeight/ { print $2 }')"
+  if [[ "$icon_width" != "$expectedSize" || "$icon_height" != "$expectedSize" ]]; then
+    echo "$filename must be ${expectedSize}x${expectedSize}, found ${icon_width}x${icon_height}" >&2
+    exit 1
+  fi
 done
 
 # iconutil may rewrite PNG metadata while preserving pixels, so normalize the 1024px

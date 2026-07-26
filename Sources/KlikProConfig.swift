@@ -178,6 +178,12 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
     case antigravityIDE
     case chrome
     case brave
+    case cursor
+    case discord
+    case notion
+    case obsidian
+    case slack
+    case visualStudioCode
 
     var title: String {
         switch self {
@@ -191,6 +197,12 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
         case .antigravityIDE: return "Antigravity IDE"
         case .chrome: return "Google Chrome"
         case .brave: return "Brave"
+        case .cursor: return "Cursor"
+        case .discord: return "Discord"
+        case .notion: return "Notion"
+        case .obsidian: return "Obsidian"
+        case .slack: return "Slack"
+        case .visualStudioCode: return "Visual Studio Code"
         }
     }
 
@@ -201,7 +213,9 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
         case .chatGPT: return .chatGPTHotkey
         case .claude: return .claudeHotkey
         case .gemini: return .geminiHotkey
-        case .canva, .zoom, .spotify, .antigravity, .antigravityIDE, .chrome, .brave:
+        case .canva, .zoom, .spotify, .antigravity, .antigravityIDE,
+             .chrome, .brave, .cursor, .discord, .notion, .obsidian,
+             .slack, .visualStudioCode:
             return nil
         }
     }
@@ -218,6 +232,12 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
         case .antigravityIDE: return "com.google.antigravity-ide"
         case .chrome: return "com.google.Chrome"
         case .brave: return "com.brave.Browser"
+        case .cursor: return "com.todesktop.230313mzl4w4u92"
+        case .discord: return "com.hnc.Discord"
+        case .notion: return "notion.id"
+        case .obsidian: return "md.obsidian"
+        case .slack: return "com.tinyspeck.slackmacgap"
+        case .visualStudioCode: return "com.microsoft.VSCode"
         }
     }
 
@@ -233,6 +253,12 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
         case .antigravityIDE: return "/Applications/Antigravity IDE.app"
         case .chrome: return "/Applications/Google Chrome.app"
         case .brave: return "/Applications/Brave Browser.app"
+        case .cursor: return "/Applications/Cursor.app"
+        case .discord: return "/Applications/Discord.app"
+        case .notion: return "/Applications/Notion.app"
+        case .obsidian: return "/Applications/Obsidian.app"
+        case .slack: return "/Applications/Slack.app"
+        case .visualStudioCode: return "/Applications/Visual Studio Code.app"
         }
     }
 
@@ -250,7 +276,9 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
             return NSString(
                 string: "~/Library/Application Support/Gemini Launchers/Gemini.app"
             ).expandingTildeInPath
-        case .canva, .zoom, .spotify, .antigravity, .antigravityIDE, .chrome, .brave:
+        case .canva, .zoom, .spotify, .antigravity, .antigravityIDE,
+             .chrome, .brave, .cursor, .discord, .notion, .obsidian,
+             .slack, .visualStudioCode:
             return NSString(
                 string: "~/Library/Application Support/\(title) Launchers/\(title).app"
             ).expandingTildeInPath
@@ -270,6 +298,12 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
         case .antigravityIDE: fileName = "Antigravity IDE.app"
         case .chrome: fileName = "Google Chrome.app"
         case .brave: fileName = "Brave.app"
+        case .cursor: fileName = "Cursor.app"
+        case .discord: fileName = "Discord.app"
+        case .notion: fileName = "Notion.app"
+        case .obsidian: fileName = "Obsidian.app"
+        case .slack: fileName = "Slack.app"
+        case .visualStudioCode: fileName = "Visual Studio Code.app"
         }
         return NSString(
             string: "~/Applications/Klik PRO Originals/\(fileName)"
@@ -288,6 +322,12 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
         case .antigravityIDE: return "local.klik-pro.original.antigravityide"
         case .chrome: return "local.klik-pro.original.chrome"
         case .brave: return "local.klik-pro.original.brave"
+        case .cursor: return "local.klik-pro.original.cursor"
+        case .discord: return "local.klik-pro.original.discord"
+        case .notion: return "local.klik-pro.original.notion"
+        case .obsidian: return "local.klik-pro.original.obsidian"
+        case .slack: return "local.klik-pro.original.slack"
+        case .visualStudioCode: return "local.klik-pro.original.visualstudiocode"
         }
     }
 
@@ -299,7 +339,9 @@ enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
         switch self {
         case .chatGPT: return UUID(uuidString: "9E4FB42E-0D73-4D66-B94E-92E13934C53D")!
         case .claude: return UUID(uuidString: "6D7052E2-747A-448F-85D0-75E36DA46040")!
-        case .gemini, .canva, .zoom, .spotify, .antigravity, .antigravityIDE, .chrome, .brave:
+        case .gemini, .canva, .zoom, .spotify, .antigravity, .antigravityIDE,
+             .chrome, .brave, .cursor, .discord, .notion, .obsidian,
+             .slack, .visualStudioCode:
             return nil
         }
     }
@@ -585,9 +627,84 @@ struct ThumbWheelConfig: Codable, Equatable {
     }
 }
 
+// MARK: - Mouse profiles
+
+/// A persistent hardware identity suitable for binding a saved profile to a mouse.
+/// Vendor/product identify the model; a serial number, when the device reports one,
+/// distinguishes two otherwise-identical mice. Display names are deliberately not part
+/// of the identity because users and device firmware can rename them.
+struct MouseDeviceIdentity: Codable, Equatable, Hashable {
+    var vendorID: Int
+    var productID: Int
+    var serialNumber: String?
+}
+
+/// One app-opening action owned by a mouse profile. A record array keeps the JSON
+/// readable and lets validation fail closed on hand-edited duplicate targets/buttons.
+struct MouseProfileLaunchAssignment: Codable, Equatable {
+    var target: LaunchAssignmentTarget
+    var button: QuickLaunchMouseButton
+}
+
+/// All behavior specific to one physical/logical mouse slide. Keyboard launch hotkeys
+/// intentionally remain global on `KlikProConfig`; switching mice must never silently
+/// replace a keyboard shortcut.
+struct MouseProfile: Codable, Equatable, Identifiable {
+    static let maximumCount = 3
+    /// Deterministic only for the one-profile v13 -> v14 migration. Newly added profiles
+    /// receive caller-supplied/random UUIDs.
+    static let defaultProfileID = UUID(
+        uuidString: "A08FEEC9-E7F9-4A96-AE91-54EA47C05E14"
+    )!
+
+    var id: UUID
+    var name: String
+    var deviceIdentity: MouseDeviceIdentity?
+    var middleButton: ShortcutMapping
+    var gestureButton: ShortcutMapping
+    var forwardButton: ShortcutMapping
+    var backButton: ShortcutMapping
+    var thumbWheel: ThumbWheelConfig
+    var launchAssignments: [MouseProfileLaunchAssignment]
+
+    /// A new slide starts with the same owner-approved quiet defaults as a fresh
+    /// installation: only browser Back/Forward are mapped, with no app assignments.
+    static func quietDefault(
+        id: UUID = UUID(),
+        name: String = "Mouse Profile"
+    ) -> MouseProfile {
+        MouseProfile(
+            id: id,
+            name: name,
+            deviceIdentity: nil,
+            middleButton: ShortcutMapping(enabled: false, combo: .unset),
+            gestureButton: ShortcutMapping(enabled: false, combo: .unset),
+            forwardButton: ShortcutMapping(
+                enabled: true,
+                combo: defaultBrowserForwardCombo
+            ),
+            backButton: ShortcutMapping(
+                enabled: true,
+                combo: defaultBrowserBackCombo
+            ),
+            thumbWheel: ThumbWheelConfig(
+                enabled: false,
+                chromeEnabled: false,
+                braveEnabled: false,
+                firefoxEnabled: false,
+                safariEnabled: false,
+                defaultFallbackEnabled: false
+            ),
+            launchAssignments: []
+        )
+    }
+}
+
 // MARK: - Top-level config
 
 struct KlikProConfig: Codable, Equatable {
+    static let currentSchemaVersion = 15
+
     var schemaVersion: Int
     // New schema-10 installations begin with onboarding pending. Configurations from
     // older releases migrate as already onboarded so an update never interrupts an
@@ -677,10 +794,17 @@ struct KlikProConfig: Codable, Equatable {
     // `topPinnedOriginals`; a pin for a deleted profile is harmless (it simply matches
     // nothing) and is deliberately not pruned, so restoring the profile restores its pin.
     var topPinnedProfileIDs: [UUID]
+    // Schema 14: up to three UUID-keyed mouse slides. Every hardware mapping and
+    // mouse-button launch assignment belongs to one profile; the global keyboard
+    // launch hotkeys above remain intentionally outside this collection.
+    var mouseProfiles: [MouseProfile]
+    var activeMouseProfileID: UUID
 
     /// The most cards either list will float to the top. Reaching it does not swap a pin
     /// out: the user unpins to free a slot, so a pin is never lost silently.
-    static let topPinLimit = 3
+    /// Each list has one sticky top slot. Pinning another card requires the user
+    /// to unpin the current one first; Klik PRO never swaps it implicitly.
+    static let topPinLimit = 1
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, onboardingCompleted, showMenuBarIcon, showQuickLaunchMenuIcons
@@ -691,6 +815,7 @@ struct KlikProConfig: Codable, Equatable {
         case forwardButton, backButton, thumbWheel, instances
         case suppressedLegacyInstanceIDs, dataRoot, knownDataRoots, menuBarPinnedOriginals
         case originalDockCustomNames, topPinnedOriginals, topPinnedProfileIDs
+        case mouseProfiles, activeMouseProfileID
     }
 
     /// `showMenuBarIcon` was added in schema 6. Quick Launch side-button defaults were
@@ -801,6 +926,36 @@ struct KlikProConfig: Codable, Equatable {
                 instances[index].archivedAt = nil
             }
         }
+        let decodedMouseProfiles = try container.decodeIfPresent(
+            [MouseProfile].self,
+            forKey: .mouseProfiles
+        ) ?? []
+        if decodedMouseProfiles.isEmpty {
+            let migratedProfile = MouseProfile(
+                id: MouseProfile.defaultProfileID,
+                name: "Default",
+                deviceIdentity: nil,
+                middleButton: middleButton,
+                gestureButton: gestureButton,
+                forwardButton: forwardButton,
+                backButton: backButton,
+                thumbWheel: thumbWheel,
+                launchAssignments: legacyMouseProfileLaunchAssignments(
+                    chatGPTMouseButton: chatGPTMouseButton,
+                    claudeMouseButton: claudeMouseButton,
+                    geminiMouseButton: geminiMouseButton,
+                    instances: instances
+                )
+            )
+            mouseProfiles = [migratedProfile]
+            activeMouseProfileID = migratedProfile.id
+        } else {
+            mouseProfiles = decodedMouseProfiles
+            activeMouseProfileID = try container.decodeIfPresent(
+                UUID.self,
+                forKey: .activeMouseProfileID
+            ) ?? decodedMouseProfiles[0].id
+        }
     }
 
     init(
@@ -828,7 +983,9 @@ struct KlikProConfig: Codable, Equatable {
         menuBarPinnedOriginals: Set<QuickLaunchTarget> = [],
         originalDockCustomNames: [QuickLaunchTarget: String] = [:],
         topPinnedOriginals: [QuickLaunchTarget] = [],
-        topPinnedProfileIDs: [UUID] = []
+        topPinnedProfileIDs: [UUID] = [],
+        mouseProfiles: [MouseProfile] = [],
+        activeMouseProfileID: UUID? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.onboardingCompleted = onboardingCompleted
@@ -855,6 +1012,29 @@ struct KlikProConfig: Codable, Equatable {
         self.originalDockCustomNames = originalDockCustomNames
         self.topPinnedOriginals = topPinnedOriginals
         self.topPinnedProfileIDs = topPinnedProfileIDs
+        if mouseProfiles.isEmpty {
+            let migratedProfile = MouseProfile(
+                id: MouseProfile.defaultProfileID,
+                name: "Default",
+                deviceIdentity: nil,
+                middleButton: middleButton,
+                gestureButton: gestureButton,
+                forwardButton: forwardButton,
+                backButton: backButton,
+                thumbWheel: thumbWheel,
+                launchAssignments: legacyMouseProfileLaunchAssignments(
+                    chatGPTMouseButton: chatGPTMouseButton,
+                    claudeMouseButton: claudeMouseButton,
+                    geminiMouseButton: geminiMouseButton,
+                    instances: instances
+                )
+            )
+            self.mouseProfiles = [migratedProfile]
+            self.activeMouseProfileID = migratedProfile.id
+        } else {
+            self.mouseProfiles = mouseProfiles
+            self.activeMouseProfileID = activeMouseProfileID ?? mouseProfiles[0].id
+        }
     }
 }
 
@@ -869,10 +1049,64 @@ let defaultBrowserForwardCombo = KeyCombo(
     command: true, option: false, control: false, shift: false
 )
 
+private let removedShortcutMapping = ShortcutMapping(enabled: false, combo: .unset)
+
+/// Product policy: Klik PRO exposes only the fixed browser Forward/Back actions.
+/// Middle, Gesture, global app hotkeys, and App Profile hotkeys are app-opening
+/// controls only; stale shortcuts from older releases must never remain as hidden
+/// fallbacks. Keep the legacy Codable fields until a future schema can remove them.
+func applyingBrowserOnlyShortcutPolicy(_ config: KlikProConfig) -> KlikProConfig {
+    var updated = config
+    updated.middleButton = removedShortcutMapping
+    updated.gestureButton = removedShortcutMapping
+    updated.chatGPTHotkey = removedShortcutMapping
+    updated.claudeHotkey = removedShortcutMapping
+    updated.geminiHotkey = removedShortcutMapping
+    updated.forwardButton = ShortcutMapping(enabled: true, combo: defaultBrowserForwardCombo)
+    updated.backButton = ShortcutMapping(enabled: true, combo: defaultBrowserBackCombo)
+    for index in updated.mouseProfiles.indices {
+        updated.mouseProfiles[index].middleButton = removedShortcutMapping
+        updated.mouseProfiles[index].gestureButton = removedShortcutMapping
+        updated.mouseProfiles[index].forwardButton =
+            ShortcutMapping(enabled: true, combo: defaultBrowserForwardCombo)
+        updated.mouseProfiles[index].backButton =
+            ShortcutMapping(enabled: true, combo: defaultBrowserBackCombo)
+    }
+    for index in updated.instances.indices {
+        updated.instances[index].hotkey = removedShortcutMapping
+    }
+    return updated
+}
+
+/// Schema 15 deliberately gives existing users the same clean mouse-control state
+/// as a new user. App Profiles and their data remain intact; only mouse presets,
+/// device associations, button ownership, and obsolete hotkeys are reset.
+func resettingMouseControlsForSchema15(_ config: KlikProConfig) -> KlikProConfig {
+    var updated = config
+    let clean = MouseProfile.quietDefault(
+        id: MouseProfile.defaultProfileID,
+        name: "Default"
+    )
+    updated.mouseProfiles = [clean]
+    updated.activeMouseProfileID = clean.id
+    updated.middleButton = clean.middleButton
+    updated.gestureButton = clean.gestureButton
+    updated.forwardButton = clean.forwardButton
+    updated.backButton = clean.backButton
+    updated.thumbWheel = clean.thumbWheel
+    updated.chatGPTMouseButton = nil
+    updated.claudeMouseButton = nil
+    updated.geminiMouseButton = nil
+    for index in updated.instances.indices {
+        updated.instances[index].mouseButton = nil
+    }
+    return applyingBrowserOnlyShortcutPolicy(updated)
+}
+
 extension KlikProConfig {
     static let `default`: KlikProConfig = {
         var config = KlikProConfig(
-            schemaVersion: 13,
+            schemaVersion: KlikProConfig.currentSchemaVersion,
             onboardingCompleted: false,
             // Fresh installs begin with every Settings toggle OFF. First-run onboarding
             // asks the user to turn each on (or skip). Existing configs keep their stored
@@ -989,9 +1223,17 @@ enum KlikProConfigStore {
         let requiresAppProfilesMigration = decoded.schemaVersion < 10
         let requiresVaultMigration = decoded.schemaVersion < 11
         let requiresLifecycleMigration = decoded.schemaVersion < 12
-        var normalized = addingDiscoveredExternalDualApps(
+        let requiresMouseProfilesMigration =
+            decoded.schemaVersion < KlikProConfig.currentSchemaVersion
+        let requiresCleanMouseControlsMigration = decoded.schemaVersion < 15
+        var normalized = applyingBrowserOnlyShortcutPolicy(addingDiscoveredExternalDualApps(
             to: normalizedQuickLaunchConfig(decoded)
-        )
+        ))
+        if requiresCleanMouseControlsMigration {
+            normalized = normalizedQuickLaunchConfig(
+                resettingMouseControlsForSchema15(normalized)
+            )
+        }
         if let previewOverride = specialFeatureEnabledPreviewOverride {
             normalized.specialFeatureEnabled = previewOverride
         }
@@ -1009,9 +1251,13 @@ enum KlikProConfigStore {
             if createPreV2BackupIfNeeded(originalData: data) {
                 _ = save(normalized)
             }
-        } else if requiresVaultMigration || requiresLifecycleMigration {
-            // Schema 10 → 11 and 11 → 12 are purely additive, so the version
-            // bump is rewritten without the destructive-migration backup convention.
+        } else if requiresVaultMigration
+                    || requiresLifecycleMigration
+                    || requiresMouseProfilesMigration {
+            // Schema 10 → 11, 11 → 12, 13 → 14, and 14 → 15 are additive. Schema 14 moves
+            // existing mouse behavior into one Default profile while retaining a
+            // synchronized legacy shadow. Schema 15 removes every legacy shortcut except
+            // fixed browser Forward/Back, so no destructive-migration backup is needed.
             _ = save(normalized)
         }
         // The "all Settings toggles start OFF" policy applies once to existing users too.
@@ -1056,8 +1302,11 @@ enum KlikProConfigStore {
 
     @discardableResult
     static func save(_ config: KlikProConfig) -> Bool {
-        let normalized = normalizedQuickLaunchConfig(config)
+        let normalized = applyingBrowserOnlyShortcutPolicy(
+            normalizedQuickLaunchConfig(config)
+        )
         guard quickLaunchMouseAssignmentsAreValid(normalized),
+              mouseProfilesAreValid(normalized),
               appProfileAssignmentsAreValid(normalized) else { return false }
         do {
             try FileManager.default.createDirectory(
@@ -1981,11 +2230,19 @@ func quickLaunchMouseButton(
     for target: QuickLaunchTarget,
     in config: KlikProConfig
 ) -> QuickLaunchMouseButton? {
+    if let profile = activeMouseProfile(in: config) {
+        return mouseButton(assignedTo: .original(target), in: profile)
+    }
+    // Decode/repair should always provide a profile. This fallback keeps a malformed
+    // in-memory value fail-safe for older callers until it is normalized.
     switch target {
     case .chatGPT: return config.chatGPTMouseButton
     case .claude: return config.claudeMouseButton
     case .gemini: return config.geminiMouseButton
-    case .canva, .zoom, .spotify, .antigravity, .antigravityIDE, .chrome, .brave: return nil
+    case .canva, .zoom, .spotify, .antigravity, .antigravityIDE,
+         .chrome, .brave, .cursor, .discord, .notion, .obsidian,
+         .slack, .visualStudioCode:
+        return nil
     }
 }
 
@@ -1993,38 +2250,363 @@ func quickLaunchMouseButton(
 /// Original installed apps deliberately remain separate from managed App Profiles:
 /// this type unifies mouse-button ownership without giving originals a UUID-backed
 /// data lifecycle, launcher ownership, repair, archive, or deletion semantics.
-enum LaunchAssignmentTarget: Equatable {
+enum LaunchAssignmentTarget: Codable, Equatable, Hashable {
     case original(QuickLaunchTarget)
     case profile(UUID)
+}
+
+/// Converts schema-13-and-earlier assignment storage into the schema-14 profile
+/// namespace without dropping dormant/archived instance assignments. Legacy external
+/// instance mirrors are excluded because their authoritative original-app fields are
+/// already represented above.
+private func legacyMouseProfileLaunchAssignments(
+    chatGPTMouseButton: QuickLaunchMouseButton?,
+    claudeMouseButton: QuickLaunchMouseButton?,
+    geminiMouseButton: QuickLaunchMouseButton?,
+    instances: [AppProfileInstance]
+) -> [MouseProfileLaunchAssignment] {
+    var assignments: [MouseProfileLaunchAssignment] = []
+    if let button = chatGPTMouseButton {
+        assignments.append(MouseProfileLaunchAssignment(
+            target: .original(.chatGPT),
+            button: button
+        ))
+    }
+    if let button = claudeMouseButton {
+        assignments.append(MouseProfileLaunchAssignment(
+            target: .original(.claude),
+            button: button
+        ))
+    }
+    if let button = geminiMouseButton {
+        assignments.append(MouseProfileLaunchAssignment(
+            target: .original(.gemini),
+            button: button
+        ))
+    }
+    assignments.append(contentsOf: instances.compactMap { instance in
+        guard instance.legacyQuickLaunchTarget == nil,
+              let button = instance.mouseButton else { return nil }
+        return MouseProfileLaunchAssignment(
+            target: .profile(instance.id),
+            button: button
+        )
+    })
+    return assignments
+}
+
+func mouseProfile(id: UUID, in config: KlikProConfig) -> MouseProfile? {
+    let matches = config.mouseProfiles.filter { $0.id == id }
+    return matches.count == 1 ? matches[0] : nil
+}
+
+func activeMouseProfile(in config: KlikProConfig) -> MouseProfile? {
+    mouseProfile(id: config.activeMouseProfileID, in: config)
+}
+
+func launchAssignmentOwner(
+    of button: QuickLaunchMouseButton,
+    in profile: MouseProfile
+) -> LaunchAssignmentTarget? {
+    let owners = profile.launchAssignments.compactMap { assignment in
+        assignment.button == button ? assignment.target : nil
+    }
+    return owners.count == 1 ? owners[0] : nil
+}
+
+func mouseButton(
+    assignedTo target: LaunchAssignmentTarget,
+    in profile: MouseProfile
+) -> QuickLaunchMouseButton? {
+    let matches = profile.launchAssignments.compactMap { assignment in
+        assignment.target == target ? assignment.button : nil
+    }
+    return matches.count == 1 ? matches[0] : nil
+}
+
+/// Returns a profile with exactly one owner for `button` and no second button for
+/// `target`. Other profile slides are not consulted: each slide has an independent
+/// assignment namespace.
+func assigningMouseButton(
+    _ button: QuickLaunchMouseButton,
+    to target: LaunchAssignmentTarget,
+    in profile: MouseProfile
+) -> MouseProfile {
+    var updated = profile
+    updated.launchAssignments.removeAll {
+        $0.button == button || $0.target == target
+    }
+    updated.launchAssignments.append(MouseProfileLaunchAssignment(
+        target: target,
+        button: button
+    ))
+    return updated
+}
+
+func clearingMouseButton(
+    from target: LaunchAssignmentTarget,
+    in profile: MouseProfile
+) -> MouseProfile {
+    var updated = profile
+    updated.launchAssignments.removeAll { $0.target == target }
+    return updated
+}
+
+private func mouseProfileLaunchAssignmentsAreValid(_ profile: MouseProfile) -> Bool {
+    var buttons = Set<QuickLaunchMouseButton>()
+    var targets = Set<LaunchAssignmentTarget>()
+    for assignment in profile.launchAssignments {
+        guard buttons.insert(assignment.button).inserted,
+              targets.insert(assignment.target).inserted else {
+            return false
+        }
+    }
+    return true
+}
+
+func mouseProfileIsValid(
+    _ profile: MouseProfile,
+    in config: KlikProConfig
+) -> Bool {
+    guard !profile.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+          mouseProfileLaunchAssignmentsAreValid(profile) else {
+        return false
+    }
+    for assignment in profile.launchAssignments {
+        if case .profile(let instanceID) = assignment.target,
+           !config.instances.contains(where: { $0.id == instanceID }) {
+            return false
+        }
+    }
+    let mouseMappings = [
+        profile.middleButton,
+        profile.gestureButton,
+        profile.forwardButton,
+        profile.backButton,
+    ]
+    guard !mouseMappings.contains(where: {
+        $0.enabled && isGestureSentinelOutput($0.combo)
+    }) else {
+        return false
+    }
+    if let identity = profile.deviceIdentity {
+        guard identity.vendorID >= 0,
+              identity.productID >= 0 else {
+            return false
+        }
+        if let serialNumber = identity.serialNumber,
+           serialNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return false
+        }
+    }
+    // Validate the mappings exactly as they would behave after activation, without
+    // changing the caller's selected profile or requiring this draft to be inserted
+    // into the real collection first.
+    var activationCandidate = config
+    activationCandidate.mouseProfiles = [profile]
+    activationCandidate.activeMouseProfileID = profile.id
+    activationCandidate = normalizedMouseProfileConfig(activationCandidate)
+    return quickLaunchMouseAssignmentsAreValid(activationCandidate)
+        && appProfileAssignmentsAreValid(activationCandidate)
+}
+
+func mouseProfilesAreValid(_ config: KlikProConfig) -> Bool {
+    guard !config.mouseProfiles.isEmpty,
+          config.mouseProfiles.count <= MouseProfile.maximumCount else {
+        return false
+    }
+    var profileIDs = Set<UUID>()
+    var deviceIdentities = Set<MouseDeviceIdentity>()
+    for profile in config.mouseProfiles {
+        guard profileIDs.insert(profile.id).inserted,
+              mouseProfileIsValid(profile, in: config) else {
+            return false
+        }
+        if let identity = profile.deviceIdentity,
+           !deviceIdentities.insert(identity).inserted {
+            // Automatic device selection would otherwise be ambiguous.
+            return false
+        }
+    }
+    return profileIDs.contains(config.activeMouseProfileID)
+}
+
+/// Mirrors the active schema-14 profile into the v1 fields and
+/// `AppProfileInstance.mouseButton`. These fields remain encoded so an older build can
+/// load the active slide, while inactive slides stay safely ignored by that build.
+private func synchronizedActiveMouseProfileDowngradeShadow(
+    in config: KlikProConfig
+) -> KlikProConfig {
+    guard let profile = activeMouseProfile(in: config) else { return config }
+    var updated = config
+    updated.middleButton = profile.middleButton
+    updated.gestureButton = profile.gestureButton
+    updated.forwardButton = profile.forwardButton
+    updated.backButton = profile.backButton
+    updated.thumbWheel = profile.thumbWheel
+    updated.chatGPTMouseButton = mouseButton(
+        assignedTo: .original(.chatGPT),
+        in: profile
+    )
+    updated.claudeMouseButton = mouseButton(
+        assignedTo: .original(.claude),
+        in: profile
+    )
+    updated.geminiMouseButton = mouseButton(
+        assignedTo: .original(.gemini),
+        in: profile
+    )
+    for index in updated.instances.indices {
+        if let legacyTarget = updated.instances[index].legacyQuickLaunchTarget {
+            updated.instances[index].mouseButton = mouseButton(
+                assignedTo: .original(legacyTarget),
+                in: profile
+            )
+        } else {
+            updated.instances[index].mouseButton = mouseButton(
+                assignedTo: .profile(updated.instances[index].id),
+                in: profile
+            )
+        }
+    }
+    return updated
+}
+
+/// Repairs only collection-level invariants: duplicate UUID rows are de-duplicated,
+/// the collection is clamped to three while retaining the active row when possible,
+/// blank names are repaired, and a missing active ID falls back to the first row.
+/// Conflicting launch assignments and duplicate device bindings remain visible and
+/// fail validation rather than being silently discarded.
+func normalizedMouseProfileConfig(_ config: KlikProConfig) -> KlikProConfig {
+    var normalized = config
+    var seenIDs = Set<UUID>()
+    var profiles = normalized.mouseProfiles.filter {
+        seenIDs.insert($0.id).inserted
+    }
+    if profiles.isEmpty {
+        profiles = [MouseProfile(
+            id: MouseProfile.defaultProfileID,
+            name: "Default",
+            deviceIdentity: nil,
+            middleButton: normalized.middleButton,
+            gestureButton: normalized.gestureButton,
+            forwardButton: normalized.forwardButton,
+            backButton: normalized.backButton,
+            thumbWheel: normalized.thumbWheel,
+            launchAssignments: legacyMouseProfileLaunchAssignments(
+                chatGPTMouseButton: normalized.chatGPTMouseButton,
+                claudeMouseButton: normalized.claudeMouseButton,
+                geminiMouseButton: normalized.geminiMouseButton,
+                instances: normalized.instances
+            )
+        )]
+    }
+    if profiles.count > MouseProfile.maximumCount {
+        if let activeIndex = profiles.firstIndex(where: {
+            $0.id == normalized.activeMouseProfileID
+        }), activeIndex >= MouseProfile.maximumCount {
+            profiles = Array(profiles.prefix(MouseProfile.maximumCount - 1))
+                + [profiles[activeIndex]]
+        } else {
+            profiles = Array(profiles.prefix(MouseProfile.maximumCount))
+        }
+    }
+    for index in profiles.indices {
+        let trimmedName = profiles[index].name.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        profiles[index].name = trimmedName.isEmpty ? "Mouse \(index + 1)" : trimmedName
+        if let serialNumber = profiles[index].deviceIdentity?.serialNumber {
+            let trimmedSerial = serialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+            profiles[index].deviceIdentity?.serialNumber =
+                trimmedSerial.isEmpty ? nil : trimmedSerial
+        }
+    }
+    normalized.mouseProfiles = profiles
+    if !profiles.contains(where: { $0.id == normalized.activeMouseProfileID }) {
+        normalized.activeMouseProfileID = profiles[0].id
+    }
+    return synchronizedActiveMouseProfileDowngradeShadow(in: normalized)
+}
+
+func replacingMouseProfile(
+    _ profile: MouseProfile,
+    in config: KlikProConfig
+) -> KlikProConfig {
+    var updated = normalizedMouseProfileConfig(config)
+    guard let index = updated.mouseProfiles.firstIndex(where: {
+        $0.id == profile.id
+    }) else { return updated }
+    updated.mouseProfiles[index] = profile
+    return normalizedMouseProfileConfig(updated)
+}
+
+func addingMouseProfile(
+    _ profile: MouseProfile,
+    to config: KlikProConfig
+) -> KlikProConfig? {
+    var updated = normalizedMouseProfileConfig(config)
+    guard updated.mouseProfiles.count < MouseProfile.maximumCount,
+          !updated.mouseProfiles.contains(where: { $0.id == profile.id }),
+          mouseProfileIsValid(profile, in: updated) else {
+        return nil
+    }
+    updated.mouseProfiles.append(profile)
+    return normalizedMouseProfileConfig(updated)
+}
+
+func removingMouseProfile(
+    id: UUID,
+    from config: KlikProConfig
+) -> KlikProConfig? {
+    var updated = normalizedMouseProfileConfig(config)
+    guard updated.mouseProfiles.count > 1,
+          let index = updated.mouseProfiles.firstIndex(where: { $0.id == id }) else {
+        return nil
+    }
+    updated.mouseProfiles.remove(at: index)
+    if updated.activeMouseProfileID == id {
+        updated.activeMouseProfileID = updated.mouseProfiles[0].id
+    }
+    return normalizedMouseProfileConfig(updated)
+}
+
+func mouseProfileCanActivate(
+    id: UUID,
+    in config: KlikProConfig
+) -> Bool {
+    var candidate = normalizedMouseProfileConfig(config)
+    guard candidate.mouseProfiles.contains(where: { $0.id == id }) else {
+        return false
+    }
+    candidate.activeMouseProfileID = id
+    return mouseProfilesAreValid(candidate)
+}
+
+func activatingMouseProfile(
+    id: UUID,
+    in config: KlikProConfig
+) -> KlikProConfig? {
+    guard mouseProfileCanActivate(id: id, in: config) else { return nil }
+    var updated = normalizedMouseProfileConfig(config)
+    updated.activeMouseProfileID = id
+    return normalizedMouseProfileConfig(updated)
 }
 
 func launchAssignmentOwner(
     of button: QuickLaunchMouseButton,
     in config: KlikProConfig
 ) -> LaunchAssignmentTarget? {
-    var owners: [LaunchAssignmentTarget] = []
-    if config.chatGPTMouseButton == button { owners.append(.original(.chatGPT)) }
-    if config.claudeMouseButton == button { owners.append(.original(.claude)) }
-    if config.geminiMouseButton == button { owners.append(.original(.gemini)) }
-    owners.append(contentsOf: config.instances.compactMap { instance in
-        guard instance.state == .active,
-              instance.legacyQuickLaunchTarget == nil,
-              instance.mouseButton == button else { return nil }
-        return .profile(instance.id)
-    })
-    return owners.count == 1 ? owners[0] : nil
+    guard let profile = activeMouseProfile(in: config) else { return nil }
+    return launchAssignmentOwner(of: button, in: profile)
 }
 
 func mouseButton(
     assignedTo target: LaunchAssignmentTarget,
     in config: KlikProConfig
 ) -> QuickLaunchMouseButton? {
-    switch target {
-    case .original(let original):
-        return quickLaunchMouseButton(for: original, in: config)
-    case .profile(let id):
-        return config.instances.first { $0.id == id && $0.state == .active }?.mouseButton
-    }
+    guard let profile = activeMouseProfile(in: config) else { return nil }
+    return mouseButton(assignedTo: target, in: profile)
 }
 
 /// Returns a copy with `button` owned by exactly `target`. Moving a target also
@@ -2035,38 +2617,10 @@ func assigningMouseButton(
     to target: LaunchAssignmentTarget,
     in config: KlikProConfig
 ) -> KlikProConfig {
-    var updated = config
-    updated.instances.indices.forEach { index in
-        let instanceTarget = updated.instances[index].legacyQuickLaunchTarget
-        if updated.instances[index].mouseButton == button
-            || (target == .profile(updated.instances[index].id))
-            || (instanceTarget.map { target == .original($0) } ?? false) {
-            updated.instances[index].mouseButton = nil
-        }
-    }
-    if updated.chatGPTMouseButton == button || target == .original(.chatGPT) {
-        updated.chatGPTMouseButton = nil
-    }
-    if updated.claudeMouseButton == button || target == .original(.claude) {
-        updated.claudeMouseButton = nil
-    }
-    if updated.geminiMouseButton == button || target == .original(.gemini) {
-        updated.geminiMouseButton = nil
-    }
-    switch target {
-    case .original(.chatGPT): updated.chatGPTMouseButton = button
-    case .original(.claude): updated.claudeMouseButton = button
-    case .original(.gemini): updated.geminiMouseButton = button
-    case .original(.canva), .original(.zoom), .original(.spotify),
-         .original(.antigravity), .original(.antigravityIDE),
-         .original(.chrome), .original(.brave): break
-    case .profile(let id):
-        if let index = updated.instances.firstIndex(where: {
-            $0.id == id && $0.state == .active && $0.legacyQuickLaunchTarget == nil
-        }) {
-            updated.instances[index].mouseButton = button
-        }
-    }
+    var updated = normalizedMouseProfileConfig(config)
+    guard let active = activeMouseProfile(in: updated) else { return updated }
+    let profile = assigningMouseButton(button, to: target, in: active)
+    updated = replacingMouseProfile(profile, in: updated)
     return normalizedQuickLaunchConfig(updated)
 }
 
@@ -2074,28 +2628,16 @@ func clearingMouseButton(
     from target: LaunchAssignmentTarget,
     in config: KlikProConfig
 ) -> KlikProConfig {
-    var updated = config
-    switch target {
-    case .original(.chatGPT): updated.chatGPTMouseButton = nil
-    case .original(.claude): updated.claudeMouseButton = nil
-    case .original(.gemini): updated.geminiMouseButton = nil
-    case .original(.canva), .original(.zoom), .original(.spotify),
-         .original(.antigravity), .original(.antigravityIDE),
-         .original(.chrome), .original(.brave): break
-    case .profile(let id):
-        if let index = updated.instances.firstIndex(where: { $0.id == id }) {
-            updated.instances[index].mouseButton = nil
-        }
-    }
+    var updated = normalizedMouseProfileConfig(config)
+    guard let active = activeMouseProfile(in: updated) else { return updated }
+    let profile = clearingMouseButton(from: target, in: active)
+    updated = replacingMouseProfile(profile, in: updated)
     return normalizedQuickLaunchConfig(updated)
 }
 
 func quickLaunchMouseAssignmentsAreValid(_ config: KlikProConfig) -> Bool {
-    guard let chatGPT = config.chatGPTMouseButton,
-          let claude = config.claudeMouseButton else {
-        return true
-    }
-    return chatGPT != claude
+    guard let profile = activeMouseProfile(in: config) else { return false }
+    return mouseProfileLaunchAssignmentsAreValid(profile)
 }
 
 private func legacyQuickLaunchInstance(
@@ -2360,9 +2902,12 @@ func launchableAppProfileInstanceIDs(
 /// visible for correction, while `assignedQuickLaunchTarget` makes its runtime overlay
 /// fail closed. The on-disk file is not rewritten until the user explicitly saves.
 func normalizedQuickLaunchConfig(_ config: KlikProConfig) -> KlikProConfig {
-    var normalized = config
-    normalized.schemaVersion = 12
+    var normalized = normalizedMouseProfileConfig(config)
+    normalized.schemaVersion = KlikProConfig.currentSchemaVersion
     normalized.instances = synchronizedLegacyQuickLaunchInstances(in: normalized)
+    // Synchronize the newly created legacy mirrors and every managed instance after
+    // rebuilding the schema-10 instance list.
+    normalized = normalizedMouseProfileConfig(normalized)
     var roots: [String] = []
     var seen = Set<String>()
     for candidate in normalized.knownDataRoots + [normalized.dataRoot].compactMap({ $0 }) {
@@ -2375,7 +2920,7 @@ func normalizedQuickLaunchConfig(_ config: KlikProConfig) -> KlikProConfig {
     normalized.knownDataRoots = Array(roots.suffix(8))
     // Clamp both pin lists here rather than trusting the UI, so a hand-edited config or
     // one written by a different build cannot quietly exceed the cap. De-duplicate first
-    // (a repeated entry would otherwise consume two of the three slots) and keep the
+    // (a repeated entry would otherwise consume the one slot) and keep the
     // user's own order, so the earliest pin stays highest.
     normalized.topPinnedOriginals = clampedTopPins(normalized.topPinnedOriginals)
     normalized.topPinnedProfileIDs = clampedTopPins(normalized.topPinnedProfileIDs)
@@ -2392,7 +2937,7 @@ func clampedTopPins<Element: Hashable>(_ pins: [Element]) -> [Element] {
 /// The pin list after pinning `pin`, or nil when the list is genuinely full.
 ///
 /// A pin whose card is not currently in the list — an uninstalled app, a deleted profile —
-/// must NOT consume a slot. Otherwise a user who pins three apps and then uninstalls them
+/// must NOT consume a slot. Otherwise a user who pins an app and then uninstalls it
 /// is locked out permanently: every remaining card reports "already full" while the pinned
 /// cards no longer exist to unpin from. Only `isResolvable` pins count toward the cap.
 ///
@@ -2443,7 +2988,9 @@ func activeQuickLaunchTarget(
     switch target {
     case .chatGPT: return chatGPTAvailable ? target : nil
     case .claude: return claudeAvailable ? target : nil
-    case .gemini, .canva, .zoom, .spotify, .antigravity, .antigravityIDE, .chrome, .brave:
+    case .gemini, .canva, .zoom, .spotify, .antigravity, .antigravityIDE,
+         .chrome, .brave, .cursor, .discord, .notion, .obsidian,
+         .slack, .visualStudioCode:
         return FileManager.default.fileExists(atPath: target.standardApplicationPath)
             ? target : nil
     }

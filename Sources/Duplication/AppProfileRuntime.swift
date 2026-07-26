@@ -421,11 +421,22 @@ struct AppProfileRuntime {
             )
         case .complete:
             // Zero processes → launch a fresh instance for this profile through
-            // openApplication with the profile's --user-data-dir and
+            // openApplication with the profile's rule-specific arguments and
             // createsNewApplicationInstance (the app's window is created on first
             // launch anyway). The already-running case is handled above.
+            let rule = instance.compatibilityRuleID.flatMap {
+                AppCompatibilityRegistry.production.rule(withID: $0)
+            }
+            guard let arguments = try? rule?.resolvedLaunchArguments(
+                profileDirectory: context.profileURL.path
+            ) ?? ["--user-data-dir=" + context.profileURL.path] else {
+                withExtendedLifetime(operationLock) {
+                    completion(.failure(.launchFailed))
+                }
+                return
+            }
             let configuration = NSWorkspace.OpenConfiguration()
-            configuration.arguments = ["--user-data-dir=" + context.profileURL.path]
+            configuration.arguments = arguments
             configuration.environment = instance.environmentOverrides
             configuration.createsNewApplicationInstance = true
             configuration.activates = false

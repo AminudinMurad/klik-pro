@@ -224,8 +224,8 @@ private struct MouseButtonRoutingTests {
         expect(shortcutSlot(forMouseButtonNumber: 5) == nil,
                "unmanaged button 5 must pass through")
 
-        expect(KlikProConfig.default.schemaVersion == 13,
-               "new configurations must use schema 13 (Gemini launch target fields)")
+        expect(KlikProConfig.default.schemaVersion == 15,
+               "new configurations must use schema 15 browser-only shortcuts")
         expect(!KlikProConfig.default.onboardingCompleted,
                "a new configuration must begin with onboarding pending")
         expect(!KlikProConfig.default.showMenuBarIcon,
@@ -257,13 +257,194 @@ private struct MouseButtonRoutingTests {
         expect(KlikProConfig.default.forwardButton.enabled
                && KlikProConfig.default.backButton.enabled,
                "Forward and Back keep their browser-shortcut defaults")
+        var staleShortcutConfig = KlikProConfig.default
+        staleShortcutConfig.middleButton = ShortcutMapping(
+            enabled: true,
+            combo: KeyCombo(
+                keyCode: UInt16(kVK_ANSI_7), keyDisplay: "7",
+                command: true, option: false, control: false, shift: true
+            )
+        )
+        staleShortcutConfig.chatGPTHotkey = staleShortcutConfig.middleButton
+        var staleProfile = activeMouseProfile(in: staleShortcutConfig)!
+        staleProfile.middleButton = staleShortcutConfig.middleButton
+        staleProfile.deviceIdentity = MouseDeviceIdentity(
+            vendorID: 0x046D, productID: 0xB02A, serialNumber: "test"
+        )
+        staleProfile.launchAssignments = [
+            MouseProfileLaunchAssignment(target: .original(.claude), button: .middle)
+        ]
+        staleShortcutConfig.mouseProfiles = [staleProfile]
+        let cleanMouseConfig = resettingMouseControlsForSchema15(staleShortcutConfig)
+        expect(cleanMouseConfig.mouseProfiles.count == 1
+               && cleanMouseConfig.activeMouseProfileID == MouseProfile.defaultProfileID,
+               "schema 15 must start with one clean Default mouse preset")
+        expect(cleanMouseConfig.mouseProfiles[0].deviceIdentity == nil
+               && cleanMouseConfig.mouseProfiles[0].launchAssignments.isEmpty,
+               "schema 15 must clear device and app-button assignments")
+        expect(!cleanMouseConfig.middleButton.enabled
+               && !cleanMouseConfig.middleButton.combo.isSet
+               && !cleanMouseConfig.chatGPTHotkey.enabled
+               && !cleanMouseConfig.chatGPTHotkey.combo.isSet,
+               "schema 15 must delete every obsolete shortcut")
+        expect(cleanMouseConfig.forwardButton.combo == defaultBrowserForwardCombo
+               && cleanMouseConfig.backButton.combo == defaultBrowserBackCombo,
+               "schema 15 must retain only fixed browser Forward and Back")
+        expect(KlikProConfig.default.mouseProfiles.count == 1
+               && KlikProConfig.default.activeMouseProfileID
+                    == MouseProfile.defaultProfileID,
+               "a fresh install must have exactly one active UUID-keyed mouse profile")
+        guard let defaultMouseProfile = activeMouseProfile(in: KlikProConfig.default) else {
+            fputs("FAIL: default mouse profile must be resolvable\n", stderr)
+            exit(1)
+        }
+        expect(defaultMouseProfile.name == "Default"
+               && defaultMouseProfile.deviceIdentity == nil,
+               "the migrated/fresh first slide must be named Default and start unbound")
+        expect(defaultMouseProfile.middleButton == KlikProConfig.default.middleButton
+               && defaultMouseProfile.gestureButton == KlikProConfig.default.gestureButton
+               && defaultMouseProfile.forwardButton == KlikProConfig.default.forwardButton
+               && defaultMouseProfile.backButton == KlikProConfig.default.backButton
+               && defaultMouseProfile.thumbWheel == KlikProConfig.default.thumbWheel,
+               "the active profile and downgrade shadow must start synchronized")
+
+        let workMouseIdentity = MouseDeviceIdentity(
+            vendorID: 0x046D,
+            productID: 0xB034,
+            serialNumber: "WORK-001"
+        )
+        var workMouse = MouseProfile.quietDefault(name: "Work Mouse")
+        workMouse.deviceIdentity = workMouseIdentity
+        workMouse.middleButton = ShortcutMapping(
+            enabled: true,
+            combo: KeyCombo(
+                keyCode: UInt16(kVK_ANSI_W), keyDisplay: "W",
+                command: true, option: true, control: false, shift: false
+            )
+        )
+        workMouse = assigningMouseButton(
+            .gesture,
+            to: .original(.chatGPT),
+            in: workMouse
+        )
+        var travelMouse = MouseProfile.quietDefault(name: "Travel Mouse")
+        travelMouse.deviceIdentity = MouseDeviceIdentity(
+            vendorID: 0x046D,
+            productID: 0xC548,
+            serialNumber: nil
+        )
+        travelMouse = assigningMouseButton(
+            .gesture,
+            to: .original(.claude),
+            in: travelMouse
+        )
+        var threeMouseConfig = addingMouseProfile(
+            workMouse,
+            to: KlikProConfig.default
+        )!
+        threeMouseConfig = addingMouseProfile(
+            travelMouse,
+            to: threeMouseConfig
+        )!
+        expect(threeMouseConfig.mouseProfiles.count == MouseProfile.maximumCount,
+               "the model must accept exactly three mouse profiles")
+        expect(addingMouseProfile(
+            MouseProfile.quietDefault(name: "Fourth Mouse"),
+            to: threeMouseConfig
+        ) == nil, "a fourth mouse profile must be rejected")
+        expect(mouseProfile(id: workMouse.id, in: threeMouseConfig) == workMouse,
+               "profile lookup must use stable UUID identity")
+        expect(mouseButton(
+            assignedTo: .original(.chatGPT),
+            in: workMouse
+        ) == .gesture
+               && mouseButton(
+                    assignedTo: .original(.claude),
+                    in: travelMouse
+               ) == .gesture,
+               "each mouse profile must own an independent launch namespace")
+        expect(mouseProfileCanActivate(id: workMouse.id, in: threeMouseConfig),
+               "a valid bound profile must be activatable")
+        threeMouseConfig = activatingMouseProfile(
+            id: workMouse.id,
+            in: threeMouseConfig
+        )!
+        expect(threeMouseConfig.activeMouseProfileID == workMouse.id
+               && threeMouseConfig.middleButton == workMouse.middleButton
+               && threeMouseConfig.chatGPTMouseButton == .gesture
+               && threeMouseConfig.claudeMouseButton == nil,
+               "activation must load the selected profile into the downgrade shadow")
+        expect(activeMouseProfile(in: threeMouseConfig) == workMouse,
+               "active profile lookup must follow the persisted active UUID")
+        expect(removingMouseProfile(
+            id: workMouse.id,
+            from: threeMouseConfig
+        )?.activeMouseProfileID == MouseProfile.defaultProfileID,
+               "removing the active slide must deterministically activate the first survivor")
+        let oneMouseConfig = KlikProConfig.default
+        expect(removingMouseProfile(
+            id: oneMouseConfig.activeMouseProfileID,
+            from: oneMouseConfig
+        ) == nil, "the final mouse profile must not be removable")
+
+        var duplicateBindingConfig = threeMouseConfig
+        duplicateBindingConfig.mouseProfiles[0].deviceIdentity = workMouseIdentity
+        expect(!mouseProfilesAreValid(duplicateBindingConfig),
+               "one physical identity must not ambiguously bind two profiles")
+        var invalidAssignmentProfile = MouseProfile.quietDefault(name: "Invalid")
+        invalidAssignmentProfile.launchAssignments = [
+            MouseProfileLaunchAssignment(
+                target: .original(.chatGPT),
+                button: .middle
+            ),
+            MouseProfileLaunchAssignment(
+                target: .original(.claude),
+                button: .middle
+            ),
+        ]
+        expect(!mouseProfileIsValid(
+            invalidAssignmentProfile,
+            in: KlikProConfig.default
+        ), "one profile must reject two launch owners for one physical button")
+
+        var malformedProfiles = KlikProConfig.default
+        var duplicateDefault = defaultMouseProfile
+        duplicateDefault.name = "Duplicate UUID"
+        let thirdProfile = MouseProfile.quietDefault(name: "Third")
+        let retainedActive = MouseProfile.quietDefault(name: "   ")
+        malformedProfiles.mouseProfiles = [
+            defaultMouseProfile,
+            duplicateDefault,
+            workMouse,
+            thirdProfile,
+            retainedActive,
+        ]
+        malformedProfiles.activeMouseProfileID = retainedActive.id
+        malformedProfiles = normalizedMouseProfileConfig(malformedProfiles)
+        expect(malformedProfiles.mouseProfiles.count == MouseProfile.maximumCount
+               && Set(malformedProfiles.mouseProfiles.map(\.id)).count
+                    == MouseProfile.maximumCount,
+               "normalization must de-duplicate UUIDs and clamp the profile list to three")
+        expect(malformedProfiles.activeMouseProfileID == retainedActive.id
+               && malformedProfiles.mouseProfiles.last?.id == retainedActive.id,
+               "clamping must retain a valid active profile beyond the first three rows")
+        expect(malformedProfiles.mouseProfiles.last?.name == "Mouse 3",
+               "normalization must repair a blank retained profile name")
+        malformedProfiles.activeMouseProfileID = UUID()
+        malformedProfiles = normalizedMouseProfileConfig(malformedProfiles)
+        expect(malformedProfiles.activeMouseProfileID
+               == malformedProfiles.mouseProfiles[0].id,
+               "normalization must repair a missing active profile ID")
 
         // v1.3 presents original apps and managed profiles through one assignment
         // flow while retaining their backwards-compatible storage fields.
         let profileID = UUID()
         var unifiedAssignments = KlikProConfig.default
-        unifiedAssignments.chatGPTMouseButton = .forward
-        unifiedAssignments.claudeMouseButton = nil
+        unifiedAssignments = assigningMouseButton(
+            .forward,
+            to: .original(.chatGPT),
+            in: unifiedAssignments
+        )
         unifiedAssignments.instances = [AppProfileInstance(
             id: profileID,
             label: "ChatGPT X",
@@ -324,6 +505,8 @@ private struct MouseButtonRoutingTests {
             object.removeValue(forKey: "showMenuBarIcon")
             object.removeValue(forKey: "showQuickLaunchMenuIcons")
             object.removeValue(forKey: "onboardingCompleted")
+            object.removeValue(forKey: "mouseProfiles")
+            object.removeValue(forKey: "activeMouseProfileID")
             var legacyThumbWheel = object["thumbWheel"] as! [String: Any]
             legacyThumbWheel.removeValue(forKey: "firefoxEnabled")
             legacyThumbWheel["defaultFallbackEnabled"] = false
@@ -343,14 +526,80 @@ private struct MouseButtonRoutingTests {
             expect(!decoded.thumbWheel.firefoxEnabled,
                    "a legacy config must preserve its Firefox behavior from the generic fallback")
             let normalized = normalizedQuickLaunchConfig(decoded)
-            expect(normalized.schemaVersion == 12,
-                   "schema-4 configs must normalize through the layered migrations to schema 12")
+            expect(normalized.schemaVersion == 15,
+                   "schema-4 configs must normalize through the layered migrations to schema 15")
             expect(normalized.instances.count == 2,
                    "pre-v2 configs must receive both legacy-external instance rows")
             expect(normalized.middleButton == legacyConfig.middleButton,
                    "normalization must preserve a custom disabled legacy button mapping")
         } catch {
             fputs("FAIL: unable to decode schema-4 compatibility fixture: \(error)\n", stderr)
+            exit(1)
+        }
+
+        // Schema 13 stored every mouse setting at the top level or on an App Profile
+        // instance. Decoding must move that exact state into one Default slide while
+        // leaving the three keyboard launch hotkeys global.
+        let migratedManagedID = UUID()
+        var schema13Source = KlikProConfig.default
+        schema13Source.schemaVersion = 13
+        schema13Source.middleButton = ShortcutMapping(
+            enabled: true,
+            combo: KeyCombo(
+                keyCode: UInt16(kVK_ANSI_M), keyDisplay: "M",
+                command: true, option: false, control: true, shift: false
+            )
+        )
+        schema13Source.thumbWheel.chromeEnabled = true
+        schema13Source.chatGPTMouseButton = .gesture
+        schema13Source.instances.append(AppProfileInstance(
+            id: migratedManagedID,
+            label: "Migrated Managed",
+            launcherKind: .managed,
+            launcherPath: "/tmp/Launchers/\(migratedManagedID.uuidString).app",
+            profileDirectory: "/tmp/Profiles/\(migratedManagedID.uuidString)",
+            profileOwnership: .managed,
+            source: AppProfileSource(
+                bundleIdentifier: "com.example.migrated",
+                bundleURL: "/Applications/Migrated.app"
+            ),
+            pinToMenuBar: false,
+            hotkey: ShortcutMapping(enabled: false, combo: .unset),
+            mouseButton: .back
+        ))
+        do {
+            let encoded = try JSONEncoder().encode(schema13Source)
+            var object = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+            object.removeValue(forKey: "mouseProfiles")
+            object.removeValue(forKey: "activeMouseProfileID")
+            let data = try JSONSerialization.data(withJSONObject: object)
+            let decoded = try JSONDecoder().decode(KlikProConfig.self, from: data)
+            expect(decoded.schemaVersion == 13
+                   && decoded.mouseProfiles.count == 1
+                   && decoded.activeMouseProfileID == MouseProfile.defaultProfileID,
+                   "schema 13 must decode losslessly into one deterministic Default profile")
+            let migratedMouse = activeMouseProfile(in: decoded)!
+            expect(migratedMouse.middleButton == schema13Source.middleButton
+                   && migratedMouse.thumbWheel == schema13Source.thumbWheel,
+                   "schema 13 hardware mappings and thumb-wheel choices must migrate exactly")
+            expect(mouseButton(
+                assignedTo: .original(.chatGPT),
+                in: migratedMouse
+            ) == .gesture
+                   && mouseButton(
+                        assignedTo: .profile(migratedManagedID),
+                        in: migratedMouse
+                   ) == .back,
+                   "schema 13 original and managed app assignments must migrate exactly")
+            expect(decoded.chatGPTHotkey == schema13Source.chatGPTHotkey
+                   && decoded.claudeHotkey == schema13Source.claudeHotkey
+                   && decoded.geminiHotkey == schema13Source.geminiHotkey,
+                   "keyboard launch hotkeys must remain global during mouse-profile migration")
+            let normalized = normalizedQuickLaunchConfig(decoded)
+            expect(normalized.schemaVersion == KlikProConfig.currentSchemaVersion,
+                   "schema 13 normalization must repair the historic 12/13 split to schema 15")
+        } catch {
+            fputs("FAIL: unable to verify schema-13 mouse-profile migration: \(error)\n", stderr)
             exit(1)
         }
 
@@ -470,8 +719,17 @@ private struct MouseButtonRoutingTests {
                 command: true, option: true, control: false, shift: false
             )
         )
-        quickLaunchConfig.middleButton = originalMiddle
-        quickLaunchConfig.chatGPTMouseButton = .middle
+        var quickLaunchMouseProfile = activeMouseProfile(in: quickLaunchConfig)!
+        quickLaunchMouseProfile.middleButton = originalMiddle
+        quickLaunchConfig = replacingMouseProfile(
+            quickLaunchMouseProfile,
+            in: quickLaunchConfig
+        )
+        quickLaunchConfig = assigningMouseButton(
+            .middle,
+            to: .original(.chatGPT),
+            in: quickLaunchConfig
+        )
         expect(quickLaunchMouseAssignmentsAreValid(quickLaunchConfig),
                "one launcher assignment must be valid")
         expect(assignedQuickLaunchTarget(for: .middleButton, in: quickLaunchConfig) == .chatGPT,
@@ -513,7 +771,15 @@ private struct MouseButtonRoutingTests {
                "editing a launcher hotkey must update its mirrored mouse combo")
 
         var invalidAssignments = quickLaunchConfig
-        invalidAssignments.claudeMouseButton = .middle
+        var invalidMouseProfile = activeMouseProfile(in: invalidAssignments)!
+        invalidMouseProfile.launchAssignments.append(MouseProfileLaunchAssignment(
+            target: .original(.claude),
+            button: .middle
+        ))
+        invalidAssignments = replacingMouseProfile(
+            invalidMouseProfile,
+            in: invalidAssignments
+        )
         expect(!quickLaunchMouseAssignmentsAreValid(invalidAssignments),
                "one physical button cannot be assigned to both launchers")
         let normalizedInvalid = normalizedQuickLaunchConfig(invalidAssignments)
@@ -641,8 +907,11 @@ private struct MouseButtonRoutingTests {
         "a passed-through disabled down must keep its up native if the feature activates")
 
         var gestureOverlayConfig = KlikProConfig.default
-        gestureOverlayConfig.gestureButton.enabled = false
-        gestureOverlayConfig.claudeMouseButton = .gesture
+        gestureOverlayConfig = assigningMouseButton(
+            .gesture,
+            to: .original(.claude),
+            in: gestureOverlayConfig
+        )
         expect(mapping(
             for: .gestureButton,
             in: gestureOverlayConfig,
@@ -808,8 +1077,6 @@ private struct MouseButtonRoutingTests {
         "Chrome profile traversal must discover configured extension commands read-only")
 
         var chromeConflictCandidate = KlikProConfig.default
-        chromeConflictCandidate.chatGPTMouseButton = nil
-        chromeConflictCandidate.claudeMouseButton = nil
         chromeConflictCandidate.forwardButton.combo = KeyCombo(
             keyCode: UInt16(kVK_ANSI_E), keyDisplay: "E",
             command: true, option: false, control: false, shift: false
@@ -824,8 +1091,11 @@ private struct MouseButtonRoutingTests {
                "an installed Chrome extension shortcut must warn even when already persisted")
 
         var linkedConflictCandidate = KlikProConfig.default
-        linkedConflictCandidate.chatGPTMouseButton = .middle
-        linkedConflictCandidate.claudeMouseButton = nil
+        linkedConflictCandidate = assigningMouseButton(
+            .middle,
+            to: .original(.chatGPT),
+            in: linkedConflictCandidate
+        )
         var linkedStatuses = evaluateShortcutConflicts(
             candidate: linkedConflictCandidate,
             persisted: linkedConflictCandidate,
@@ -900,8 +1170,16 @@ private struct MouseButtonRoutingTests {
         // Feature off, so the fixture makes those assignments itself. A fresh install
         // no longer links any button to an app, so inheriting them from the default
         // would leave nothing to resolve.
-        config.claudeMouseButton = .back
-        config.chatGPTMouseButton = .forward
+        config = assigningMouseButton(
+            .back,
+            to: .original(.claude),
+            in: config
+        )
+        config = assigningMouseButton(
+            .forward,
+            to: .original(.chatGPT),
+            in: config
+        )
         config.backButton.combo = KeyCombo(
             keyCode: UInt16(kVK_ANSI_C), keyDisplay: "C",
             command: true, option: true, control: false, shift: true
@@ -1029,9 +1307,18 @@ private struct MouseButtonRoutingTests {
 
         var hiddenBaseSentinel = KlikProConfig.default
         // The reserved scan only considers enabled base mappings, and Gesture ships off.
-        hiddenBaseSentinel.gestureButton.enabled = true
-        hiddenBaseSentinel.gestureButton.combo = sentinelCandidate.gestureButton.combo
-        hiddenBaseSentinel.chatGPTMouseButton = .gesture
+        var hiddenBaseMouseProfile = activeMouseProfile(in: hiddenBaseSentinel)!
+        hiddenBaseMouseProfile.gestureButton.enabled = true
+        hiddenBaseMouseProfile.gestureButton.combo = sentinelCandidate.gestureButton.combo
+        hiddenBaseSentinel = replacingMouseProfile(
+            hiddenBaseMouseProfile,
+            in: hiddenBaseSentinel
+        )
+        hiddenBaseSentinel = assigningMouseButton(
+            .gesture,
+            to: .original(.chatGPT),
+            in: hiddenBaseSentinel
+        )
         expect(mapping(for: .gestureButton, in: hiddenBaseSentinel).combo.signature
                == hiddenBaseSentinel.chatGPTHotkey.combo.signature,
                "the active overlay fixture must hide its base Gesture combo")
@@ -1043,7 +1330,11 @@ private struct MouseButtonRoutingTests {
         // These hotkeys now ship disabled, and a disabled row short-circuits to .ok before
         // the reserved-F20 check, so the fixture enables what it is testing.
         linkedSentinelCandidate.chatGPTHotkey.enabled = true
-        linkedSentinelCandidate.chatGPTMouseButton = .forward
+        linkedSentinelCandidate = assigningMouseButton(
+            .forward,
+            to: .original(.chatGPT),
+            in: linkedSentinelCandidate
+        )
         let linkedSentinelStatuses = evaluateShortcutConflicts(
             candidate: linkedSentinelCandidate,
             persisted: KlikProConfig.default,
@@ -1073,7 +1364,11 @@ private struct MouseButtonRoutingTests {
         expect(commandTabStatuses[.chatGPTHotkey] == .unavailable,
                "Command-Tab must be unavailable for global menu hotkeys")
 
-        commandTabCandidate.chatGPTMouseButton = .middle
+        commandTabCandidate = assigningMouseButton(
+            .middle,
+            to: .original(.chatGPT),
+            in: commandTabCandidate
+        )
         let linkedCommandTabStatuses = evaluateShortcutConflicts(
             candidate: commandTabCandidate,
             persisted: KlikProConfig.default,

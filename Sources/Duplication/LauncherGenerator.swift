@@ -635,9 +635,9 @@ struct LauncherGenerator {
         let rule = instance.compatibilityRuleID.flatMap {
             AppCompatibilityRegistry.production.rule(withID: $0)
         }
-        let arguments = (rule?.passesUserDataDirArgument ?? true)
-            ? ["--user-data-dir=" + expectedProfile.path]
-            : []
+        let arguments = try rule?.resolvedLaunchArguments(
+            profileDirectory: expectedProfile.path
+        ) ?? ["--user-data-dir=" + expectedProfile.path]
         return ManagedLauncherSpecification(
             instanceID: instance.id,
             bundleIdentifier: "local.klik-pro.launcher.i"

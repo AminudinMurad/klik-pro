@@ -385,15 +385,15 @@ heading — one per list, all doing the same rescan — so whichever list you ar
 has it to hand. It rescans installed apps and refreshes the profile list when an app
 is installed or removed while Klik PRO is already open.
 
-Every card also carries a **pin**, beside its gear. Pinning moves a card to the top of
-its list on both tabs, and the Mappings lists show exactly three cards at a time, so
-the apps you pin are the ones you see without scrolling. Each list keeps its own three
-pins — three native apps and three App Profiles. Nothing is pinned until you pin it,
-and Klik PRO never pins anything on your behalf. Once three are pinned the fourth pin
-is refused rather than silently replacing one, so unpin to free a slot. Pinning only
-changes the order: everything past the third card is one scroll away, an app keeps its
-mouse-button assignment whether pinned or not, and pinning never counts as an unsaved
-change.
+Every card also carries a **pin**, beside its gear. Pinning keeps one card at the very
+top of its list on both tabs, while the Mappings lists continue to show three cards at
+a time. Each list has one sticky pin slot — one for native apps and one for App
+Profiles. Nothing is pinned until you pin it, and Klik PRO never pins anything on your
+behalf. To pin another card, first unpin the current one; Klik PRO never silently
+replaces it. The pin is a bare gear-sized glyph, rotated 20° clockwise and shown in
+black when active. Pinning only changes the order: every other card remains available
+by scrolling, an app keeps its mouse-button assignment whether pinned or not, and
+pinning never counts as an unsaved change.
 
 Generated launchers use the name you choose for their visible `.app` icon, while
 their profile data remains safely UUID-keyed inside Klik PRO's Application Support

@@ -119,9 +119,30 @@ private func activeAppProfileInstance(for slot: ShortcutSlot) -> AppProfileInsta
     )
 }
 
+/// Resolve an original-app mouse assignment independently of the legacy launcher
+/// wrapper. A physical button assigned to "Open native" only needs the native app;
+/// requiring the old wrapper makes a valid assignment silently fall through to the
+/// dormant keyboard shortcut.
+private func activeOriginalAppTarget(for slot: ShortcutSlot) -> QuickLaunchTarget? {
+    activeQuickLaunchTarget(
+        for: slot,
+        in: config,
+        specialFeatureActive: specialFeatureActive,
+        chatGPTAvailable: chatGPTInstalled,
+        claudeAvailable: claudeInstalled
+    )
+}
+
 private func effectiveMapping(for slot: ShortcutSlot) -> ShortcutMapping {
     if let instance = activeAppProfileInstance(for: slot) {
         return ShortcutMapping(enabled: true, combo: instance.hotkey.combo)
+    }
+    if activeOriginalAppTarget(for: slot) != nil {
+        // The combo is dormant for direct app dispatch, but keeping the underlying
+        // value makes the mapping safe if this event is ever re-evaluated.
+        var mapping = baseMapping(for: slot, in: config)
+        mapping.enabled = true
+        return mapping
     }
     return baseMapping(for: slot, in: config)
 }
@@ -1014,6 +1035,7 @@ private func setupMouseMappings() {
                 }
                 let shortcut = effectiveMapping(for: slot)
                 let linkedInstance = activeAppProfileInstance(for: slot)
+                let originalAppTarget = activeOriginalAppTarget(for: slot)
                 guard shortcut.enabled else {
                     _ = mouseButtonDispatchState.begin(
                         buttonNumber: buttonNumber,
@@ -1035,6 +1057,7 @@ private func setupMouseMappings() {
                         slot: slot,
                         shortcut: shortcut,
                         frontmostBundleIdentifier: frontmostBundleIdentifier,
+                        quickLaunchTarget: originalAppTarget,
                         appProfileInstanceID: linkedInstance?.id
                     )
                 )
@@ -1067,11 +1090,13 @@ private func setupMouseMappings() {
                 }
                 let shortcut = effectiveMapping(for: slot)
                 let linkedInstance = activeAppProfileInstance(for: slot)
+                let originalAppTarget = activeOriginalAppTarget(for: slot)
                 let orphanFallback: MouseButtonShortcutDispatch = shortcut.enabled
                     ? mouseButtonShortcutDispatch(
                         slot: slot,
                         shortcut: shortcut,
                         frontmostBundleIdentifier: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+                        quickLaunchTarget: originalAppTarget,
                         appProfileInstanceID: linkedInstance?.id
                     )
                     : .nativePassThrough

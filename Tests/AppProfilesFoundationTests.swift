@@ -256,9 +256,10 @@ private struct AppProfilesFoundationTests {
 
     private static func testSchema10DefaultsAndSynchronization() {
         let defaults = KlikProConfig.default
-        expect(defaults.schemaVersion == 13, "new configs must use schema 13")
+        expect(defaults.schemaVersion == KlikProConfig.currentSchemaVersion,
+               "new configs must use the current schema")
         expect(defaults.dataRoot == nil, "new configs must default to no vault (Application Support)")
-        expect(defaults.instances.count == 2, "schema 13 must contain both legacy targets")
+        expect(defaults.instances.count == 2, "the current schema must contain both legacy targets")
 
         // Only ChatGPT and Claude ever shipped a v1.x legacy wrapper, so only they own a
         // legacyInstanceID. Every target added since (Gemini, Canva, Zoom, Spotify, …)
@@ -313,7 +314,11 @@ private struct AppProfilesFoundationTests {
         edited.instances.removeAll { $0.id == existingChatGPT.id }
         edited.instances.append(coloredChatGPT)
         edited.chatGPTHotkey.enabled = false
-        edited.chatGPTMouseButton = .middle
+        edited = assigningMouseButton(
+            .middle,
+            to: .original(.chatGPT),
+            in: edited
+        )
         edited.showQuickLaunchMenuIcons = false
         let synchronized = normalizedQuickLaunchConfig(edited)
         let chatGPT = synchronized.instances.first { $0.legacyQuickLaunchTarget == .chatGPT }
@@ -370,7 +375,8 @@ private struct AppProfilesFoundationTests {
         defer { unsetenv("KLIK_PRO_CONFIG_DIRECTORY") }
 
         let migrated = KlikProConfigStore.load()
-        expect(migrated.schemaVersion == 12, "schema 9 must migrate through to schema 12")
+        expect(migrated.schemaVersion == KlikProConfig.currentSchemaVersion,
+               "schema 9 must migrate through to the current schema")
         expect(migrated.instances.count == 2, "migration must add two legacy rows")
         expect(!migrated.chatGPTHotkey.enabled, "migration must preserve customized hotkeys")
 
@@ -386,8 +392,9 @@ private struct AppProfilesFoundationTests {
             KlikProConfig.self,
             from: Data(contentsOf: configURL)
         )
-        expect(saved.schemaVersion == 12 && saved.instances.count == 2,
-               "the atomically replaced config must be schema 12")
+        expect(saved.schemaVersion == KlikProConfig.currentSchemaVersion
+               && saved.instances.count == 2,
+               "the atomically replaced config must use the current schema")
 
         var later = migrated
         later.middleButton.enabled.toggle()
@@ -570,10 +577,10 @@ private struct AppProfilesFoundationTests {
 
         let rule = AppCompatibilityRule(
             id: "fixture-electron-1",
+            catalogueName: "Fixture",
             bundleIdentifier: electron.bundleIdentifier,
             teamIdentifier: "TEAM123456",
-            engine: .electron,
-            testedVersions: ["1.0"]
+            engine: .electron
         )
         let registry = AppCompatibilityRegistry(rules: [rule])
         let verified = detector.eligibility(for: electron, registry: registry)
@@ -589,34 +596,32 @@ private struct AppProfilesFoundationTests {
         expect(supportedCatalogue.map { $0.app.id } == [electron.id],
                "the user-facing catalogue must omit every scan result without an approved rule")
 
-        var untestedRule = AppCompatibilityRule(
-            id: "fixture-electron-untested",
+        let futureVersionRule = AppCompatibilityRule(
+            id: "fixture-electron-any-version",
+            catalogueName: "Fixture",
             bundleIdentifier: electron.bundleIdentifier,
             teamIdentifier: "TEAM123456",
-            engine: .electron,
-            testedVersions: []
+            engine: .electron
         )
-        untestedRule.assurance = .untested
-        untestedRule.acceptsAnyVersion = true
-        let untestedEligibility = detector.eligibility(
-            for: electron,
-            registry: AppCompatibilityRegistry(rules: [untestedRule])
+        var futureVersion = electron
+        futureVersion.version = "999.0"
+        let futureEligibility = detector.eligibility(
+            for: futureVersion,
+            registry: AppCompatibilityRegistry(rules: [futureVersionRule])
         )
-        expect(untestedEligibility.kind == .experimental,
-               "an owner-enabled Untested rule must never be labelled Verified")
-        expect(untestedEligibility.compatibilityRuleID == untestedRule.id,
-               "an owner-enabled Untested rule must expose its isolation recipe")
-        expect(untestedEligibility.allowsManagedProfile(usingRuleID: untestedRule.id),
-               "an owner-enabled Untested rule must pass exact launcher revalidation")
-        expect(!untestedEligibility.allowsManagedProfile(usingRuleID: "wrong-rule"),
+        expect(futureEligibility == .verified(ruleID: futureVersionRule.id),
+               "an exact catalogue rule must stay Verified across app versions")
+        expect(futureEligibility.allowsManagedProfile(usingRuleID: futureVersionRule.id),
+               "an exact catalogue rule must pass exact launcher revalidation")
+        expect(!futureEligibility.allowsManagedProfile(usingRuleID: "wrong-rule"),
                "a generated launcher with a changed rule ID must fail closed")
         expect(
             AppProfileCandidate(
-                app: electron,
+                app: futureVersion,
                 engine: .electron,
-                eligibility: untestedEligibility
+                eligibility: futureEligibility
             ).canCreate,
-            "an explicit Untested rule must enable creation"
+            "an exact catalogue rule must enable creation"
         )
         expect(
             !AppProfileCandidate(
@@ -765,10 +770,10 @@ private struct AppProfilesFoundationTests {
         try! FileManager.default.createDirectory(at: framework, withIntermediateDirectories: true)
         let rule = AppCompatibilityRule(
             id: "fixture-rule",
+            catalogueName: "Fixture",
             bundleIdentifier: source.bundleIdentifier,
             teamIdentifier: source.teamIdentifier!,
-            engine: .electron,
-            testedVersions: [source.version!]
+            engine: .electron
         )
         let registry = AppCompatibilityRegistry(rules: [rule])
         let generator = LauncherGenerator(
@@ -1258,10 +1263,10 @@ private struct AppProfilesFoundationTests {
         try! FileManager.default.createDirectory(at: framework, withIntermediateDirectories: true)
         let rule = AppCompatibilityRule(
             id: "conversion-rule",
+            catalogueName: "Fixture",
             bundleIdentifier: source.bundleIdentifier,
             teamIdentifier: source.teamIdentifier!,
-            engine: .electron,
-            testedVersions: [source.version!]
+            engine: .electron
         )
         let externalLauncher = root.appendingPathComponent("External.app", isDirectory: true)
         try! FileManager.default.createDirectory(at: externalLauncher, withIntermediateDirectories: true)
@@ -1343,12 +1348,11 @@ private struct AppProfilesFoundationTests {
         try! FileManager.default.createDirectory(at: framework, withIntermediateDirectories: true)
         var rule = AppCompatibilityRule(
             id: "env-rule",
+            catalogueName: "Fixture",
             bundleIdentifier: source.bundleIdentifier,
             teamIdentifier: source.teamIdentifier!,
-            engine: .electron,
-            testedVersions: [source.version!]
+            engine: .electron
         )
-        rule.assurance = .untested
         rule.requiredEnvironment = [
             "CODEX_HOME": "{profileDir}/codex-home",
             "CODEX_ELECTRON_USER_DATA_PATH": "{profileDir}",
@@ -1425,10 +1429,10 @@ private struct AppProfilesFoundationTests {
 
         var badRule = AppCompatibilityRule(
             id: "bad-token-rule",
+            catalogueName: "Fixture",
             bundleIdentifier: source.bundleIdentifier,
             teamIdentifier: source.teamIdentifier!,
-            engine: .electron,
-            testedVersions: [source.version!]
+            engine: .electron
         )
         badRule.requiredEnvironment = ["CODEX_HOME": "{unknownToken}/home"]
         let badManager = AppProfileManager(
@@ -1455,19 +1459,135 @@ private struct AppProfilesFoundationTests {
         }
     }
 
+    private static func documentedVerifiedCompatibilityNames() -> Set<String> {
+        let documentURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("docs/COMPATIBILITY.md")
+        guard let document = try? String(contentsOf: documentURL, encoding: .utf8),
+              let verifiedStart = document.range(of: "## Verified"),
+              let unverifiedStart = document.range(
+                of: "## Unverified",
+                range: verifiedStart.upperBound..<document.endIndex
+              ) else {
+            return []
+        }
+
+        let section = document[verifiedStart.upperBound..<unverifiedStart.lowerBound]
+        var names: Set<String> = []
+        for line in section.split(separator: "\n") where line.hasPrefix("|") {
+            let cells = line.split(separator: "|", omittingEmptySubsequences: false)
+            for cell in cells.dropFirst().dropLast() {
+                let name = cell.trimmingCharacters(in: .whitespaces)
+                if !name.isEmpty && name != "App" && !name.allSatisfy({ $0 == "-" }) {
+                    names.insert(name)
+                }
+            }
+        }
+        return names
+    }
+
     private static func testProductionRegistryPinsExplicitRules() {
         let root = temporaryDirectory("m6-production-pin")
         defer { try? FileManager.default.removeItem(at: root) }
 
+        let expectedIdentities: [
+            String: (bundleIdentifier: String, teamIdentifier: String, engine: AppProfileEngine)
+        ] = [
+            "Antigravity": ("com.google.antigravity", "EQHXZ8M8AV", .electron),
+            "Gemini": ("com.google.GeminiMacOS", "EQHXZ8M8AV", .native),
+            "Antigravity IDE": ("com.google.antigravity-ide", "EQHXZ8M8AV", .electron),
+            "Google Chrome": ("com.google.Chrome", "EQHXZ8M8AV", .chromium),
+            "Brave": ("com.brave.Browser", "KL8N8XSYF4", .chromium),
+            "Notion": ("notion.id", "LBQJ96FQ8D", .electron),
+            "Canva": ("com.canva.CanvaDesktop", "5HD2ARTBFS", .electron),
+            "Obsidian": ("md.obsidian", "6JSW4SJWN9", .electron),
+            "ChatGPT / Codex": ("com.openai.codex", "2DC432GLL2", .electron),
+            "Slack": ("com.tinyspeck.slackmacgap", "BQR82RBBHL", .electron),
+            "Claude": ("com.anthropic.claudefordesktop", "Q6L2SF6YDW", .electron),
+            "Spotify": ("com.spotify.client", "2FNC3A47ZF", .native),
+            "Cursor": ("com.todesktop.230313mzl4w4u92", "VDXQ22DGB9", .electron),
+            "Visual Studio Code": ("com.microsoft.VSCode", "UBF8T346G9", .electron),
+            "Discord": ("com.hnc.Discord", "53Q6R32WPB", .electron),
+            "Zoom": ("us.zoom.xos", "BJ4HAAB9B3", .native),
+        ]
+
         let rules = AppCompatibilityRegistry.production.rules
-        // An exact count keeps an unvetted rule from being added silently: growing the
-        // catalogue must be a deliberate edit here too. Current catalogue — Claude,
-        // ChatGPT, Gemini, Canva, Zoom, Spotify, Antigravity, Antigravity IDE, Chrome,
-        // Brave. The three original rules keep their detailed pins below.
-        expect(rules.count == 10,
-               "production must contain exactly the ten catalogued rules")
+        let documentedNames = documentedVerifiedCompatibilityNames()
+        expect(documentedNames == Set(expectedIdentities.keys),
+               "the expected identity map must exactly match COMPATIBILITY.md's Verified section")
+        expect(Set(rules.map(\.catalogueName)) == documentedNames,
+               "the production registry must exactly mirror COMPATIBILITY.md's Verified section")
+        expect(rules.count == documentedNames.count,
+               "production must contain one rule per documented Verified app")
         expect(Set(rules.map(\.id)).count == rules.count,
                "every production rule id must be unique — ids are persisted per instance")
+        expect(Set(rules.map(\.catalogueName)).count == rules.count,
+               "every production rule must have a unique compatibility-document name")
+        expect(Set(QuickLaunchTarget.allCases.map(\.title)) == documentedNames,
+               "all app-list targets must exactly mirror COMPATIBILITY.md's Verified section")
+        expect(QuickLaunchTarget.allCases.count == documentedNames.count,
+               "all four app lists must expose one target per documented Verified app")
+
+        for (name, expected) in expectedIdentities {
+            guard let rule = rules.first(where: { $0.catalogueName == name }) else {
+                expect(false, "missing production rule for \(name)")
+                return
+            }
+            expect(rule.bundleIdentifier == expected.bundleIdentifier,
+                   "\(name) must pin its exact bundle identifier")
+            expect(rule.teamIdentifier == expected.teamIdentifier,
+                   "\(name) must pin its exact signing Team ID")
+            expect(rule.engine == expected.engine,
+                   "\(name) must pin its declared engine")
+            if name == "Cursor" || name == "Visual Studio Code" {
+                let profilePath = root
+                    .appendingPathComponent("\(name)-profile", isDirectory: true)
+                    .path
+                let arguments = try? rule.resolvedLaunchArguments(
+                    profileDirectory: profilePath
+                )
+                expect(
+                    arguments == [
+                        "--user-data-dir=" + profilePath,
+                        "--extensions-dir=" + profilePath + "/extensions",
+                    ],
+                    "\(name) must isolate both user data and extensions"
+                )
+            }
+            guard let target = QuickLaunchTarget.allCases.first(where: {
+                $0.title == name
+            }) else {
+                expect(false, "missing app-list target for \(name)")
+                return
+            }
+            expect(target.applicationBundleIdentifier == expected.bundleIdentifier,
+                   "\(name) app-list target must use the registry bundle identifier")
+
+            let futureVersion = makeInstalledApp(
+                root: root,
+                bundleIdentifier: expected.bundleIdentifier,
+                teamIdentifier: expected.teamIdentifier,
+                version: "9999.0"
+            )
+            expect(
+                AppCompatibilityRegistry.production.matchingRule(
+                    for: futureVersion,
+                    engine: expected.engine
+                )?.id == rule.id,
+                "\(name) catalogue membership must not depend on app version"
+            )
+            var missingVersion = futureVersion
+            missingVersion.version = nil
+            expect(
+                AppCompatibilityRegistry.production.matchingRule(
+                    for: missingVersion,
+                    engine: expected.engine
+                )?.id == rule.id,
+                "\(name) catalogue membership must not require version evidence"
+            )
+        }
+
         guard let claude = rules.first(where: {
             $0.id == "com-anthropic-claudefordesktop-verified"
         }), let chatGPT = rules.first(where: {
@@ -1475,61 +1595,30 @@ private struct AppProfilesFoundationTests {
         }), let gemini = rules.first(where: {
             $0.id == "com-google-geminimacos-native-untested"
         }) else {
-            expect(false, "every explicit production rule must be present")
+            expect(false, "Claude and the frozen ChatGPT/Gemini rules must remain present")
             return
         }
-        expect(claude.id == "com-anthropic-claudefordesktop-verified",
-               "the production rule id must match the emitted draft rule")
-        expect(claude.bundleIdentifier == "com.anthropic.claudefordesktop",
-               "the production rule must pin the evidenced bundle identifier")
-        expect(claude.teamIdentifier == "Q6L2SF6YDW",
-               "the production rule must pin the evidenced Team ID")
-        expect(claude.engine == .electron,
-               "the production rule must pin the evidenced engine")
-        expect(claude.testedVersions == ["1.21459.0", "1.21459.1"],
-               "the production rule must list exactly the versions both gates covered")
-        expect(claude.assurance == .verified && claude.acceptsAnyVersion,
-               "Claude approval must survive vendor updates while retaining its evidence record")
+        expect(chatGPT.catalogueName == "ChatGPT / Codex",
+               "the frozen ChatGPT rule ID must map to the Verified document entry")
+        expect(gemini.catalogueName == "Gemini",
+               "the frozen Gemini rule ID must map to the Verified document entry")
+
         expect(claude.requiredEnvironment == [
             "CLAUDE_CONFIG_DIR": "{codexHomeDir}",
         ], "Claude must point CLAUDE_CONFIG_DIR at the instance's sibling home (2026-07-19 owner decision)")
         expect(claude.homeSymlinkPrefix == "claude",
                "Claude profiles must expose a visible ~/.claude-* home symlink")
-
-        expect(chatGPT.bundleIdentifier == "com.openai.codex",
-               "ChatGPT must pin the installed bundle identifier")
-        expect(chatGPT.teamIdentifier == "2DC432GLL2",
-               "ChatGPT must pin OpenAI's signing Team ID")
-        expect(chatGPT.engine == .electron,
-               "ChatGPT must pin its detected Electron engine")
-        expect(chatGPT.assurance == .untested && chatGPT.acceptsAnyVersion,
-               "ChatGPT must stay honestly Untested while accepting vendor updates")
-        expect(chatGPT.testedVersions.isEmpty,
-               "ChatGPT must not claim evidence-backed tested versions")
         expect(chatGPT.requiredEnvironment == [
             "CODEX_HOME": "{codexHomeDir}",
             "CODEX_ELECTRON_USER_DATA_PATH": "{profileDir}",
         ], "ChatGPT must retain both required isolation paths")
         expect(chatGPT.homeSymlinkPrefix == "codex",
                "ChatGPT profiles must expose a visible ~/.codex-* home symlink")
-
-        // Both Electron entries must keep the historical launch shape now that
-        // the native rule can opt out of it.
         expect(claude.passesUserDataDirArgument && chatGPT.passesUserDataDirArgument,
                "Electron rules must still receive --user-data-dir=")
         expect(!claude.requiresLoginKeychainLink && !chatGPT.requiresLoginKeychainLink,
                "Electron rules must not provision a login-keychain link")
 
-        expect(gemini.bundleIdentifier == "com.google.GeminiMacOS",
-               "Gemini must pin the installed bundle identifier")
-        expect(gemini.teamIdentifier == "EQHXZ8M8AV",
-               "Gemini must pin Google's signing Team ID")
-        expect(gemini.engine == .native,
-               "Gemini must pin its detected native engine")
-        expect(gemini.assurance == .untested && gemini.acceptsAnyVersion,
-               "Gemini must stay honestly Untested until it survives a vendor update")
-        expect(gemini.testedVersions == ["1.86.7.600"],
-               "Gemini must record the version its isolation evidence covers")
         expect(gemini.requiredEnvironment == [
             "CFFIXED_USER_HOME": "{profileDir}",
         ], "Gemini isolates through CFFIXED_USER_HOME alone; HOME is ignored by Foundation")
@@ -1540,31 +1629,10 @@ private struct AppProfilesFoundationTests {
         expect(gemini.homeSymlinkPrefix == nil,
                "Gemini has no CLI home for multi-account scanners to discover")
 
-        let tested = makeInstalledApp(
-            root: root,
-            bundleIdentifier: "com.anthropic.claudefordesktop",
-            teamIdentifier: "Q6L2SF6YDW",
-            version: "1.21459.1"
-        )
-        expect(
-            AppCompatibilityRegistry.production
-                .matchingRule(for: tested, engine: .electron)?.id == claude.id,
-            "the evidenced Claude identity must match the production rule"
-        )
-        let updatedClaude = makeInstalledApp(
-            root: root,
-            bundleIdentifier: "com.anthropic.claudefordesktop",
-            teamIdentifier: "Q6L2SF6YDW",
-            version: "9.9.9"
-        )
-        expect(
-            AppCompatibilityRegistry.production
-                .matchingRule(for: updatedClaude, engine: .electron)?.id == claude.id,
-            "an approved Claude installation must remain visible after a vendor update"
-        )
-
+        let futureChatGPTRoot = temporaryDirectory("catalogue-chatgpt-future")
+        defer { try? FileManager.default.removeItem(at: futureChatGPTRoot) }
         let futureChatGPT = makeInstalledApp(
-            root: root,
+            root: futureChatGPTRoot,
             bundleIdentifier: "com.openai.codex",
             teamIdentifier: "2DC432GLL2",
             version: "99.0"
@@ -1581,18 +1649,27 @@ private struct AppProfilesFoundationTests {
             options: 0
         ).write(to: futureChatGPT.bundleURL.appendingPathComponent("Contents/Info.plist"))
         let futureEligibility = EngineDetector().eligibility(for: futureChatGPT)
-        expect(futureEligibility.kind == .experimental,
-               "future ChatGPT versions must remain labelled Untested")
-        expect(futureEligibility.compatibilityRuleID == chatGPT.id,
-               "future ChatGPT versions must stay addable through the explicit rule")
+        expect(futureEligibility == .verified(ruleID: chatGPT.id),
+               "ChatGPT must show Verified at every app version")
         expect(
             AppProfileCandidate(
                 app: futureChatGPT,
                 engine: .electron,
                 eligibility: futureEligibility
             ).canCreate,
-            "the explicit ChatGPT rule must enable Add for future vendor versions"
+            "the exact ChatGPT rule must enable Add for future vendor versions"
         )
+
+        let geminiRoot = temporaryDirectory("catalogue-gemini-future")
+        defer { try? FileManager.default.removeItem(at: geminiRoot) }
+        let futureGemini = makeInstalledApp(
+            root: geminiRoot,
+            bundleIdentifier: "com.google.GeminiMacOS",
+            teamIdentifier: "EQHXZ8M8AV",
+            version: "99.0"
+        )
+        expect(EngineDetector().eligibility(for: futureGemini) == .verified(ruleID: gemini.id),
+               "Gemini must show Verified at every app version")
     }
 
     private static func testCodexHomeSiblingPlaceholderAndPrecreation() {
@@ -1611,10 +1688,10 @@ private struct AppProfilesFoundationTests {
         try! FileManager.default.createDirectory(at: framework, withIntermediateDirectories: true)
         var rule = AppCompatibilityRule(
             id: "sibling-env-rule",
+            catalogueName: "Fixture",
             bundleIdentifier: source.bundleIdentifier,
             teamIdentifier: source.teamIdentifier!,
-            engine: .electron,
-            testedVersions: [source.version!]
+            engine: .electron
         )
         rule.requiredEnvironment = ["CODEX_HOME": "{codexHomeDir}"]
         let generator = LauncherGenerator(
@@ -1841,10 +1918,10 @@ private struct AppProfilesFoundationTests {
         // Yesterday's rule: no required environment, no visible home.
         let oldRule = AppCompatibilityRule(
             id: "healing-rule",
+            catalogueName: "Fixture",
             bundleIdentifier: source.bundleIdentifier,
             teamIdentifier: source.teamIdentifier!,
-            engine: .electron,
-            testedVersions: [source.version!]
+            engine: .electron
         )
         let oldManager = AppProfileManager(
             registry: AppCompatibilityRegistry(rules: [oldRule]),
@@ -2371,10 +2448,10 @@ private struct AppProfilesFoundationTests {
         try! FileManager.default.createDirectory(at: framework, withIntermediateDirectories: true)
         var rule = AppCompatibilityRule(
             id: "vault-fixture-rule",
+            catalogueName: "Fixture",
             bundleIdentifier: source.bundleIdentifier,
             teamIdentifier: source.teamIdentifier!,
-            engine: .electron,
-            testedVersions: [source.version!]
+            engine: .electron
         )
         rule.requiredEnvironment = ["CLAUDE_CONFIG_DIR": "{codexHomeDir}"]
         rule.homeSymlinkPrefix = "claude"
@@ -2619,8 +2696,11 @@ private struct AppProfilesFoundationTests {
                "a schema-10 config must decode with dataRoot = nil")
         expect(decoded.instances.allSatisfy { $0.storage == .applicationSupport },
                "every schema-10 instance must migrate as .applicationSupport")
-        expect(normalizedQuickLaunchConfig(decoded).schemaVersion == 12,
-               "normalization must bump migrated configs to schema 12")
+        expect(
+            normalizedQuickLaunchConfig(decoded).schemaVersion
+                == KlikProConfig.currentSchemaVersion,
+            "normalization must bump migrated configs to the current schema"
+        )
 
         // Schema 11 → 12 is lifecycle-only and must default every existing row
         // to active without inventing an archive timestamp.
@@ -2638,8 +2718,11 @@ private struct AppProfilesFoundationTests {
         expect(lifecycleMigrated.instances.allSatisfy {
             $0.state == .active && $0.archivedAt == nil
         }, "schema 11 rows must migrate to active with no archive timestamp")
-        expect(normalizedQuickLaunchConfig(lifecycleMigrated).schemaVersion == 12,
-               "normalization must bump schema 11 configs to schema 12")
+        expect(
+            normalizedQuickLaunchConfig(lifecycleMigrated).schemaVersion
+                == KlikProConfig.currentSchemaVersion,
+            "normalization must bump schema 11 configs to the current schema"
+        )
 
         // Schema-11 round trip: dataRoot and per-instance storage survive.
         var vaulted = defaults
@@ -2684,27 +2767,18 @@ private struct AppProfilesFoundationTests {
     private static func testTopPinsPersistAndClamp() {
         var pinned = KlikProConfig.default
         let profileA = UUID()
-        let profileB = UUID()
-        pinned.topPinnedOriginals = [.claude, .gemini]
-        pinned.topPinnedProfileIDs = [profileA, profileB]
+        pinned.topPinnedOriginals = [.claude]
+        pinned.topPinnedProfileIDs = [profileA]
         let encoded = try! JSONEncoder().encode(pinned)
         let decoded = try! JSONDecoder().decode(KlikProConfig.self, from: encoded)
-        expect(decoded.topPinnedOriginals == [.claude, .gemini],
+        expect(decoded.topPinnedOriginals == [.claude],
                "pinned native apps must persist, in pin order")
-        expect(decoded.topPinnedProfileIDs == [profileA, profileB],
+        expect(decoded.topPinnedProfileIDs == [profileA],
                "pinned App Profiles must persist, in pin order")
         expect(decoded == pinned, "a config carrying pins must round-trip exactly")
 
         // Order is load-bearing: the pin list decides which cards lead the list, so a
         // set-like reordering on the way to disk would shuffle the user's layout.
-        var reordered = pinned
-        reordered.topPinnedOriginals = [.gemini, .claude]
-        let reversed = try! JSONDecoder().decode(
-            KlikProConfig.self, from: try! JSONEncoder().encode(reordered)
-        )
-        expect(reversed.topPinnedOriginals == [.gemini, .claude],
-               "pin order must survive encoding rather than being normalized to a set")
-
         // An older config predates both keys and must decode to empty — nothing is ever
         // auto-pinned on an upgrading user's behalf.
         var object = try! JSONSerialization.jsonObject(with: encoded) as! [String: Any]
@@ -2725,7 +2799,7 @@ private struct AppProfilesFoundationTests {
         var overCap = KlikProConfig.default
         overCap.topPinnedOriginals = [.chatGPT, .chatGPT, .claude, .gemini, .canva, .zoom]
         let clamped = normalizedQuickLaunchConfig(overCap)
-        expect(clamped.topPinnedOriginals == [.chatGPT, .claude, .gemini],
+        expect(clamped.topPinnedOriginals == [.chatGPT],
                "normalization must de-duplicate and trim the pin list to the cap")
         expect(clamped.topPinnedOriginals.count == KlikProConfig.topPinLimit,
                "the clamped pin list must be exactly the cap")
@@ -2737,20 +2811,20 @@ private struct AppProfilesFoundationTests {
                "normalization must leave a valid pin list untouched")
     }
 
-    /// The cap must never be able to lock the user out. Pinning three apps and then
-    /// uninstalling them used to leave every remaining card reporting "already full",
+    /// The cap must never be able to lock the user out. Pinning an app and then
+    /// uninstalling it could leave every remaining card reporting "already full",
     /// with the pinned cards gone and therefore nothing left to unpin — verified against
     /// a rendered preview before this rule existed.
     private static func testTopPinsCannotDeadlockOnUnresolvablePins() {
         let installed: Set<String> = ["a", "b"]
         let resolvable: (String) -> Bool = { installed.contains($0) }
 
-        // Three pins, none of them installed: the cap must treat the list as empty.
-        let allStale = ["x", "y", "z"]
+        // A stale pin with no installed card must not consume the single slot.
+        let allStale = ["x"]
         let recovered = topPinsAdding("a", to: allStale, isResolvable: resolvable)
         expect(recovered != nil, "pins with no card on screen must not consume a slot")
         // The new pin has to survive normalization's clamp, so room is made by releasing
-        // the entries that have no card rather than by appending a fourth.
+        // the entry that has no card rather than by appending a second.
         let clamped = clampedTopPins(recovered ?? [])
         expect(clamped.contains("a"),
                "the pin just added must survive the clamp, not be trimmed away")
@@ -2758,31 +2832,9 @@ private struct AppProfilesFoundationTests {
                "making room must keep the stored list within the cap")
 
         // A genuinely full list still refuses, and refuses without mutating anything.
-        let full = ["a", "b", "x"]
-        let fullResolvable: (String) -> Bool = { ["a", "b", "x"].contains($0) }
-        expect(topPinsAdding("c", to: full, isResolvable: fullResolvable) == nil,
-               "a list of three resolvable pins must refuse a fourth")
-
-        // Mixed: two live pins plus one stale one has a slot free, and taking it must not
-        // cost either live pin.
-        let mixed = ["a", "b", "stale"]
-        let grown = topPinsAdding("c", to: mixed, isResolvable: {
-            ["a", "b", "c"].contains($0)
-        })
-        expect(grown != nil, "a stale pin must not block the third slot")
-        let grownClamped = clampedTopPins(grown ?? [])
-        expect(grownClamped.contains("a") && grownClamped.contains("b")
-                && grownClamped.contains("c"),
-               "making room must sacrifice only the stale pin, never a live one")
-        expect(!grownClamped.contains("stale"),
-               "the stale pin is the one released when its slot is needed")
-
-        // Room is only made when needed: below the cap, a stale pin is left in place so a
-        // reinstall restores it.
-        let sparse = ["stale"]
-        let kept = topPinsAdding("a", to: sparse, isResolvable: resolvable)
-        expect(kept == ["stale", "a"],
-               "a stale pin must be preserved while the list is under the cap")
+        let full = ["a"]
+        expect(topPinsAdding("b", to: full, isResolvable: resolvable) == nil,
+               "one resolvable pin must refuse a second")
     }
 
     private static func testCreateInVaultWritesManifestAndLeavesExistingUntouched() {

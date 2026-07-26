@@ -172,6 +172,19 @@ struct AppProfileManager {
         self.resolveLegacyTarget = resolveLegacyTarget ?? { $0.legacyQuickLaunchTarget }
     }
 
+    private func clearingMouseProfileAssignments(
+        for instanceID: UUID,
+        in config: KlikProConfig
+    ) -> KlikProConfig {
+        var updated = config
+        let target = LaunchAssignmentTarget.profile(instanceID)
+        for profile in updated.mouseProfiles {
+            let cleared = clearingMouseButton(from: target, in: profile)
+            updated = replacingMouseProfile(cleared, in: updated)
+        }
+        return updated
+    }
+
     func candidate(for app: InstalledApp) -> AppProfileCandidate {
         AppProfileCandidate(
             app: app,
@@ -356,6 +369,29 @@ struct AppProfileManager {
             updated.suppressedLegacyInstanceIDs.insert(legacyID)
         }
         updated.instances.append(managed)
+        // Conversion transfers the UUID-keyed launch target on every Mouse
+        // Profile, not only the currently active downgrade shadow.
+        for savedProfile in updated.mouseProfiles {
+            guard let button = mouseButton(
+                assignedTo: .original(target),
+                in: savedProfile
+            ) else { continue }
+            var transferred = clearingMouseButton(
+                from: .original(target),
+                in: savedProfile
+            )
+            transferred = assigningMouseButton(
+                button,
+                to: .profile(managedInstanceID),
+                in: transferred
+            )
+            updated = replacingMouseProfile(transferred, in: updated)
+        }
+        if let activeManaged = updated.instances.first(where: {
+            $0.id == managedInstanceID
+        }) {
+            managed = activeManaged
+        }
         guard appProfileAssignmentsAreValid(updated) else {
             generator.rollbackNewMaterialization(for: managed)
             throw AppProfileManagerError.invalidAssignments
@@ -396,35 +432,58 @@ struct AppProfileManager {
         updatedConfig.instances[index].menuColor = menuColor
         updatedConfig.instances[index].pinToMenuBar = pinToMenuBar
         updatedConfig.instances[index].hotkey = hotkey
-        updatedConfig.instances[index].mouseButton = mouseButton
+        let assignmentTarget = LaunchAssignmentTarget.profile(instanceID)
+        if let mouseButton {
+            updatedConfig = assigningMouseButton(
+                mouseButton,
+                to: assignmentTarget,
+                in: updatedConfig
+            )
+        } else {
+            updatedConfig = clearingMouseButton(
+                from: assignmentTarget,
+                in: updatedConfig
+            )
+        }
+        guard let updatedIndex = updatedConfig.instances.firstIndex(where: {
+            $0.id == instanceID
+        }) else {
+            throw AppProfileManagerError.invalidAssignments
+        }
         let movedLauncherURL: URL
         do {
             movedLauncherURL = try generator.updateDisplayName(
                 from: previous,
-                to: updatedConfig.instances[index]
+                to: updatedConfig.instances[updatedIndex]
             )
-            updatedConfig.instances[index].launcherPath = movedLauncherURL.path
-            updatedConfig.instances[index].iconPath = movedLauncherURL
+            updatedConfig.instances[updatedIndex].launcherPath = movedLauncherURL.path
+            updatedConfig.instances[updatedIndex].iconPath = movedLauncherURL
                 .appendingPathComponent("Contents/Resources/AppIcon.icns")
                 .path
         } catch {
             throw AppProfileManagerError.materializationFailed
         }
         guard appProfileAssignmentsAreValid(updatedConfig) else {
-            _ = try? generator.updateDisplayName(from: updatedConfig.instances[index], to: previous)
+            _ = try? generator.updateDisplayName(
+                from: updatedConfig.instances[updatedIndex],
+                to: previous
+            )
             throw AppProfileManagerError.invalidAssignments
         }
         guard persist(updatedConfig) else {
-            _ = try? generator.updateDisplayName(from: updatedConfig.instances[index], to: previous)
+            _ = try? generator.updateDisplayName(
+                from: updatedConfig.instances[updatedIndex],
+                to: previous
+            )
             throw AppProfileManagerError.persistenceFailed
         }
         // The visible home symlink is cosmetic: re-derive it from the new
         // label after the rename has fully persisted; failures are non-fatal.
-        if previous.label != updatedConfig.instances[index].label {
+        if previous.label != updatedConfig.instances[updatedIndex].label {
             generator.removeHomeSymlinks(for: instanceID, storage: previous.storage)
-            createHomeSymlinkIfRuleRequests(for: updatedConfig.instances[index])
+            createHomeSymlinkIfRuleRequests(for: updatedConfig.instances[updatedIndex])
         }
-        if updatedConfig.instances[index].storage == .vault {
+        if updatedConfig.instances[updatedIndex].storage == .vault {
             updateVaultManifest(config: updatedConfig)
         }
         return updatedConfig
@@ -730,6 +789,7 @@ struct AppProfileManager {
         }
         var updated = config
         updated.instances.removeAll { $0.id == instanceID }
+        updated = clearingMouseProfileAssignments(for: instanceID, in: updated)
         guard persist(updated) else {
             throw AppProfileManagerError.persistenceFailed
         }
@@ -1018,6 +1078,10 @@ struct AppProfileManager {
             let wasVault = config.instances
                 .first(where: { $0.id == target.instanceID })?.storage == .vault
             updated.instances.removeAll { $0.id == target.instanceID }
+            updated = clearingMouseProfileAssignments(
+                for: target.instanceID,
+                in: updated
+            )
             if persist(updated) {
                 generator.removeHomeSymlinks(for: target.instanceID, storage: target.storage)
                 if wasVault { updateVaultManifest(config: updated) }
@@ -1131,6 +1195,7 @@ struct AppProfileManager {
         }
         var updated = config
         updated.instances.removeAll { $0.id == instanceID }
+        updated = clearingMouseProfileAssignments(for: instanceID, in: updated)
         guard persist(updated) else {
             if let stagedProfileRemoval {
                 try? generator.rollbackProfileRemoval(stagedProfileRemoval)

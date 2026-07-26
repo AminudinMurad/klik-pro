@@ -449,10 +449,17 @@ assurance in an id — do not repeat it for new rules.
 
 ## 4d. List-order pin — DONE 2026-07-26
 
-Owner request: *"for mapping tab, the app listing limit to 3 apps (let user pin any 3 apps) add pin
-icon (right to gear icon) on each app card. by limiting app list to 3, add a gap after the refresh
-button."* Plus three clarifications: the pin appears on **both** tabs' cards; **max 3 pins per app
-list**, and a fourth pin must be refused until the user unpins; and **nothing is auto-pinned** —
+**Owner override 2026-07-26:** each list now has exactly **one** sticky top pin,
+not three. Pinning a second card is refused until the current card is unpinned.
+The Mappings viewport remains three cards tall; pin capacity no longer controls
+viewport height. Every card uses a bare gear-sized pin glyph with no pill
+background, rotated 20° clockwise and colored black while active.
+
+Original owner request: *"for mapping tab, the app listing limit to 3 apps (let user pin any 3 apps)
+add pin icon (right to gear icon) on each app card. by limiting app list to 3, add a gap after the
+refresh button."* Later overridden as recorded above. The pin appears on **both** tabs' cards;
+**max 1 pin per app list**, and a second pin must be refused until the user unpins; and
+**nothing is auto-pinned** —
 recover the saved pins on launch, and if none are pinned leave it that way.
 
 **Interpretation that reconciles all four messages: pinning REORDERS, it does not filter.** The
@@ -530,9 +537,9 @@ is unconditional. `AppProfileInstanceRowView` keeps its own literals (it is 92pt
 and places its pin by hand. Both row types that hide the gear for external launchers now fall back
 to the **pin's** minX, not the card edge, or the title slides under the pin.
 
-`MappingSectionCardView` derives its viewport from `topPinLimit` — 3 rows = 277pt against the 352pt
-card — putting `scrollY` at 63 instead of 36, i.e. a 28pt gap under the refresh icon. Floored at 36
-so a shorter card degrades rather than computing a negative origin.
+`MappingSectionCardView` keeps a three-row viewport independently of `topPinLimit` — 3 rows = 277pt
+against the 352pt card — putting `scrollY` at 63 instead of 36, i.e. a 28pt gap under the refresh
+icon. Floored at 36 so a shorter card degrades rather than computing a negative origin.
 
 ### Verification
 
@@ -573,13 +580,9 @@ so a shorter card degrades rather than computing a negative origin.
   pinned treatment on future changes. `INSTALLED_TARGETS=all` now exists, so adding a
   `mappings-pinned.png` fixture is straightforward — it needs a preview override for the pin lists
   (profile pins are keyed by runtime-generated UUIDs and so cannot be seeded from config).
-- **The disabled at-limit pin was never rendered.** It needs three pinned apps *and* a fourth
-  unpinned card on screen at once, which this machine cannot produce: the Mappings viewport is three
-  cards tall, and the generator column — the only uncapped list — shows a card per genuine candidate,
-  which is just ChatGPT and Claude here (`INSTALLED_TARGETS` overrides path lookup, not candidate
-  discovery). Covered by `testTopPinsCannotDeadlockOnUnresolvablePins` and by the tooltip/alert copy,
-  but the visual is unverified. Worth an eyeball on a machine with three-plus catalogue apps
-  installed.
+- **The disabled at-limit pin was never rendered.** It now needs one pinned app and a second
+  unpinned card on screen. Covered by `testTopPinsCannotDeadlockOnUnresolvablePins` and by the
+  tooltip/alert copy, but the visual still deserves an eyeball.
 
 ## 4e. Mouse Profiles — SPEC ONLY, not built (owner decisions 2026-07-26)
 
@@ -659,11 +662,13 @@ probe (usage page 1 / usage 2) on the owner's Mac with two mice connected:
 |---|---|---|---|
 | Logi M650 | `0x046D` / `0xB02A` | Bluetooth LE | `9A519428` |
 | MX Master 3 Mac | `0x046D` / `0xB023` | Bluetooth LE | `3D4ED8C35E2A8362` |
+| HP Wireless Mouse 201 | `0x3938` / `0x1031` | USB (2.4 GHz dongle) | Not reported |
 
 - **Scanning is easy** — ~40 lines, no new dependency (`IOKit` is already imported by
   `KlikProInput.swift`).
 - **Serials are present and unique**, so identity can be VID+PID+serial. That removes the "two
-  identical mice are indistinguishable" worry.
+  identical Bluetooth mice are indistinguishable" worry. The HP receiver does not expose a serial,
+  so two identical HP receivers would still be indistinguishable.
 - **The scan needs a filter.** The same match also returned `Apple Internal Keyboard / Trackpad`
   and `MX Keys Mac` — exclude built-ins (transport `SPI`) and beware keyboards advertising a
   pointer usage, or the UI would offer a keyboard as a registrable mouse.
@@ -813,6 +818,11 @@ users should **keep** their current mappings; this is a fresh-install default ch
   raise it again). Chromium browsers were queried and may be re-included; confirm before listing.
 - `tools/check.sh` must be run **unsandboxed** — its preview-app launch stage fails in a sandbox with
   `kLSNoExecutableErr`.
+- **Version and build are frozen at v1.5.0 / 23** (owner instruction 2026-07-26). Do not bump either
+  number, and do not recommend bumping, without the owner's explicit permission. This holds even when a
+  rebuild produces a new binary under an existing build number — rebuild in place and identify the
+  artifact by its SHA-256. Multiple distinct binaries sharing one build number is an accepted
+  trade-off, not a defect to fix.
 
 ## Verified app-target findings (tested 2026-07-25)
 

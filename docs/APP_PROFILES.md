@@ -40,9 +40,9 @@ bundle pointed at a different profile folder:
 
 - It **survives app updates** automatically — it runs the live original, so it's
   always on the current version. Nothing to regenerate.
-- **For a Verified app, the profile is tested to retain its login across
-  relaunches and application updates** — the original bundle identity means the
-  app's keychain entry still resolves.
+- A **Verified** badge follows Aminudin's manual declaration in
+  [`COMPATIBILITY.md`](COMPATIBILITY.md), not version or test evidence. The
+  launcher always runs the live original app after an update.
 - Archiving an instance removes its generated launcher and runtime access while
   preserving its profile, identity, assignments, and custom icon. The original
   app is untouched.
@@ -65,16 +65,18 @@ are derived state and are reconciled after relaunch if an operation was interrup
 
 ## Approved app list
 
-Detecting an engine does **not** prove an app works. The user therefore never sees
-the full installed-app scan. Klik PRO shows only an installed app that matches a
-compiled rule Aminudin has manually approved after testing. A match validates the
-bundle ID, signing/Team ID, engine, and the app-specific isolation recipe.
+Detecting an engine does **not** put an app in the catalogue. The user therefore
+never sees the full installed-app scan. Klik PRO shows only an installed app that
+matches a compiled rule Aminudin has manually declared in
+[`COMPATIBILITY.md`](COMPATIBILITY.md). A match validates the bundle ID,
+signing/Team ID, engine, and the app-specific isolation recipe.
 
 - ChatGPT and Claude always occupy the first two generator cards.
 - An installed card offers **Generate**; a missing card shows **Not installed**.
 - Existing launchers appear under **Your App Profiles** with Open and Assign Button.
 - Unsupported and merely detected apps are never listed.
-- Future apps are added to the approved list only after Aminudin tests them.
+- Future apps are added only when Aminudin declares them in `COMPATIBILITY.md`
+  and their exact identity metadata is available for a compiled rule.
 
 Important caveats remain:
 
@@ -113,19 +115,19 @@ updates, which matters more for the target apps.
 | Modifies / copies the original | No | Yes (full copy, re-signed) |
 | Survives app auto-updates | Automatically | No — manual regenerate |
 | Always on the current version | Yes | No — frozen until regenerated |
-| Retains sign-in | Verified per supported app | No — re-login (new identity) |
+| Retains sign-in | Declared per `COMPATIBILITY.md` | No — re-login (new identity) |
 | Re-signing the target required | No | Yes, every generate |
 | Separate Dock icon / `⌘Tab` entry | No (shared) | Yes |
 | Per-instance notifications | No (shared) | Yes |
 | Per-instance macOS permissions | No (shared) | Yes |
 | Dedicated launcher + hotkey + mouse button | **Yes** | Not provided by the approach |
-| Native (non-Electron) apps | Gemini only, Untested (`CFFIXED_USER_HOME` + keychain link); others not supported | App-dependent (entitlements / app groups / keychain / provisioning can block it) |
+| Native (non-Electron) apps | Gemini is Verified (`CFFIXED_USER_HOME` + keychain link); other native apps require an explicit rule | App-dependent (entitlements / app groups / keychain / provisioning can block it) |
 | App Store / Apple-provisioned apps | Not supported | Not supported |
 | Reversibility | Trivial | Delete bundle + profile |
 | Ongoing maintenance | None | Regenerate on each update |
 
 > **In short:** Klik PRO trades a separate Dock icon for an instance that is
-> always current, retains sign-in (Verified per supported app), and needs no
+> always current, follows the owner-declared compatibility list, and needs no
 > upkeep — then gives it a hotkey and a mouse button so you can still reach it
 > instantly.
 

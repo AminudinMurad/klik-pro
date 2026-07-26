@@ -4,22 +4,13 @@ enum AppCompatibilityRuleError: Error, Equatable {
     case unresolvedEnvironmentToken(String)
 }
 
-enum AppCompatibilityAssurance: Equatable {
-    case verified
-    case untested
-}
-
 struct AppCompatibilityRule: Equatable {
     let id: String
+    /// Exact display name used by `docs/COMPATIBILITY.md`.
+    let catalogueName: String
     let bundleIdentifier: String
     let teamIdentifier: String
     let engine: AppProfileEngine
-    let testedVersions: Set<String>
-    /// The approved catalogue is app-level. Evidence versions remain recorded,
-    /// while an approved rule may accept vendor updates without weakening its
-    /// pinned bundle, signing identity, engine, or isolation recipe.
-    var assurance: AppCompatibilityAssurance = .verified
-    var acceptsAnyVersion = false
     /// Extra environment an explicitly supported app requires for real profile isolation
     /// (e.g. CODEX_HOME for Codex-family apps). Values may contain the
     /// `{profileDir}` placeholder (the instance's UUID-keyed profile path) or
@@ -28,6 +19,9 @@ struct AppCompatibilityRule: Equatable {
     /// symlinks never enter the profile-deletion path) — never labels.
     /// Compiled-in only; never persisted.
     var requiredEnvironment: [String: String] = [:]
+    /// Extra profile-isolation arguments beyond `--user-data-dir`. Templates may
+    /// contain `{profileDir}` and are compiled in with the exact app rule.
+    var additionalArguments: [String] = []
     /// Dot-folder family prefix for the instance's visible home symlink in `~`
     /// (e.g. "claude" → `~/.claude-a` for a "Claude A" profile). Multi-account
     /// scanners detect CLI homes by these dot-folder names; the symlink points
@@ -51,6 +45,50 @@ struct AppCompatibilityRule: Equatable {
     /// link itself, which is what this codebase uses.
     var requiresLoginKeychainLink = false
 
+    init(
+        id: String,
+        catalogueName: String,
+        bundleIdentifier: String,
+        teamIdentifier: String,
+        engine: AppProfileEngine,
+        requiredEnvironment: [String: String] = [:],
+        additionalArguments: [String] = [],
+        homeSymlinkPrefix: String? = nil,
+        passesUserDataDirArgument: Bool = true,
+        requiresLoginKeychainLink: Bool = false
+    ) {
+        self.id = id
+        self.catalogueName = catalogueName
+        self.bundleIdentifier = bundleIdentifier
+        self.teamIdentifier = teamIdentifier
+        self.engine = engine
+        self.requiredEnvironment = requiredEnvironment
+        self.additionalArguments = additionalArguments
+        self.homeSymlinkPrefix = homeSymlinkPrefix
+        self.passesUserDataDirArgument = passesUserDataDirArgument
+        self.requiresLoginKeychainLink = requiresLoginKeychainLink
+    }
+
+    /// Evidence tooling may construct a temporary, non-production rule while it
+    /// exercises an isolation recipe. The version set is deliberately discarded:
+    /// evidence must never become catalogue or badge authority.
+    init(
+        id: String,
+        bundleIdentifier: String,
+        teamIdentifier: String,
+        engine: AppProfileEngine,
+        testedVersions: Set<String>
+    ) {
+        _ = testedVersions
+        self.init(
+            id: id,
+            catalogueName: bundleIdentifier,
+            bundleIdentifier: bundleIdentifier,
+            teamIdentifier: teamIdentifier,
+            engine: engine
+        )
+    }
+
     /// Expands `{profileDir}` and `{codexHomeDir}` in each required value.
     /// Any other unresolved `{...}` token is a rule-authoring error and
     /// fails closed.
@@ -71,55 +109,55 @@ struct AppCompatibilityRule: Equatable {
         return resolved
     }
 
-    func matches(app: InstalledApp, detectedEngine: AppProfileEngine) -> Bool {
-        guard app.bundleIdentifier == bundleIdentifier,
-              app.teamIdentifier == teamIdentifier,
-              detectedEngine == engine else {
-            return false
+    func resolvedLaunchArguments(profileDirectory: String) throws -> [String] {
+        var arguments = passesUserDataDirArgument
+            ? ["--user-data-dir=" + profileDirectory]
+            : []
+        for template in additionalArguments {
+            let value = template.replacingOccurrences(
+                of: "{profileDir}",
+                with: profileDirectory
+            )
+            if value.range(of: "\\{[^}]*\\}", options: .regularExpression) != nil {
+                throw AppCompatibilityRuleError.unresolvedEnvironmentToken(template)
+            }
+            arguments.append(value)
         }
-        if acceptsAnyVersion { return true }
-        guard let version = app.version else { return false }
-        return testedVersions.contains(version)
+        return arguments
+    }
+
+    func matches(app: InstalledApp, detectedEngine: AppProfileEngine) -> Bool {
+        app.bundleIdentifier == bundleIdentifier
+            && app.teamIdentifier == teamIdentifier
+            && detectedEngine == engine
     }
 }
 
 struct AppCompatibilityRegistry {
-    /// Verified entries require the full evidence protocol. Untested entries
-    /// require an explicit owner decision and remain visibly labelled Untested.
-    ///
-    /// Claude (com.anthropic.claudefordesktop): both gates passed 2026-07-16
-    /// against the real vendor update 1.21459.0 → 1.21459.1; evidence record
-    /// and emitted draft rule preserved in the evidence workspace. App-level
-    /// isolation is `--user-data-dir`. Owner decision 2026-07-19: the rule
-    /// additionally points CLAUDE_CONFIG_DIR at the instance's sibling home so
-    /// the embedded Claude Code CLI side is isolated per instance and visible
-    /// to multi-account scanners via the home symlink; this environment
-    /// addition still needs its own on-machine re-attestation (login
-    /// persistence + update survival) before the next release gate.
-    ///
-    /// ChatGPT is owner-enabled as Untested. Its known isolation recipe is
-    /// retained, but no vendor-update verification claim is made.
+    /// `docs/COMPATIBILITY.md` is the sole product authority for the shipping
+    /// catalogue and badge (owner decision 2026-07-26). Every exact rule in
+    /// `production` is therefore Verified. Bundle ID, Team ID and engine remain
+    /// pinned as security/identity gates, but version or test evidence never
+    /// promotes or demotes an app. Change the document first, then mirror it here.
     static let production = AppCompatibilityRegistry(rules: [
         AppCompatibilityRule(
             id: "com-anthropic-claudefordesktop-verified",
+            catalogueName: "Claude",
             bundleIdentifier: "com.anthropic.claudefordesktop",
             teamIdentifier: "Q6L2SF6YDW",
             engine: .electron,
-            testedVersions: ["1.21459.0", "1.21459.1"],
-            acceptsAnyVersion: true,
             requiredEnvironment: [
                 "CLAUDE_CONFIG_DIR": "{codexHomeDir}",
             ],
             homeSymlinkPrefix: "claude"
         ),
         AppCompatibilityRule(
+            // Persisted/frozen ID: the historical suffix does not control the badge.
             id: "com-openai-codex-untested",
+            catalogueName: "ChatGPT / Codex",
             bundleIdentifier: "com.openai.codex",
             teamIdentifier: "2DC432GLL2",
             engine: .electron,
-            testedVersions: [],
-            assurance: .untested,
-            acceptsAnyVersion: true,
             requiredEnvironment: [
                 "CODEX_HOME": "{codexHomeDir}",
                 "CODEX_ELECTRON_USER_DATA_PATH": "{profileDir}",
@@ -145,17 +183,13 @@ struct AppCompatibilityRegistry {
         // frames; accounts do not collide, since every isolated profile names
         // its own slot `user1`.
         //
-        // Untested, not verified: login persistence and cold start are proven,
-        // but this rule has not yet survived a real vendor update, which is the
-        // second gate the catalogue requires before a `.verified` claim.
         AppCompatibilityRule(
+            // Persisted/frozen ID: the historical suffix does not control the badge.
             id: "com-google-geminimacos-native-untested",
+            catalogueName: "Gemini",
             bundleIdentifier: "com.google.GeminiMacOS",
             teamIdentifier: "EQHXZ8M8AV",
             engine: .native,
-            testedVersions: ["1.86.7.600"],
-            assurance: .untested,
-            acceptsAnyVersion: true,
             requiredEnvironment: [
                 "CFFIXED_USER_HOME": "{profileDir}",
             ],
@@ -170,11 +204,10 @@ struct AppCompatibilityRegistry {
         // land on whichever instance LaunchServices picks.
         AppCompatibilityRule(
             id: "com-canva-canvadesktop",
+            catalogueName: "Canva",
             bundleIdentifier: "com.canva.CanvaDesktop",
             teamIdentifier: "5HD2ARTBFS",
-            engine: .electron,
-            testedVersions: [],
-            acceptsAnyVersion: true
+            engine: .electron
         ),
         // Zoom (us.zoom.xos) — native and unsandboxed, so isolation is
         // CFFIXED_USER_HOME. Verified 2026-07-25: a redirected instance built its own
@@ -182,11 +215,10 @@ struct AppCompatibilityRegistry {
         // profile flag, so the user-data-dir argument is suppressed.
         AppCompatibilityRule(
             id: "com-zoom-xos",
+            catalogueName: "Zoom",
             bundleIdentifier: "us.zoom.xos",
             teamIdentifier: "BJ4HAAB9B3",
             engine: .native,
-            testedVersions: [],
-            acceptsAnyVersion: true,
             requiredEnvironment: ["CFFIXED_USER_HOME": "{profileDir}"],
             passesUserDataDirArgument: false,
             requiresLoginKeychainLink: true
@@ -197,37 +229,31 @@ struct AppCompatibilityRegistry {
         // app-level single instance, so profiles switch rather than run side by side.
         AppCompatibilityRule(
             id: "com-spotify-client",
+            catalogueName: "Spotify",
             bundleIdentifier: "com.spotify.client",
             teamIdentifier: "2FNC3A47ZF",
             engine: .native,
-            testedVersions: [],
-            acceptsAnyVersion: true,
             requiredEnvironment: ["CFFIXED_USER_HOME": "{profileDir}"],
             passesUserDataDirArgument: false,
             requiresLoginKeychainLink: true
         ),
         // Antigravity and its IDE (Google, team EQHXZ8M8AV) — both Electron and
         // unsandboxed, with `user-data-dir` present in their bundled framework, so
-        // the stock argument is the whole recipe. Untested end to end; the IDE is a
-        // VS Code fork, so a profile isolates settings and extensions along with the
-        // sign-in.
+        // the stock argument is the whole recipe. The IDE is a VS Code fork, so a
+        // profile isolates settings and extensions along with the sign-in.
         AppCompatibilityRule(
             id: "com-google-antigravity",
+            catalogueName: "Antigravity",
             bundleIdentifier: "com.google.antigravity",
             teamIdentifier: "EQHXZ8M8AV",
-            engine: .electron,
-            testedVersions: [],
-            assurance: .untested,
-            acceptsAnyVersion: true
+            engine: .electron
         ),
         AppCompatibilityRule(
             id: "com-google-antigravity-ide",
+            catalogueName: "Antigravity IDE",
             bundleIdentifier: "com.google.antigravity-ide",
             teamIdentifier: "EQHXZ8M8AV",
-            engine: .electron,
-            testedVersions: [],
-            assurance: .untested,
-            acceptsAnyVersion: true
+            engine: .electron
         ),
         // Chromium browsers. `--user-data-dir` is the same flag Chrome has always
         // taken, and both are already recognised as `.chromium` by the detector.
@@ -235,21 +261,64 @@ struct AppCompatibilityRegistry {
         // mainly adds a separate Dock tile rather than new capability.
         AppCompatibilityRule(
             id: "com-google-chrome",
+            catalogueName: "Google Chrome",
             bundleIdentifier: "com.google.Chrome",
             teamIdentifier: "EQHXZ8M8AV",
-            engine: .chromium,
-            testedVersions: [],
-            assurance: .untested,
-            acceptsAnyVersion: true
+            engine: .chromium
         ),
         AppCompatibilityRule(
             id: "com-brave-browser",
+            catalogueName: "Brave",
             bundleIdentifier: "com.brave.Browser",
             teamIdentifier: "KL8N8XSYF4",
-            engine: .chromium,
-            testedVersions: [],
-            assurance: .untested,
-            acceptsAnyVersion: true
+            engine: .chromium
+        ),
+        // Identity metadata for Cursor and VS Code was read from the signed apps
+        // installed on this Mac on 2026-07-26. The remaining four identities were
+        // read from each vendor's official signed macOS disk image the same day.
+        AppCompatibilityRule(
+            id: "com-todesktop-230313mzl4w4u92",
+            catalogueName: "Cursor",
+            bundleIdentifier: "com.todesktop.230313mzl4w4u92",
+            teamIdentifier: "VDXQ22DGB9",
+            engine: .electron,
+            additionalArguments: ["--extensions-dir={profileDir}/extensions"]
+        ),
+        AppCompatibilityRule(
+            id: "com-hnc-discord",
+            catalogueName: "Discord",
+            bundleIdentifier: "com.hnc.Discord",
+            teamIdentifier: "53Q6R32WPB",
+            engine: .electron
+        ),
+        AppCompatibilityRule(
+            id: "notion-id",
+            catalogueName: "Notion",
+            bundleIdentifier: "notion.id",
+            teamIdentifier: "LBQJ96FQ8D",
+            engine: .electron
+        ),
+        AppCompatibilityRule(
+            id: "md-obsidian",
+            catalogueName: "Obsidian",
+            bundleIdentifier: "md.obsidian",
+            teamIdentifier: "6JSW4SJWN9",
+            engine: .electron
+        ),
+        AppCompatibilityRule(
+            id: "com-tinyspeck-slackmacgap",
+            catalogueName: "Slack",
+            bundleIdentifier: "com.tinyspeck.slackmacgap",
+            teamIdentifier: "BQR82RBBHL",
+            engine: .electron
+        ),
+        AppCompatibilityRule(
+            id: "com-microsoft-vscode",
+            catalogueName: "Visual Studio Code",
+            bundleIdentifier: "com.microsoft.VSCode",
+            teamIdentifier: "UBF8T346G9",
+            engine: .electron,
+            additionalArguments: ["--extensions-dir={profileDir}/extensions"]
         ),
     ])
 
@@ -320,15 +389,7 @@ struct EngineDetector {
 
         let engine = detect(app)
         if let rule = registry.matchingRule(for: app, engine: engine) {
-            switch rule.assurance {
-            case .verified:
-                return .verified(ruleID: rule.id)
-            case .untested:
-                return .experimental(
-                    "Known isolation method; enabled without update-survival verification.",
-                    ruleID: rule.id
-                )
-            }
+            return .verified(ruleID: rule.id)
         }
 
         switch engine {

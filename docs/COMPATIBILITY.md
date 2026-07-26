@@ -2,12 +2,13 @@
 
 Apps that can run as isolated **App Profiles**, each holding its own login.
 
-- **Verified** — a rule ships in Klik PRO and the isolation method is proven.
-- **Unverified** — a rule ships, the method is plausible but not yet proven.
+- **Verified** — Aminudin has manually declared that the app ships as Verified.
+- **Unverified** — Aminudin has manually declared that the app ships as Unverified.
 - **Pending** — not in Klik PRO yet. The method is known, but a rule pins the app's exact bundle
   identifier and Team ID, which can only be read from the app itself.
 
 Only Verified and Unverified apps appear in Klik PRO, and only while the app is installed.
+The badge is taken from this document; app versions and test evidence do not promote or demote it.
 
 ## Verified
 
@@ -45,19 +46,23 @@ not need to run.
 | | | Vivaldi |
 | | | Windsurf |
 
-TablePlus would land in **Unverified** — it is a native app, where the isolation method is less
-predictable. Everything else here is Electron or Chromium and would land in **Verified**.
+Pending rows have no preassigned shipping badge. Engine type is planning context only; Aminudin
+declares Verified or Unverified when an app moves into the shipping catalogue.
 
 ## Notes
 
 - Install apps from the developer's own download, not the Mac App Store. App Store builds are
   sandboxed and cannot be isolated.
 - **Spotify** runs one instance at a time — profiles switch rather than run side by side.
+- **Cursor and Visual Studio Code** receive separate `--user-data-dir` and
+  `--extensions-dir` paths inside each generated profile, isolating accounts, settings,
+  workspace state, and extensions.
 - Apps that hand sign-in to your default browser may return the login to the original app instead of
   the profile. Quit the original app during a profile's first sign-in.
 
 ## Maintaining this list
 
-An app moves from Pending once its bundle identifier, Team ID and engine have been read and a rule
-added. It moves to Verified once two profiles have been signed into different accounts and confirmed
-independent.
+This document is the sole product authority for the shipping catalogue and badge. Change an app's
+status here only by owner decision, then mirror the declaration in the compiled registry. The
+registry still pins bundle identifier, Team ID, engine, and isolation recipe as security gates.
+Automated tests enforce exact document/registry parity; they never promote or demote an app.

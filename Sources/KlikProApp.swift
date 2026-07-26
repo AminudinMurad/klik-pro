@@ -1,11 +1,106 @@
 import AppKit
 import Carbon
 import ImageIO
+import IOKit.hid
 import QuartzCore
 import UniformTypeIdentifiers
 
 // NOTE: LaunchAgent identifiers and installer helpers live in KlikProConfig.swift,
 // shared with the combined background helper.
+
+/// One physical pointer offered by the Mouse Profile selector. The persisted
+/// identity stays intentionally small (VID/PID/serial); presentation-only details
+/// are refreshed from IOKit whenever the settings window opens.
+struct ConnectedMouseDevice: Equatable {
+    let identity: MouseDeviceIdentity
+    let displayName: String
+    let transport: String?
+
+    var detail: String {
+        let serial = identity.serialNumber.flatMap { $0.isEmpty ? nil : $0 }
+        return serial.map { "\(displayName) · …\(String($0.suffix(6)))" } ?? displayName
+    }
+}
+
+private func knownMouseDisplayName(for identity: MouseDeviceIdentity) -> String? {
+    switch (identity.vendorID, identity.productID) {
+    case (0x046D, 0xB023): return "MX Master 3 Mac"
+    case (0x046D, 0xB02A): return "Logi M650"
+    case (0x3938, 0x1031): return "HP Wireless Mouse 201"
+    default: return nil
+    }
+}
+
+/// Enumerates external mouse-class HID devices without subscribing to input
+/// reports. Built-in SPI devices and keyboard/trackpad services are excluded, so
+/// binding a Mouse Profile cannot accidentally offer the Mac's internal keyboard.
+func connectedMouseDevices() -> [ConnectedMouseDevice] {
+    let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
+    let match: [String: Any] = [
+        kIOHIDDeviceUsagePageKey: kHIDPage_GenericDesktop,
+        kIOHIDDeviceUsageKey: kHIDUsage_GD_Mouse,
+    ]
+    IOHIDManagerSetDeviceMatching(manager, match as CFDictionary)
+    guard IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone)) == kIOReturnSuccess else {
+        return []
+    }
+    defer { IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone)) }
+    guard let rawDevices = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice> else {
+        return []
+    }
+
+    func number(_ device: IOHIDDevice, _ key: String) -> Int? {
+        (IOHIDDeviceGetProperty(device, key as CFString) as? NSNumber)?.intValue
+    }
+    func string(_ device: IOHIDDevice, _ key: String) -> String? {
+        IOHIDDeviceGetProperty(device, key as CFString) as? String
+    }
+
+    var seen = Set<MouseDeviceIdentity>()
+    return rawDevices.compactMap { device -> ConnectedMouseDevice? in
+        guard let vendorID = number(device, kIOHIDVendorIDKey),
+              let productID = number(device, kIOHIDProductIDKey) else {
+            return nil
+        }
+        let transport = string(device, kIOHIDTransportKey)
+        guard transport?.caseInsensitiveCompare("SPI") != .orderedSame else { return nil }
+        let name = string(device, kIOHIDProductKey)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        // HP Wireless Mouse 201's 2.4 GHz receiver exposes only this generic
+        // USB HID product name and no serial. Use the receiver's exact VID/PID
+        // to give the profile picker the product name the owner recognizes.
+        let displayName: String
+        let identity = MouseDeviceIdentity(
+            vendorID: vendorID,
+            productID: productID,
+            serialNumber: string(device, kIOHIDSerialNumberKey)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        if let knownName = knownMouseDisplayName(for: identity) {
+            displayName = knownName
+        } else {
+            displayName = (name?.isEmpty == false ? name! : "Mouse")
+        }
+        let lowered = displayName.lowercased()
+        guard !lowered.contains("keyboard"), !lowered.contains("trackpad") else { return nil }
+        let serial = identity.serialNumber
+        let normalizedIdentity = MouseDeviceIdentity(
+            vendorID: vendorID,
+            productID: productID,
+            serialNumber: serial?.isEmpty == false ? serial : nil
+        )
+        guard seen.insert(normalizedIdentity).inserted else { return nil }
+        return ConnectedMouseDevice(
+            identity: normalizedIdentity,
+            displayName: displayName,
+            transport: transport
+        )
+    }.sorted {
+        if $0.displayName != $1.displayName {
+            return $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+        }
+        return ($0.identity.serialNumber ?? "") < ($1.identity.serialNumber ?? "")
+    }
+}
 
 // MARK: - ToggleSwitchView
 
@@ -712,9 +807,10 @@ func applyUnsetShortcutPresentation(
     resetButton: ShortcutResetButton,
     badge: ConflictBadgeView
 ) {
-    guard !recorder.isHidden, !recorder.combo.isSet else { return }
-    resetButton.isHidden = true
-    badge.isHidden = true
+    guard !recorder.isHidden else { return }
+    let hidesShortcutState = !recorder.combo.isSet
+    resetButton.isHidden = hidesShortcutState
+    badge.isHidden = hidesShortcutState
 }
 
 final class RecordableShortcutRowView: NSView {
@@ -729,6 +825,7 @@ final class RecordableShortcutRowView: NSView {
     var onComboChange: ((KeyCombo) -> Void)?
     var onOpenAppChange: ((LaunchAssignmentTarget?) -> Void)?
     private let defaultCombo: KeyCombo
+    private let showsShortcutControls: Bool
     private var linkedTarget: QuickLaunchTarget?
     private var linkedCombo: KeyCombo?
     private var linkedFeatureActive = false
@@ -745,10 +842,13 @@ final class RecordableShortcutRowView: NSView {
         status: ShortcutConflictStatus,
         displayOverride: String? = nil,
         displayOverrideResolver: ((KeyCombo) -> String?)? = nil,
+        baseActionTitle: String = "Shortcut",
+        showsShortcutControls: Bool = true,
         frame: NSRect
     ) {
         self.titleLabel = title
         self.defaultCombo = defaultCombo
+        self.showsShortcutControls = showsShortcutControls
         // Compact layout so a full row (toggle + title + recorder + badge) fits in a
         // half-width (~400pt) column.
         self.toggle = ToggleSwitchView(isOn: mapping.enabled, frame: NSRect(x: 0, y: (frame.height - 22) / 2, width: 40, height: 22))
@@ -786,7 +886,7 @@ final class RecordableShortcutRowView: NSView {
             x: ShortcutRowLayout.actionX, y: (frame.height - 30) / 2,
             width: ShortcutRowLayout.actionWidth, height: 30
         )
-        actionPicker.addItems(withTitles: ["Shortcut", "Open App"])
+        actionPicker.addItems(withTitles: [baseActionTitle, "Open App"])
         // A keyboard glyph stands in for "Keyboard" so the option reads "⌨ Shortcut"
         // in full instead of truncating, letting the picker be narrower.
         actionPicker.item(at: 0)?.image = NSImage(
@@ -817,6 +917,12 @@ final class RecordableShortcutRowView: NSView {
                   self.recorder.combo.signature != self.defaultCombo.signature else { return }
             self.recorder.setCombo(self.defaultCombo)
             self.onComboChange?(self.defaultCombo)
+        }
+        if !showsShortcutControls {
+            toggle.isHidden = true
+            recorder.isHidden = true
+            resetButton.isHidden = true
+            badge.isHidden = true
         }
     }
     required init?(coder: NSCoder) { nil }
@@ -870,16 +976,34 @@ final class RecordableShortcutRowView: NSView {
             appPicker.isHidden = false
         } else {
             actionPicker.selectItem(at: 0)
-            recorder.isHidden = false
-            resetButton.isHidden = false
-            badge.isHidden = false
+            recorder.isHidden = !showsShortcutControls
+            resetButton.isHidden = !showsShortcutControls
+            badge.isHidden = !showsShortcutControls
             appPicker.isHidden = true
         }
         applyUnsetShortcutPresentation(
             recorder: recorder, resetButton: resetButton, badge: badge
         )
-        toggle.isHidden = false
+        toggle.isHidden = !showsShortcutControls
         updatingActionControls = false
+        needsDisplay = true
+    }
+
+    /// Loads a Mouse Profile into the existing control without firing edit
+    /// callbacks. Carousel browsing changes the viewed profile only; it must not
+    /// mutate or activate anything merely because the row was repainted.
+    func setMapping(_ mapping: ShortcutMapping) {
+        toggle.isOn = mapping.enabled
+        recorder.setCombo(mapping.combo)
+        applyUnsetShortcutPresentation(
+            recorder: recorder, resetButton: resetButton, badge: badge
+        )
+        if !showsShortcutControls {
+            toggle.isHidden = true
+            recorder.isHidden = true
+            resetButton.isHidden = true
+            badge.isHidden = true
+        }
         needsDisplay = true
     }
 
@@ -909,6 +1033,13 @@ final class RecordableShortcutRowView: NSView {
         specialFeatureActive: Bool = false,
         targetReadiness: QuickLaunchTargetReadiness = .appNotInstalled
     ) {
+        guard showsShortcutControls else {
+            toggle.isHidden = true
+            recorder.isHidden = true
+            resetButton.isHidden = true
+            badge.isHidden = true
+            return
+        }
         guard assignedAppTarget == nil else { return }
         linkedTarget = target
         linkedCombo = combo
@@ -1478,6 +1609,13 @@ final class URLLinkView: NSView {
 final class IconActionButton: NSView {
     private let icon: NSImage?
     var onClick: (() -> Void)?
+    var isEnabled = true {
+        didSet {
+            alphaValue = isEnabled ? 1 : 0.35
+            needsDisplay = true
+            window?.invalidateCursorRects(for: self)
+        }
+    }
 
     init(symbolName: String, accessibility: String, frame: NSRect) {
         self.icon = NSImage(systemSymbolName: symbolName, accessibilityDescription: accessibility)?
@@ -1488,8 +1626,14 @@ final class IconActionButton: NSView {
     required init?(coder: NSCoder) { nil }
 
     override var isFlipped: Bool { true }
-    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
-    override func mouseDown(with event: NSEvent) { onClick?() }
+    override func resetCursorRects() {
+        guard isEnabled else { return }
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
+        onClick?()
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         guard let icon = icon else { return }
@@ -1658,6 +1802,258 @@ final class ToggleOnlyRowView: NSView {
 
 // MARK: - Scrollable settings content (device diagram + all mapping rows)
 
+/// Compact controller embedded in the Mouse Profile card's header. Browsing is
+/// deliberately separate from activation: selecting a popup item, chevron, or
+/// page dot only loads that profile into the editor. The explicit Activate action
+/// is the only path that changes what the input helper runs.
+final class MouseProfileHeaderView: NSView {
+    private let previousButton = IconActionButton(
+        symbolName: "chevron.left",
+        accessibility: "Previous Mouse Profile",
+        frame: NSRect(x: 0, y: 1, width: 26, height: 26)
+    )
+    private let profilePopup = NSPopUpButton(
+        frame: NSRect(x: 30, y: 0, width: 154, height: 28)
+    )
+    private let nextButton = IconActionButton(
+        symbolName: "chevron.right",
+        accessibility: "Next Mouse Profile",
+        frame: NSRect(x: 188, y: 1, width: 26, height: 26)
+    )
+    private let addButton = IconActionButton(
+        symbolName: "plus",
+        accessibility: "Add Mouse Profile",
+        frame: NSRect(x: 218, y: 1, width: 26, height: 26)
+    )
+    private let mouseLabel = NSTextField(labelWithString: "Mouse")
+    private let devicePopup = NSPopUpButton(
+        frame: NSRect(x: 344, y: 0, width: 196, height: 28)
+    )
+    private let activeBadge = NSTextField(labelWithString: "ACTIVE")
+    private let activateButton = AppProfileButton(
+        title: "Activate", frame: NSRect(x: 554, y: 0, width: 94, height: 28)
+    )
+    private let menuButton = IconActionButton(
+        symbolName: "ellipsis",
+        accessibility: "Manage Mouse Profile",
+        frame: NSRect(x: 654, y: 1, width: 28, height: 26)
+    )
+
+    private var profileIDs: [UUID] = []
+    private var viewedProfileID: UUID?
+    private var activeProfileID: UUID?
+    private var devices: [ConnectedMouseDevice] = []
+    private var viewedDeviceIdentity: MouseDeviceIdentity?
+
+    var onBrowse: ((UUID) -> Void)?
+    var onAdd: (() -> Void)?
+    var onActivate: ((UUID) -> Void)?
+    var onBindDevice: ((UUID, MouseDeviceIdentity?) -> Void)?
+    var onRescanDevices: (() -> Void)?
+    var onRename: ((UUID) -> Void)?
+    var onDuplicate: ((UUID) -> Void)?
+    var onReset: ((UUID) -> Void)?
+    var onDelete: ((UUID) -> Void)?
+
+    override var isFlipped: Bool { true }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        profilePopup.controlSize = .small
+        profilePopup.target = self
+        profilePopup.action = #selector(profileSelectionChanged)
+        profilePopup.setAccessibilityLabel("Viewed Mouse Profile")
+
+        mouseLabel.frame = NSRect(x: 292, y: 6, width: 48, height: 17)
+        mouseLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        mouseLabel.textColor = .appTextSecondary
+
+        devicePopup.controlSize = .small
+        devicePopup.target = self
+        devicePopup.action = #selector(deviceSelectionChanged)
+        devicePopup.setAccessibilityLabel("Mouse assigned to profile")
+
+        activeBadge.font = .systemFont(ofSize: 9, weight: .bold)
+        activeBadge.textColor = .systemGreen
+        activeBadge.alignment = .center
+        activeBadge.frame = NSRect(x: 554, y: 6, width: 94, height: 16)
+        activeBadge.setAccessibilityLabel("Active Mouse Profile")
+
+        previousButton.onClick = { [weak self] in self?.browse(offset: -1) }
+        nextButton.onClick = { [weak self] in self?.browse(offset: 1) }
+        addButton.onClick = { [weak self] in self?.onAdd?() }
+        activateButton.onPress = { [weak self] in
+            guard let self, let id = self.viewedProfileID else { return }
+            self.onActivate?(id)
+        }
+        menuButton.onClick = { [weak self] in self?.presentMenu() }
+
+        [
+            previousButton, profilePopup, nextButton, addButton, mouseLabel,
+            devicePopup, activeBadge, activateButton, menuButton,
+        ].forEach(addSubview)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    func configure(
+        profiles: [MouseProfile],
+        viewedID: UUID,
+        activeID: UUID,
+        connectedDevices: [ConnectedMouseDevice]
+    ) {
+        profileIDs = profiles.map(\.id)
+        viewedProfileID = profileIDs.contains(viewedID) ? viewedID : profileIDs.first
+        activeProfileID = activeID
+        devices = connectedDevices
+        let viewed = profiles.first { $0.id == viewedProfileID }
+        viewedDeviceIdentity = viewed?.deviceIdentity
+
+        profilePopup.removeAllItems()
+        for profile in profiles {
+            profilePopup.addItem(withTitle: profile.name)
+        }
+        if let id = viewedProfileID,
+           let index = profileIDs.firstIndex(of: id) {
+            profilePopup.selectItem(at: index)
+        }
+
+        let canPage = profiles.count > 1
+        previousButton.isEnabled = canPage
+        nextButton.isEnabled = canPage
+        addButton.isEnabled = profiles.count < MouseProfile.maximumCount
+        addButton.toolTip = addButton.isEnabled
+            ? "Add Mouse Profile"
+            : "Maximum of \(MouseProfile.maximumCount) Mouse Profiles"
+
+        rebuildDevicePopup()
+        let isActive = viewedProfileID == activeProfileID
+        activeBadge.isHidden = !isActive
+        activateButton.isHidden = isActive
+        activateButton.isEnabled = !isActive
+        menuButton.isEnabled = viewedProfileID != nil
+        needsDisplay = true
+    }
+
+    private func rebuildDevicePopup() {
+        devicePopup.removeAllItems()
+        devicePopup.addItem(withTitle: "No mouse assigned")
+        var selectedIndex = 0
+        for (index, device) in devices.enumerated() {
+            devicePopup.addItem(withTitle: device.detail)
+            if device.identity == viewedDeviceIdentity { selectedIndex = index + 1 }
+        }
+        if let identity = viewedDeviceIdentity,
+           !devices.contains(where: { $0.identity == identity }) {
+            let serial = identity.serialNumber.map { " · …\(String($0.suffix(6)))" } ?? ""
+            let name = knownMouseDisplayName(for: identity)
+                ?? String(format: "Assigned mouse %04X:%04X", identity.vendorID, identity.productID)
+            devicePopup.addItem(
+                withTitle: "\(name)\(serial) · Not connected"
+            )
+            selectedIndex = devicePopup.numberOfItems - 1
+        }
+        devicePopup.menu?.addItem(.separator())
+        devicePopup.addItem(withTitle: "Scan for mice…")
+        devicePopup.selectItem(at: selectedIndex)
+    }
+
+    @objc private func profileSelectionChanged() {
+        let index = profilePopup.indexOfSelectedItem
+        guard profileIDs.indices.contains(index) else { return }
+        onBrowse?(profileIDs[index])
+    }
+
+    @objc private func deviceSelectionChanged() {
+        guard let profileID = viewedProfileID else { return }
+        let index = devicePopup.indexOfSelectedItem
+        if index == devicePopup.numberOfItems - 1 {
+            onRescanDevices?()
+            rebuildDevicePopup()
+            return
+        }
+        if index == 0 {
+            onBindDevice?(profileID, nil)
+            return
+        }
+        let deviceIndex = index - 1
+        if devices.indices.contains(deviceIndex) {
+            onBindDevice?(profileID, devices[deviceIndex].identity)
+        }
+    }
+
+    private func browse(offset: Int) {
+        guard let viewedProfileID,
+              let index = profileIDs.firstIndex(of: viewedProfileID),
+              !profileIDs.isEmpty else { return }
+        let next = (index + offset + profileIDs.count) % profileIDs.count
+        onBrowse?(profileIDs[next])
+    }
+
+    private func presentMenu() {
+        guard let id = viewedProfileID else { return }
+        let menu = NSMenu()
+        func item(_ title: String, _ action: Selector) -> NSMenuItem {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            item.representedObject = id as NSUUID
+            return item
+        }
+        menu.addItem(item("Rename…", #selector(renameProfile(_:))))
+        let duplicate = item("Duplicate", #selector(duplicateProfile(_:)))
+        duplicate.isEnabled = profileIDs.count < MouseProfile.maximumCount
+        menu.addItem(duplicate)
+        menu.addItem(item("Reset to Defaults…", #selector(resetProfile(_:))))
+        menu.addItem(.separator())
+        let delete = item("Delete…", #selector(deleteProfile(_:)))
+        delete.isEnabled = profileIDs.count > 1 && id != activeProfileID
+        delete.toolTip = id == activeProfileID
+            ? "Activate another Mouse Profile before deleting this one."
+            : nil
+        menu.addItem(delete)
+        menu.popUp(
+            positioning: nil,
+            at: NSPoint(x: menuButton.frame.minX, y: menuButton.frame.maxY + 3),
+            in: self
+        )
+    }
+
+    private func representedID(_ sender: NSMenuItem) -> UUID? {
+        (sender.representedObject as? NSUUID).map { $0 as UUID }
+    }
+
+    @objc private func renameProfile(_ sender: NSMenuItem) {
+        if let id = representedID(sender) { onRename?(id) }
+    }
+    @objc private func duplicateProfile(_ sender: NSMenuItem) {
+        if let id = representedID(sender) { onDuplicate?(id) }
+    }
+    @objc private func resetProfile(_ sender: NSMenuItem) {
+        if let id = representedID(sender) { onReset?(id) }
+    }
+    @objc private func deleteProfile(_ sender: NSMenuItem) {
+        if let id = representedID(sender) { onDelete?(id) }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let viewedProfileID,
+              let viewedIndex = profileIDs.firstIndex(of: viewedProfileID) else { return }
+        let dotSize: CGFloat = 6
+        let gap: CGFloat = 6
+        let totalWidth = CGFloat(profileIDs.count) * dotSize
+            + CGFloat(max(0, profileIDs.count - 1)) * gap
+        var x = 268 - totalWidth / 2
+        for index in profileIDs.indices {
+            (index == viewedIndex ? NSColor.controlAccentColor : NSColor.tertiaryLabelColor)
+                .setFill()
+            NSBezierPath(
+                ovalIn: NSRect(x: x, y: 11, width: dotSize, height: dotSize)
+            ).fill()
+            x += dotSize + gap
+        }
+    }
+}
+
 final class SettingsContentView: NSView {
     private let image: NSImage?
 
@@ -1707,6 +2103,9 @@ final class SettingsContentView: NSView {
     // browsers pull-down that stays in sync with the Settings tab's four browser checkboxes.
     let thumbWheelToggle: ToggleSwitchView
     let thumbWheelBrowsers: ThumbWheelBrowsersButton
+    let mouseProfileHeader = MouseProfileHeaderView(
+        frame: NSRect(x: 112, y: 6, width: 700, height: 30)
+    )
     var onThumbWheelToggle: ((Bool) -> Void)?
     var onThumbWheelBrowserChange: ((ThumbWheelBrowsersButton.Browser, Bool) -> Void)?
     // App icons shown in the Special Feature card, loaded at runtime from the user's
@@ -1817,6 +2216,8 @@ final class SettingsContentView: NSView {
             mapping: config.middleButton,
             defaultCombo: KlikProConfig.default.middleButton.combo,
             status: statuses[.middleButton] ?? .ok,
+            baseActionTitle: "No Action",
+            showsShortcutControls: false,
             frame: NSRect(x: shortcutLeftX, y: shortcutTopY, width: shortcutRowW, height: shortcutRowH)
         )
         gestureButtonRow = RecordableShortcutRowView(
@@ -1824,6 +2225,8 @@ final class SettingsContentView: NSView {
             mapping: config.gestureButton,
             defaultCombo: KlikProConfig.default.gestureButton.combo,
             status: statuses[.gestureButton] ?? .ok,
+            baseActionTitle: "No Action",
+            showsShortcutControls: false,
             frame: NSRect(x: shortcutBottomRightX, y: shortcutBottomY, width: shortcutRowW, height: shortcutRowH)
         )
         let forwardDisplay = browserHistoryDisplayOverride(
@@ -1841,6 +2244,8 @@ final class SettingsContentView: NSView {
             displayOverrideResolver: { combo in
                 browserHistoryDisplayOverride(slot: .forwardButton, combo: combo)
             },
+            baseActionTitle: "Browser Forward",
+            showsShortcutControls: false,
             frame: NSRect(x: shortcutBottomLeftX, y: shortcutBottomY, width: shortcutRowW, height: shortcutRowH)
         )
         backRow = RecordableShortcutRowView(
@@ -1850,6 +2255,8 @@ final class SettingsContentView: NSView {
             displayOverrideResolver: { combo in
                 browserHistoryDisplayOverride(slot: .backButton, combo: combo)
             },
+            baseActionTitle: "Browser Back",
+            showsShortcutControls: false,
             frame: NSRect(x: shortcutRightX, y: shortcutTopY, width: shortcutRowW, height: shortcutRowH)
         )
         [middleButtonRow, gestureButtonRow, forwardRow, backRow].forEach {
@@ -1860,7 +2267,7 @@ final class SettingsContentView: NSView {
         // selector, followed by full-width hotkey rows below.
         specialFeatureToggleRow = ToggleOnlyRowView(
             title: "ChatGPT / Codex & Claude Quick Launch",
-            detail: "Enables menu icons, hotkeys, and assigned mouse buttons",
+            detail: "Enables menu icons and assigned mouse buttons",
             disabledDetail: "Install ChatGPT or Claude to enable",
             isOn: specialFeatureAvailable && specialFeatureOn,
             frame: NSRect(x: rxi, y: 278, width: iw, height: 44)
@@ -1898,6 +2305,8 @@ final class SettingsContentView: NSView {
             status: statuses[.claudeHotkey] ?? .ok,
             frame: NSRect(x: rxi, y: 429, width: iw, height: 36)
         )
+        chatGPTHotkeyRow.isHidden = true
+        claudeHotkeyRow.isHidden = true
         infoLink.frame = NSRect(x: rxi, y: 477, width: iw, height: 18)
         // Four support links, justified across the right column's bottom area. Each
         // badge is sized to its own content (icon + gap + label + padding) so the outline
@@ -1955,7 +2364,8 @@ final class SettingsContentView: NSView {
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: 728))
 
         [middleButtonRow, gestureButtonRow, forwardRow, backRow,
-         thumbWheelToggle, thumbWheelBrowsers, mappingProfilesView].forEach { addSubview($0) }
+         thumbWheelToggle, thumbWheelBrowsers, mappingProfilesView,
+         mouseProfileHeader].forEach { addSubview($0) }
         thumbWheelBrowsers.setStates(
             chrome: config.thumbWheel.chromeEnabled,
             brave: config.thumbWheel.braveEnabled,
@@ -2086,24 +2496,6 @@ final class SettingsContentView: NSView {
 
         // Group title, parallel to "NATIVE APPS" / "APP PROFILES" on the cards below.
         drawSectionLabel("Mouse Profile", x: 18, y: 16)
-
-        // Carousel paging scaffold: with a single profile the prev/next chevrons are shown
-        // disabled (greyed) and one active page dot marks slide 1 — the swipe affordance is
-        // in place for when multiple mouse profiles are added. See mouse-profile-carousel.
-        let chevronTint = NSColor.tertiaryLabelColor
-        let chevronBox = NSSize(width: 11, height: 18)
-        NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "Previous mouse profile")?
-            .tinted(chevronTint)
-            .draw(in: NSRect(x: card.minX + 20, y: card.midY - chevronBox.height / 2,
-                             width: chevronBox.width, height: chevronBox.height))
-        NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "Next mouse profile")?
-            .tinted(chevronTint)
-            .draw(in: NSRect(x: card.maxX - 20 - chevronBox.width, y: card.midY - chevronBox.height / 2,
-                             width: chevronBox.width, height: chevronBox.height))
-        let dotRadius: CGFloat = 3.5
-        NSColor.appTextSecondary.setFill()
-        NSBezierPath(ovalIn: NSRect(x: card.midX - dotRadius, y: card.maxY - 24 - dotRadius,
-                                    width: dotRadius * 2, height: dotRadius * 2)).fill()
 
         guard let image = image else { return }
         let imageAspect = image.size.height > 0 ? image.size.width / image.size.height : 1
@@ -3156,6 +3548,10 @@ final class ToggleView: NSView {
     )
     private var supportedAppCandidateCache: [AppProfileCandidate]?
     private var supportedAppDiscoveryInProgress = false
+    /// The carousel page being edited. It is intentionally separate from
+    /// `config.activeMouseProfileID`: browsing must never change live input.
+    private var viewedMouseProfileID: UUID?
+    private var availableMouseDevices: [ConnectedMouseDevice] = []
     private let saveButton = PrimaryHoverButton(
         title: "Save",
         frame: NSRect(x: 48, y: 854, width: 120, height: 42)
@@ -3211,6 +3607,8 @@ final class ToggleView: NSView {
             && helperRunning
         config = loadedConfig
         persistedConfig = loadedConfig
+        viewedMouseProfileID = loadedConfig.activeMouseProfileID
+        availableMouseDevices = previewRenderingIsActive ? [] : connectedMouseDevices()
         appProfileManager = makeAppProfileManager(forDataRoot: loadedConfig.dataRoot)
         controlState = AppControlState(
             launchAtLogin: launchAtLoginEnabled,
@@ -3269,12 +3667,20 @@ final class ToggleView: NSView {
         scrollView.drawsBackground = false
         scrollView.documentView = contentView
         addSubview(scrollView)
+        contentView.mouseProfileHeader.configure(
+            profiles: loadedConfig.mouseProfiles,
+            viewedID: loadedConfig.activeMouseProfileID,
+            activeID: loadedConfig.activeMouseProfileID,
+            connectedDevices: availableMouseDevices
+        )
         saveButton.onPress = { [weak self] in
             self?.saveConfiguration()
         }
         addSubview(saveButton)
 
         wireRowCallbacks()
+        refreshMouseProfileEditor()
+        refreshActiveMouseProfileSettings()
         recomputeConflictBadges()   // badges correct on first paint
         appActivationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification,
@@ -3525,8 +3931,18 @@ final class ToggleView: NSView {
         // screenshots (the running app already shares one config between them).
         // Sync persistedConfig too so this doesn't read as an unsaved change.
         config.instances = expandedInstances
-        config.chatGPTMouseButton = nil
-        config.claudeMouseButton = nil
+        if var previewProfile = activeMouseProfile(in: config) {
+            previewProfile.launchAssignments.removeAll()
+            for instance in expandedInstances {
+                guard let button = instance.mouseButton else { continue }
+                previewProfile = assigningMouseButton(
+                    button,
+                    to: .profile(instance.id),
+                    in: previewProfile
+                )
+            }
+            config = replacingMouseProfile(previewProfile, in: config)
+        }
         persistedConfig = config
         refreshOriginalAssignmentViews()
         refreshQuickLaunchAssignments()
@@ -3543,7 +3959,263 @@ final class ToggleView: NSView {
         nil
     }
 
+    private func configViewingMouseProfile(
+        _ profileID: UUID?,
+        from source: KlikProConfig
+    ) -> KlikProConfig {
+        guard let profileID,
+              mouseProfile(id: profileID, in: source) != nil else {
+            return source
+        }
+        // Browsing is display-only and must still expose an invalid draft so the
+        // user can repair it. Real activation keeps using the validated helper.
+        var viewed = source
+        viewed.activeMouseProfileID = profileID
+        return normalizedMouseProfileConfig(viewed)
+    }
+
+    private func refreshMouseProfileEditor() {
+        guard !config.mouseProfiles.isEmpty else { return }
+        let fallbackID = config.activeMouseProfileID
+        let id = viewedMouseProfileID.flatMap { candidate in
+            config.mouseProfiles.contains { $0.id == candidate } ? candidate : nil
+        } ?? fallbackID
+        guard let profile = mouseProfile(id: id, in: config) else { return }
+        viewedMouseProfileID = id
+        contentView.mouseProfileHeader.configure(
+            profiles: config.mouseProfiles,
+            viewedID: id,
+            activeID: config.activeMouseProfileID,
+            connectedDevices: availableMouseDevices
+        )
+        contentView.middleButtonRow.setMapping(profile.middleButton)
+        contentView.gestureButtonRow.setMapping(profile.gestureButton)
+        contentView.forwardRow.setMapping(profile.forwardButton)
+        contentView.backRow.setMapping(profile.backButton)
+        contentView.setThumbWheel(profile.thumbWheel)
+
+        // Reuse the established assignment presentation by activating a temporary
+        // copy only. This repaints the viewed slide's app targets without changing
+        // `config.activeMouseProfileID` or live input.
+        let displayConfig = configViewingMouseProfile(id, from: config)
+        contentView.updateQuickLaunchAssignments(
+            config: displayConfig,
+            featureActive: menuRunning
+        )
+        recomputeConflictBadges()
+    }
+
+    private func updateViewedMouseProfile(
+        _ update: (inout MouseProfile) -> Void
+    ) {
+        guard let id = viewedMouseProfileID,
+              var profile = mouseProfile(id: id, in: config) else { return }
+        update(&profile)
+        config = replacingMouseProfile(profile, in: config)
+        configurationDidChange()
+        refreshMouseProfileEditor()
+        refreshOriginalAssignmentViews()
+    }
+
+    private func updateActiveMouseProfile(
+        _ update: (inout MouseProfile) -> Void
+    ) {
+        guard var profile = activeMouseProfile(in: config) else { return }
+        update(&profile)
+        config = replacingMouseProfile(profile, in: config)
+        configurationDidChange()
+        refreshActiveMouseProfileSettings()
+        if viewedMouseProfileID == profile.id {
+            refreshMouseProfileEditor()
+            refreshOriginalAssignmentViews()
+        }
+    }
+
+    private func refreshActiveMouseProfileSettings() {
+        guard let profile = activeMouseProfile(in: config) else { return }
+        let wheel = profile.thumbWheel
+        preferencesView.thumbWheelToggle.isOn = wheel.enabled
+        preferencesView.chromeCheck.isOn = wheel.chromeEnabled
+        preferencesView.braveCheck.isOn = wheel.braveEnabled
+        preferencesView.firefoxCheck.isOn = wheel.firefoxEnabled
+        preferencesView.safariCheck.isOn = wheel.safariEnabled
+        preferencesView.chromeCheck.isEnabled = wheel.enabled
+        preferencesView.braveCheck.isEnabled = wheel.enabled
+        preferencesView.firefoxCheck.isEnabled = wheel.enabled
+        preferencesView.safariCheck.isEnabled = wheel.enabled
+        [
+            preferencesView.chromeCheck,
+            preferencesView.braveCheck,
+            preferencesView.firefoxCheck,
+            preferencesView.safariCheck,
+        ].forEach { control in
+            window?.invalidateCursorRects(for: control)
+        }
+    }
+
+    private func wireMouseProfileCallbacks() {
+        let header = contentView.mouseProfileHeader
+        header.onBrowse = { [weak self] id in
+            self?.viewedMouseProfileID = id
+            self?.refreshMouseProfileEditor()
+        }
+        header.onAdd = { [weak self] in self?.addMouseProfile() }
+        header.onActivate = { [weak self] id in self?.activateMouseProfile(id) }
+        header.onBindDevice = { [weak self] id, identity in
+            self?.bindMouseDevice(identity, to: id)
+        }
+        header.onRescanDevices = { [weak self] in
+            guard let self else { return }
+            self.availableMouseDevices = previewRenderingIsActive ? [] : connectedMouseDevices()
+            self.refreshMouseProfileEditor()
+        }
+        header.onRename = { [weak self] id in self?.renameMouseProfile(id) }
+        header.onDuplicate = { [weak self] id in self?.duplicateMouseProfile(id) }
+        header.onReset = { [weak self] id in self?.resetMouseProfile(id) }
+        header.onDelete = { [weak self] id in self?.deleteMouseProfile(id) }
+    }
+
+    private func addMouseProfile(copying source: MouseProfile? = nil) {
+        guard config.mouseProfiles.count < MouseProfile.maximumCount else {
+            NSSound.beep()
+            return
+        }
+        let number = config.mouseProfiles.count + 1
+        var profile = source ?? MouseProfile.quietDefault(
+            id: UUID(), name: "Mouse \(number)"
+        )
+        profile.id = UUID()
+        profile.name = source.map { "\($0.name) Copy" } ?? "Mouse \(number)"
+        // A physical device cannot silently become bound to two profiles.
+        profile.deviceIdentity = nil
+        guard let updated = addingMouseProfile(profile, to: config) else {
+            NSSound.beep()
+            return
+        }
+        config = updated
+        viewedMouseProfileID = profile.id
+        configurationDidChange()
+        refreshMouseProfileEditor()
+    }
+
+    private func renameMouseProfile(_ id: UUID) {
+        guard let profile = mouseProfile(id: id, in: config) else { return }
+        let field = NSTextField(string: profile.name)
+        field.frame = NSRect(x: 0, y: 0, width: 320, height: 26)
+        let alert = NSAlert()
+        alert.messageText = "Rename Mouse Profile"
+        alert.informativeText = "Choose a short name that identifies this mouse or workflow."
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        updateViewedMouseProfile { profile in
+            guard profile.id == id else { return }
+            profile.name = String(name.prefix(40))
+        }
+    }
+
+    private func duplicateMouseProfile(_ id: UUID) {
+        guard let source = mouseProfile(id: id, in: config) else { return }
+        addMouseProfile(copying: source)
+    }
+
+    private func resetMouseProfile(_ id: UUID) {
+        guard let existing = mouseProfile(id: id, in: config) else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Reset \(existing.name)?"
+        alert.informativeText =
+            "Forward and Back return to their browser defaults. Every other button, "
+            + "thumb-wheel option, and app assignment is cleared."
+        alert.addButton(withTitle: "Reset")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        var reset = MouseProfile.quietDefault(id: existing.id, name: existing.name)
+        reset.deviceIdentity = existing.deviceIdentity
+        config = replacingMouseProfile(reset, in: config)
+        configurationDidChange()
+        refreshMouseProfileEditor()
+        refreshButtonAssignmentViews()
+    }
+
+    private func deleteMouseProfile(_ id: UUID) {
+        guard id != config.activeMouseProfileID,
+              let profile = mouseProfile(id: id, in: config),
+              config.mouseProfiles.count > 1 else {
+            NSSound.beep()
+            return
+        }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Delete \(profile.name)?"
+        alert.informativeText = "Only this Mouse Profile's mappings and assignments are removed."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn,
+              let updated = removingMouseProfile(id: id, from: config) else { return }
+        config = updated
+        viewedMouseProfileID = config.activeMouseProfileID
+        configurationDidChange()
+        refreshMouseProfileEditor()
+    }
+
+    private func bindMouseDevice(_ identity: MouseDeviceIdentity?, to id: UUID) {
+        guard var profile = mouseProfile(id: id, in: config) else { return }
+        if let identity,
+           let other = config.mouseProfiles.first(where: {
+               $0.id != id && $0.deviceIdentity == identity
+           }) {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Move this mouse from \(other.name)?"
+            alert.informativeText =
+                "A physical mouse can identify only one Mouse Profile. Its mappings are not deleted."
+            alert.addButton(withTitle: "Move Mouse")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else {
+                refreshMouseProfileEditor()
+                return
+            }
+            var released = other
+            released.deviceIdentity = nil
+            config = replacingMouseProfile(released, in: config)
+        }
+        profile.deviceIdentity = identity
+        config = replacingMouseProfile(profile, in: config)
+        configurationDidChange()
+        refreshMouseProfileEditor()
+    }
+
+    private func activateMouseProfile(_ id: UUID) {
+        guard id != config.activeMouseProfileID,
+              let selected = mouseProfile(id: id, in: config),
+              mouseProfileIsValid(selected, in: config),
+              let activated = activatingMouseProfile(id: id, in: config) else {
+            showAppProfileAlert(
+                title: "Mouse Profile was not activated",
+                message: "Resolve its duplicate or reserved assignments first."
+            )
+            return
+        }
+        // Activation is explicitly a save/apply transaction. Browsing never enters
+        // this path; one click writes the selected profile as active and restarts the
+        // helper once so it reads the new legacy shadow.
+        config = activated
+        viewedMouseProfileID = id
+        refreshMouseProfileEditor()
+        refreshActiveMouseProfileSettings()
+        refreshButtonAssignmentViews()
+        saveConfiguration()
+    }
+
     private func wireRowCallbacks() {
+        wireMouseProfileCallbacks()
         // Footer gear → open the Settings tab.
         contentView.settingsButton.onClick = { [weak self] in
             self?.selectTab(1)
@@ -3712,13 +4384,22 @@ final class ToggleView: NSView {
             self?.launchAppProfile(instance)
         }
         contentView.mappingProfilesView.onAssign = { [weak self] instance in
-            self?.assignMouseButton(to: instance)
+            guard let self else { return }
+            self.assignMouseButton(
+                to: instance,
+                mouseProfileID: self.viewedMouseProfileID
+            )
         }
         contentView.mappingProfilesView.onOpenOriginal = { [weak self] target in
             self?.launchOriginalApp(target)
         }
         contentView.mappingProfilesView.onAssignOriginal = { [weak self] target in
-            self?.assignMouseButton(to: .original(target), label: target.title)
+            guard let self else { return }
+            self.assignMouseButton(
+                to: .original(target),
+                label: target.title,
+                mouseProfileID: self.viewedMouseProfileID
+            )
         }
         // Both tabs' cards carry the menu-bar toggle in their gear, so both route to
         // the same handlers — the state is persisted in config, not per view.
@@ -3746,7 +4427,11 @@ final class ToggleView: NSView {
         }
         appProfilesView.onInstancesChange = { [weak self] instances in
             guard let self else { return }
-            self.contentView.mappingProfilesView.setInstances(instances)
+            let displayConfig = self.configViewingMouseProfile(
+                self.viewedMouseProfileID,
+                from: self.config
+            )
+            self.contentView.mappingProfilesView.setInstances(displayConfig.instances)
             // The Mappings tab has two halves that must both track a profile change:
             // the compact list above, and the mouse-button "Open App" callout pickers.
             // A rename changes a profile's label and a create/remove changes the set, so
@@ -3766,76 +4451,60 @@ final class ToggleView: NSView {
         // Settings tab: both edit the same config.thumbWheel fields and mirror each other.
         contentView.onThumbWheelToggle = { [weak self] on in
             guard let self = self else { return }
-            self.config.thumbWheel.enabled = on
-            self.preferencesView.thumbWheelToggle.isOn = on
-            self.preferencesView.chromeCheck.isEnabled = on
-            self.preferencesView.braveCheck.isEnabled = on
-            self.preferencesView.firefoxCheck.isEnabled = on
-            self.preferencesView.safariCheck.isEnabled = on
-            self.contentView.setThumbWheel(self.config.thumbWheel)
-            self.configurationDidChange()
+            self.updateViewedMouseProfile { $0.thumbWheel.enabled = on }
+            if self.viewedMouseProfileID == self.config.activeMouseProfileID {
+                self.preferencesView.thumbWheelToggle.isOn = on
+                self.preferencesView.chromeCheck.isEnabled = on
+                self.preferencesView.braveCheck.isEnabled = on
+                self.preferencesView.firefoxCheck.isEnabled = on
+                self.preferencesView.safariCheck.isEnabled = on
+            }
         }
         contentView.onThumbWheelBrowserChange = { [weak self] browser, on in
             guard let self = self else { return }
-            switch browser {
-            case .chrome:
-                self.config.thumbWheel.chromeEnabled = on
-                self.preferencesView.chromeCheck.isOn = on
-            case .brave:
-                self.config.thumbWheel.braveEnabled = on
-                self.preferencesView.braveCheck.isOn = on
-            case .firefox:
-                self.config.thumbWheel.firefoxEnabled = on
-                self.preferencesView.firefoxCheck.isOn = on
-            case .safari:
-                self.config.thumbWheel.safariEnabled = on
-                self.preferencesView.safariCheck.isOn = on
+            self.updateViewedMouseProfile { profile in
+                switch browser {
+                case .chrome: profile.thumbWheel.chromeEnabled = on
+                case .brave: profile.thumbWheel.braveEnabled = on
+                case .firefox: profile.thumbWheel.firefoxEnabled = on
+                case .safari: profile.thumbWheel.safariEnabled = on
+                }
             }
-            self.configurationDidChange()
+            guard self.viewedMouseProfileID == self.config.activeMouseProfileID else { return }
+            switch browser {
+            case .chrome: self.preferencesView.chromeCheck.isOn = on
+            case .brave: self.preferencesView.braveCheck.isOn = on
+            case .firefox: self.preferencesView.firefoxCheck.isOn = on
+            case .safari: self.preferencesView.safariCheck.isOn = on
+            }
         }
 
         contentView.middleButtonRow.onToggleChange = { [weak self] on in
-            self?.config.middleButton.enabled = on
-            self?.configurationDidChange()
-            self?.recomputeConflictBadges()
+            self?.updateViewedMouseProfile { $0.middleButton.enabled = on }
         }
         contentView.middleButtonRow.onComboChange = { [weak self] combo in
-            self?.config.middleButton.combo = combo
-            self?.configurationDidChange()
-            self?.recomputeConflictBadges()
+            self?.updateViewedMouseProfile { $0.middleButton.combo = combo }
         }
 
         contentView.gestureButtonRow.onToggleChange = { [weak self] on in
-            self?.config.gestureButton.enabled = on
-            self?.configurationDidChange()
-            self?.recomputeConflictBadges()
+            self?.updateViewedMouseProfile { $0.gestureButton.enabled = on }
         }
         contentView.gestureButtonRow.onComboChange = { [weak self] combo in
-            self?.config.gestureButton.combo = combo
-            self?.configurationDidChange()
-            self?.recomputeConflictBadges()
+            self?.updateViewedMouseProfile { $0.gestureButton.combo = combo }
         }
 
         contentView.forwardRow.onToggleChange = { [weak self] on in
-            self?.config.forwardButton.enabled = on
-            self?.configurationDidChange()
-            self?.recomputeConflictBadges()
+            self?.updateViewedMouseProfile { $0.forwardButton.enabled = on }
         }
         contentView.forwardRow.onComboChange = { [weak self] combo in
-            self?.config.forwardButton.combo = combo
-            self?.configurationDidChange()
-            self?.recomputeConflictBadges()
+            self?.updateViewedMouseProfile { $0.forwardButton.combo = combo }
         }
 
         contentView.backRow.onToggleChange = { [weak self] on in
-            self?.config.backButton.enabled = on
-            self?.configurationDidChange()
-            self?.recomputeConflictBadges()
+            self?.updateViewedMouseProfile { $0.backButton.enabled = on }
         }
         contentView.backRow.onComboChange = { [weak self] combo in
-            self?.config.backButton.combo = combo
-            self?.configurationDidChange()
-            self?.recomputeConflictBadges()
+            self?.updateViewedMouseProfile { $0.backButton.combo = combo }
         }
 
         contentView.middleButtonRow.onOpenAppChange = { [weak self] target in
@@ -3895,43 +4564,19 @@ final class ToggleView: NSView {
 
         preferencesView.thumbWheelToggle.onChange = { [weak self] on in
             guard let self = self else { return }
-            self.config.thumbWheel.enabled = on
-            // Grey out / re-enable the per-browser options with the master toggle.
-            self.preferencesView.chromeCheck.isEnabled = on
-            self.preferencesView.braveCheck.isEnabled = on
-            self.preferencesView.firefoxCheck.isEnabled = on
-            self.preferencesView.safariCheck.isEnabled = on
-            self.window?.invalidateCursorRects(for: self.preferencesView.chromeCheck)
-            self.window?.invalidateCursorRects(for: self.preferencesView.braveCheck)
-            self.window?.invalidateCursorRects(for: self.preferencesView.firefoxCheck)
-            self.window?.invalidateCursorRects(for: self.preferencesView.safariCheck)
-            // Mirror the master switch (and enabled state) onto the Mappings callout.
-            self.contentView.setThumbWheel(self.config.thumbWheel)
-            self.configurationDidChange()
+            self.updateActiveMouseProfile { $0.thumbWheel.enabled = on }
         }
         preferencesView.chromeCheck.onChange = { [weak self] on in
-            guard let self = self else { return }
-            self.config.thumbWheel.chromeEnabled = on
-            self.contentView.setThumbWheel(self.config.thumbWheel)
-            self.configurationDidChange()
+            self?.updateActiveMouseProfile { $0.thumbWheel.chromeEnabled = on }
         }
         preferencesView.braveCheck.onChange = { [weak self] on in
-            guard let self = self else { return }
-            self.config.thumbWheel.braveEnabled = on
-            self.contentView.setThumbWheel(self.config.thumbWheel)
-            self.configurationDidChange()
+            self?.updateActiveMouseProfile { $0.thumbWheel.braveEnabled = on }
         }
         preferencesView.firefoxCheck.onChange = { [weak self] on in
-            guard let self = self else { return }
-            self.config.thumbWheel.firefoxEnabled = on
-            self.contentView.setThumbWheel(self.config.thumbWheel)
-            self.configurationDidChange()
+            self?.updateActiveMouseProfile { $0.thumbWheel.firefoxEnabled = on }
         }
         preferencesView.safariCheck.onChange = { [weak self] on in
-            guard let self = self else { return }
-            self.config.thumbWheel.safariEnabled = on
-            self.contentView.setThumbWheel(self.config.thumbWheel)
-            self.configurationDidChange()
+            self?.updateActiveMouseProfile { $0.thumbWheel.safariEnabled = on }
         }
     }
 
@@ -3945,8 +4590,10 @@ final class ToggleView: NSView {
         target: LaunchAssignmentTarget?,
         button: QuickLaunchMouseButton
     ) {
-        let currentOwner = launchAssignmentOwner(of: button, in: config)
-        let previousButton = target.flatMap { mouseButton(assignedTo: $0, in: config) }
+        guard let profileID = viewedMouseProfileID,
+              var profile = mouseProfile(id: profileID, in: config) else { return }
+        let currentOwner = launchAssignmentOwner(of: button, in: profile)
+        let previousButton = target.flatMap { mouseButton(assignedTo: $0, in: profile) }
         let releasesDifferentOwner = currentOwner != nil && currentOwner != target
         let movesSelectedApp = previousButton != nil && previousButton != button
         if releasesDifferentOwner || movesSelectedApp {
@@ -3972,13 +4619,14 @@ final class ToggleView: NSView {
         }
 
         if let target {
-            config = assigningMouseButton(button, to: target, in: config)
+            profile = assigningMouseButton(button, to: target, in: profile)
         } else if let currentOwner {
-            config = clearingMouseButton(from: currentOwner, in: config)
+            profile = clearingMouseButton(from: currentOwner, in: profile)
         }
-        config = normalizedQuickLaunchConfig(config)
+        config = replacingMouseProfile(profile, in: config)
         configurationDidChange()
         refreshButtonAssignmentViews()
+        refreshMouseProfileEditor()
     }
 
     private func beginAppProfileLifecycle() -> Bool {
@@ -5897,9 +6545,9 @@ final class ToggleView: NSView {
 
     private func showTopPinLimitAlert(name: String) {
         showAppProfileAlert(
-            title: "\(KlikProConfig.topPinLimit) cards are already pinned",
-            message: "Unpin one of them to free a slot, then pin \(name). "
-                + "Pinning never removes a card you already pinned."
+            title: "A card is already pinned",
+            message: "Unpin the current card, then pin \(name). "
+                + "Klik PRO never replaces a pinned card automatically."
         )
     }
 
@@ -7042,11 +7690,22 @@ final class ToggleView: NSView {
         }
     }
 
-    private func assignMouseButton(to instance: AppProfileInstance) {
-        assignMouseButton(to: .profile(instance.id), label: instance.label)
+    private func assignMouseButton(
+        to instance: AppProfileInstance,
+        mouseProfileID: UUID? = nil
+    ) {
+        assignMouseButton(
+            to: .profile(instance.id),
+            label: instance.label,
+            mouseProfileID: mouseProfileID
+        )
     }
 
-    private func assignMouseButton(to target: LaunchAssignmentTarget, label: String) {
+    private func assignMouseButton(
+        to target: LaunchAssignmentTarget,
+        label: String,
+        mouseProfileID: UUID? = nil
+    ) {
         // Gate on a settled configuration, exactly like the other App Profile
         // lifecycle actions. This is what keeps the two sections consistent: the
         // assign flow saves immediately from persistedConfig, so it must not run
@@ -7066,11 +7725,19 @@ final class ToggleView: NSView {
             )
             return
         }
+        let profileID = mouseProfileID ?? persistedConfig.activeMouseProfileID
+        guard var assignmentProfile = mouseProfile(id: profileID, in: persistedConfig) else {
+            showAppProfileAlert(
+                title: "Mouse Profile is unavailable",
+                message: "Reload the Mouse Profile and try again."
+            )
+            return
+        }
         let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 390, height: 42))
         let picker = NSPopUpButton(frame: NSRect(x: 0, y: 6, width: 390, height: 30))
         picker.addItem(withTitle: "None — Clear assignment")
         for button in QuickLaunchMouseButton.allCases {
-            let owner = launchAssignmentOwner(of: button, in: persistedConfig)
+            let owner = launchAssignmentOwner(of: button, in: assignmentProfile)
             let state = owner.map { "Used: \(launchAssignmentLabel($0, in: persistedConfig))" }
                 ?? "Available"
             picker.addItem(withTitle: "\(button.title) Button — \(state)")
@@ -7084,7 +7751,8 @@ final class ToggleView: NSView {
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         if picker.indexOfSelectedItem == 0 {
-            var updated = clearingMouseButton(from: target, in: persistedConfig)
+            assignmentProfile = clearingMouseButton(from: target, in: assignmentProfile)
+            var updated = replacingMouseProfile(assignmentProfile, in: persistedConfig)
             guard KlikProConfigStore.save(updated) else {
                 showAppProfileAlert(
                     title: "Assignment was not cleared",
@@ -7093,7 +7761,8 @@ final class ToggleView: NSView {
                 return
             }
             updated = normalizedQuickLaunchConfig(updated)
-            let applied = applySavedConfig()
+            let appliesToRuntime = profileID == persistedConfig.activeMouseProfileID
+            let applied = !appliesToRuntime || applySavedConfig()
             config = updated
             persistedConfig = updated
             refreshButtonAssignmentViews()
@@ -7104,7 +7773,7 @@ final class ToggleView: NSView {
             return
         }
         let button = QuickLaunchMouseButton.allCases[picker.indexOfSelectedItem - 1]
-        let currentOwner = launchAssignmentOwner(of: button, in: persistedConfig)
+        let currentOwner = launchAssignmentOwner(of: button, in: assignmentProfile)
         if let currentOwner, currentOwner != target {
             let confirmation = NSAlert()
             confirmation.alertStyle = .warning
@@ -7115,13 +7784,15 @@ final class ToggleView: NSView {
             guard confirmation.runModal() == .alertFirstButtonReturn else { return }
         }
 
-        var updated = assigningMouseButton(button, to: target, in: persistedConfig)
+        assignmentProfile = assigningMouseButton(button, to: target, in: assignmentProfile)
+        var updated = replacingMouseProfile(assignmentProfile, in: persistedConfig)
         guard KlikProConfigStore.save(updated) else {
             showAppProfileAlert(title: "Button was not assigned", message: "Klik PRO could not save a valid assignment.")
             return
         }
         updated = normalizedQuickLaunchConfig(updated)
-        let applied = applySavedConfig()
+        let appliesToRuntime = profileID == persistedConfig.activeMouseProfileID
+        let applied = !appliesToRuntime || applySavedConfig()
         config = updated
         persistedConfig = updated
         refreshButtonAssignmentViews()
@@ -8057,32 +8728,29 @@ final class ToggleView: NSView {
             refreshQuickLaunchAssignments()
             return
         }
-        let other = target == .chatGPT ? config.claudeMouseButton : config.chatGPTMouseButton
-        guard button == nil || button != other else {
-            NSSound.beep()
-            refreshQuickLaunchAssignments()
-            return
-        }
-        let current = quickLaunchMouseButton(for: target, in: config)
+        guard let profileID = viewedMouseProfileID,
+              var profile = mouseProfile(id: profileID, in: config) else { return }
+        let assignmentTarget = LaunchAssignmentTarget.original(target)
+        let current = mouseButton(assignedTo: assignmentTarget, in: profile)
         guard button != current else {
             refreshQuickLaunchAssignments()
             return
         }
-        switch target {
-        case .chatGPT: config.chatGPTMouseButton = button
-        case .claude: config.claudeMouseButton = button
-        case .gemini: config.geminiMouseButton = button
-        // No persisted slot for these, so a button assignment cannot stick.
-        case .canva, .zoom, .spotify, .antigravity, .antigravityIDE, .chrome, .brave:
-            return
+        if let button {
+            profile = assigningMouseButton(button, to: assignmentTarget, in: profile)
+        } else {
+            profile = clearingMouseButton(from: assignmentTarget, in: profile)
         }
+        config = replacingMouseProfile(profile, in: config)
         configurationDidChange()
         refreshButtonAssignmentViews()
+        refreshMouseProfileEditor()
     }
 
     private func refreshQuickLaunchAssignments() {
+        let displayConfig = configViewingMouseProfile(viewedMouseProfileID, from: config)
         contentView.updateQuickLaunchAssignments(
-            config: config,
+            config: displayConfig,
             featureActive: menuRunning
         )
     }
@@ -8094,6 +8762,8 @@ final class ToggleView: NSView {
     /// sections can never drift out of sync. Callers must set `config` first.
     private func refreshButtonAssignmentViews() {
         appProfilesView.setInstances(config.instances)
+        let displayConfig = configViewingMouseProfile(viewedMouseProfileID, from: config)
+        contentView.mappingProfilesView.setInstances(displayConfig.instances)
         refreshOriginalAssignmentViews()
         refreshQuickLaunchAssignments()
         recomputeConflictBadges()
@@ -8124,10 +8794,13 @@ final class ToggleView: NSView {
     }
 
     private func refreshOriginalAssignmentViews() {
-        appProfilesView.setOriginalAssignments(
-            chatGPT: config.chatGPTMouseButton,
-            claude: config.claudeMouseButton
+        let activeAssignments = Dictionary(
+            uniqueKeysWithValues: QuickLaunchTarget.allCases.compactMap { target in
+                quickLaunchMouseButton(for: target, in: config).map { (target, $0) }
+            }
         )
+        appProfilesView.setOriginalAssignments(activeAssignments)
+        let displayConfig = configViewingMouseProfile(viewedMouseProfileID, from: config)
         let menuBarPinned = persistedConfig.menuBarPinnedOriginals
         // Read from persistedConfig, matching menuBarPinned above: `config` can hold an
         // in-flight edit that was never written, and the list must show what is saved.
@@ -8140,12 +8813,10 @@ final class ToggleView: NSView {
                 target: target,
                 name: target.title,
                 path: url.path,
-                mouseButton: quickLaunchMouseButton(for: target, in: config),
+                mouseButton: quickLaunchMouseButton(for: target, in: displayConfig),
                 verified: nativeAppCompatibilityVerified(target),
                 menuBarPinned: menuBarPinned.contains(target),
-                // A target with no ShortcutSlot has nowhere to persist an assignment,
-                // so its Assign control is disabled rather than silently doing nothing.
-                assignable: target.shortcutSlot != nil,
+                assignable: true,
                 topPinned: topPinned.contains(target),
                 topPinAtLimit: topPinAtLimit
             )
@@ -8222,15 +8893,26 @@ final class ToggleView: NSView {
     }
 
     private func recomputeConflictBadges() {
+        let displayConfig = configViewingMouseProfile(viewedMouseProfileID, from: config)
+        let persistedDisplayConfig: KlikProConfig
+        if let viewedMouseProfileID,
+           mouseProfile(id: viewedMouseProfileID, in: persistedConfig) != nil {
+            persistedDisplayConfig = configViewingMouseProfile(
+                viewedMouseProfileID,
+                from: persistedConfig
+            )
+        } else {
+            persistedDisplayConfig = persistedConfig
+        }
         let launchableInstanceIDs = launchableAppProfileInstanceIDs(
-            in: config,
+            in: displayConfig,
             instanceIsLaunchable: { [appProfileRuntime] instance in
                 !previewRenderingIsActive && appProfileRuntime.health(for: instance) == .ready
             }
         )
         let statuses = evaluateShortcutConflicts(
-            candidate: config,
-            persisted: persistedConfig,
+            candidate: displayConfig,
+            persisted: persistedDisplayConfig,
             browserExtensionShortcuts: browserExtensionShortcuts,
             specialFeatureActive: menuRunning,
             chatGPTAvailable: quickLaunchTargetIsAvailable(.chatGPT),
@@ -8252,6 +8934,12 @@ final class ToggleView: NSView {
             return
         }
         guard !saveInProgress else { return }
+        if !mouseProfilesAreValid(config) {
+            saveStatusMessage =
+                "A Mouse Profile has an invalid or duplicate device/button assignment."
+            needsDisplay = true
+            return
+        }
         if !quickLaunchMouseAssignmentsAreValid(config),
            let button = config.chatGPTMouseButton {
             saveStatusMessage = "\(button.title) is already assigned to both launchers."
