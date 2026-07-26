@@ -1146,8 +1146,15 @@ final class MappingAppProfilesView: NSView {
             )
         )
         super.init(frame: frame)
-        let refreshWidth: CGFloat = 168
-        refreshButton.frame = NSRect(x: 0, y: 2, width: refreshWidth, height: 28)
+        // Icon only: the clockwise arrow alone, right-aligned, so the header row
+        // costs almost nothing. The label lives in the tooltip instead.
+        let refreshSide: CGFloat = 26
+        refreshButton.frame = NSRect(
+            x: bounds.width - refreshSide, y: 2, width: refreshSide, height: refreshSide
+        )
+        refreshButton.title = ""
+        refreshButton.imagePosition = .imageOnly
+        refreshButton.toolTip = "Refresh App List"
         // Leading clockwise-arrow glyph, matching the "Updates…" button's refresh affordance.
         if let base = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil),
            let sized = base.withSymbolConfiguration(
@@ -1342,7 +1349,15 @@ final class AppProfilesContentView: NSView {
         statusField.isHidden = true
         // Refresh re-scans installed apps for both columns; it sits in the panel's
         // top-right corner, out of the way of the column divider and headers.
-        refreshButton.frame = NSRect(x: width - 174, y: 12, width: 160, height: 28)
+        refreshButton.frame = NSRect(x: width - 40, y: 12, width: 26, height: 26)
+        refreshButton.title = ""
+        refreshButton.imagePosition = .imageOnly
+        refreshButton.toolTip = "Refresh App List"
+        if let base = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil),
+           let sized = base.copy() as? NSImage {
+            sized.size = NSSize(width: 14, height: 14)
+            refreshButton.image = sized
+        }
         refreshButton.onPress = { [weak self] in self?.onRefreshApps?() }
 
         scrollView.frame = NSRect(
@@ -1430,7 +1445,6 @@ final class AppProfilesContentView: NSView {
         loadingSpinner.stopAnimation(nil)
         loadingView.isHidden = true
         refreshButton.isEnabled = true
-        refreshButton.title = "Refresh App List"
         refreshButton.setAccessibilityLabel("Refresh App List")
         // A card only appears when its app is actually installed; a listed-but-absent
         // app would otherwise show a card whose every action is dead.
@@ -1462,7 +1476,7 @@ final class AppProfilesContentView: NSView {
         loadingView.isHidden = false
         loadingSpinner.startAnimation(nil)
         refreshButton.isEnabled = false
-        refreshButton.title = "Refreshing…"
+        refreshButton.toolTip = "Refreshing…"
         refreshButton.setAccessibilityLabel("Refreshing app list")
         setStatus("Scanning installed apps…")
     }
