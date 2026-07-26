@@ -9,6 +9,7 @@ Branch: `release/v1.5.0`
 The latest source commits are:
 
 ```text
+941be25 fix: open mouse mapping menu on mouse down
 be6ac3b fix: keep mouse mapping gear menu visible
 00b3126 fix: polish mouse mapping controls and spacing
 ```
@@ -21,22 +22,30 @@ Implemented in the current source:
   returning useful height to the slide/list area.
 - Refresh controls use a native `NSProgressIndicator` spinner instead of the
   earlier rotating glyph animation.
-- The mouse gear menu uses deferred AppKit menu tracking and a retained menu,
-  so the button mouse-up event cannot immediately dismiss it.
+- The mouse gear menu now begins native AppKit menu tracking directly from the
+  gear button's mouse-down event and retains the menu for the synchronous
+  tracking session. This replaces the earlier deferred mouse-up workaround and
+  prevents the opening click's mouse-up from immediately dismissing the menu.
+- Space/Return and accessibility-triggered gear activation remain wired through
+  the button's ordinary action path.
 - The gear menu contains activation, assignment/rescan/unassignment, add,
   rename, duplicate, reset and delete actions as specified below.
 
-Live QA already confirmed the DMG build displays the improved spacing and native
-spinner treatment. The next agent must re-build or launch the latest source and
-verify that clicking **Manage <mapping> mapping** visibly leaves the menu open;
-the earlier synchronous implementation did not. Use an isolated temporary
-configuration and do not install or publish the app.
+Live QA already confirmed the earlier DMG build displays the improved spacing
+and native spinner treatment. The next manual QA action is to launch the latest
+source or DMG and verify that one ordinary click on **Manage <mapping> mapping**
+leaves the menu visible and selectable. Exercise at least one non-destructive
+item or submenu, then confirm keyboard activation with Space/Return. Use an
+isolated temporary configuration and do not install or publish the app.
 
-The latest full check before the deferred-menu change passed. A subsequent
-`./tools/check.sh` reached the preview stage but failed because macOS reported
-`kLSNoExecutableErr` while opening a generated preview bundle; treat that as an
-environment/preview-launch failure and rerun after closing stale preview/app
-instances. Do not claim the full suite is green until a clean exit 0 is obtained.
+`./tools/check.sh` completed with exit 0 immediately before the final gear-menu
+change (output: `build/check-20260727-002842`). After commit `941be25`, the core
+compilation, mouse-button routing, LaunchAgent installer and App Profiles
+foundation stages passed, but the script exited silently at the known generated
+preview-launch boundary (output: `build/check-20260727-003529`). `git diff
+--check` also passed. Treat the latter as the existing macOS preview-launch
+environment issue, but do not claim the post-`941be25` full suite is green until
+a clean exit 0 is obtained.
 
 The DMG background/arrow remains unresolved in the mounted Finder view. Do not
 claim that the DMG arrow is fixed without fresh visual verification.
@@ -47,12 +56,12 @@ Read this document before changing the Mappings mouse slide. Also read:
 - `docs/HANDOVER_FINAL_2026-07-26.md`
 - `docs/HANDOVER_v1.5.0.md`
 
-## 1. Current shipped/test build
+## 1. Current handoff/test build
 
-The latest replacement DMG was built after commit:
+The latest replacement DMG was built from source commit:
 
 ```text
-23bd96c fix: gate visible mouse controls on assignment
+941be25 fix: open mouse mapping menu on mouse down
 ```
 
 Path:
@@ -64,11 +73,14 @@ releases/Klik-PRO-v1.5.0-macos-universal.dmg
 SHA-256 at build time:
 
 ```text
-2188284a1fc91d2b3078a0ccbc8bea796875cc23a1f69fab042b911f2188bee6
+3c54551d68e62600127728b504057ad9474aa9da224aadd75e139c1f8a0a7aa4
 ```
 
-The full `./tools/check.sh` suite passed before that DMG was built, and the
-official release script verified its signature and disk-image checksum.
+`./tools/build-release.sh` completed successfully in
+`klik-pro-release-v1.5.0-20260727-004604.USG9Jl`. It verified the app and nested
+helper signatures before and after packaging, verified the disk-image checksum,
+and regenerated signed checksum manifests. This is a local handoff/test artifact;
+it has not been published.
 
 Important: `16d6dcf` is documentation only. True per-device event routing is not
 implemented. Do not copy, translate, adapt or derive OpenLogi code.
