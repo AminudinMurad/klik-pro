@@ -283,6 +283,52 @@ Sandbox and App-Store checks already sit ahead of this path, so impossible class
 the `continue-028969` worktree on the stale release branch — recreate or move it onto the v1.5.0 branch.
 Then CHANGELOG + release notes for v1.5.0.
 
+## 4b. List Canva, Zoom and Spotify — DO THIS NEXT
+
+The owner's policy is settled: **if we know the mechanism, the app gets listed.** All three were
+tested on 2026-07-25 and their mechanism is known, so they must appear. This is not a decision to
+re-open — stop asking and implement it.
+
+| App | Bundle | Team | Engine | Mechanism |
+|---|---|---|---|---|
+| Canva | `com.canva.CanvaDesktop` | 5HD2ARTBFS | electron | `--user-data-dir` (launcher emits it by default) |
+| Zoom | `us.zoom.xos` | BJ4HAAB9B3 | native | `CFFIXED_USER_HOME: {profileDir}`, `passesUserDataDirArgument: false` |
+| Spotify | `com.spotify.client` | 2FNC3A47ZF | native (CEF) | as Zoom. Note it enforces a single instance, so profiles are sequential |
+
+**A registry rule alone is not enough today.** The generator column is built from
+`QuickLaunchTarget.allCases` (`AppProfilesUI.swift`, `generatorCards`), so an app with a rule but no
+enum case still renders nothing. Two ways forward:
+
+1. **Cheap, scales badly** — add each as a `QuickLaunchTarget` the way Gemini was done. Every case
+   needs a `ShortcutSlot`, a `<app>Hotkey` and `<app>MouseButton` in `KlikProConfig`, decode
+   defaults, and arms in ~8 switches. Fine for three; unworkable at forty.
+2. **Right fix** — make `QuickLaunchTarget.shortcutSlot` **optional** (`ShortcutSlot?`, nil = no
+   global hotkey). A target then costs only title / bundle id / app path / dock-launcher id, with no
+   config keys at all, and the generator can list every ruled app. Touches every `shortcutSlot`
+   consumer once, then every future app is nearly free.
+
+Take option 2. It is the same "stop pre-committing per-app plumbing" move that the generic engine
+fallback in section 3 makes for identities.
+
+## 4c. Mappings tab still untouched — the visible gap
+
+Done so far: the generator card is two rows, the generator column is data-driven, Gemini/Canva/Zoom/
+Spotify are listed, and the refresh control is icon-only. **Not done, and the owner has flagged it
+twice:**
+
+1. **Refresh icon placement is wrong.** It was only shrunk in place, so it floats above the cards.
+   It must sit **inline in each column's section header**, right-aligned — four in total across the
+   two tabs, all calling the same `onRefreshApps`. See the placement note in 2b.
+2. **Mappings rows still use the old compact layout** — small icon, inline buttons, and the
+   **"Native app" subtitle that must be deleted** (it is the third row, same reasoning as
+   "Installed"). Apply the 2-row card from section 2: 44–56pt icon spanning both rows, name + badge
+   + gear on row 1, right-aligned buttons on row 2, `+ New Profile` omitted.
+3. **Badges are not wired anywhere.** `DualAppGeneratorCard.setCompatibility(verified:)` exists and
+   is never called. Feed it from the matched rule's `AppCompatibilityAssurance`.
+4. **Assign Button does nothing for Canva/Zoom/Spotify** — they have no persisted mouse-button slot.
+   Either add a generic per-target assignment store, or disable the button for targets whose
+   `shortcutSlot` is nil.
+
 ## 5. Mouse Profile defaults (owner request, do next)
 
 Change `KlikProConfig.default` (`Sources/KlikProConfig.swift`, the `static let default` block) so a
