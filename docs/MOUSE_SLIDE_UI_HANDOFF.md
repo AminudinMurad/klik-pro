@@ -186,8 +186,11 @@ Read this document before changing the Mappings mouse slide. Also read:
 The latest replacement DMG was built from source commit:
 
 ```text
-941be25 fix: open mouse mapping menu on mouse down
+176d934 fix: make the refresh buttons clickable where they are drawn
 ```
+
+The working tree held no changes other than the untracked sample-icons folder, so
+the disk image corresponds exactly to that commit.
 
 Path:
 
@@ -195,17 +198,23 @@ Path:
 releases/Klik-PRO-v1.5.0-macos-universal.dmg
 ```
 
-SHA-256 at build time:
+SHA-256:
 
 ```text
-3c54551d68e62600127728b504057ad9474aa9da224aadd75e139c1f8a0a7aa4
+d3b39be57eca1e5a1378b3ccc157674e2f39fed1c043e1a925f3aefd323bd75c
 ```
 
-`./tools/build-release.sh` completed successfully in
-`klik-pro-release-v1.5.0-20260727-004604.USG9Jl`. It verified the app and nested
-helper signatures before and after packaging, verified the disk-image checksum,
-and regenerated signed checksum manifests. This is a local handoff/test artifact;
-it has not been published.
+`./tools/build-release.sh` completed with exit 0 in
+`klik-pro-release-v1.5.0-20260727-065708.kIRSPj`, and `./tools/check.sh` completed
+with exit 0 on the same tree beforehand (`build/check-20260727-065143`). The
+mounted image was re-inspected afterwards: version 1.5.0 (23), `codesign --verify
+--deep --strict` clean, universal `x86_64 arm64`, recomputed SHA-256 equal to the
+manifest, and the manifest signature verifies against the pinned release key
+`SHA256:Evg4ITqpPJY/aIT48Zv9Cp3psQfo977uCz/35a2k79E`. This is a local handoff/test
+artifact; it has not been published.
+
+Version and build stay frozen at 1.5.0 (23). This image was rebuilt in place under
+the same build number, so identify it by SHA-256 rather than by version.
 
 Important: `16d6dcf` is documentation only. True per-device event routing is not
 implemented. Do not copy, translate, adapt or derive OpenLogi code.
