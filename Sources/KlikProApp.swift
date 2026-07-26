@@ -2239,6 +2239,7 @@ final class MouseProfileHeaderView: NSView {
 
 final class SettingsContentView: NSView {
     private let image: NSImage?
+    private var displayedMouseImage: NSImage?
 
     let middleButtonRow: RecordableShortcutRowView
     let gestureButtonRow: RecordableShortcutRowView
@@ -2369,7 +2370,12 @@ final class SettingsContentView: NSView {
         specialFeatureAvailable: Bool,
         width: CGFloat
     ) {
-        image = Bundle.main.url(forResource: "device-reference", withExtension: "png").flatMap { NSImage(contentsOf: $0) }
+        let deviceImage = Bundle.main.url(
+            forResource: "device-reference",
+            withExtension: "png"
+        ).flatMap { NSImage(contentsOf: $0) }
+        image = deviceImage
+        displayedMouseImage = deviceImage
         chatGPTIcon = Self.installedAppIcon(.chatGPT)
         claudeIcon = Self.installedAppIcon(.claude)
         self.specialFeatureOn = specialFeatureAvailable && specialFeatureOn
@@ -2606,6 +2612,48 @@ final class SettingsContentView: NSView {
 
     required init?(coder: NSCoder) { nil }
 
+    /// Gives each slide a quiet visual identity without changing the hardware
+    /// artwork, its geometry, or the persisted mapping model. The tint follows
+    /// slide position: pearl white, mist blue, then warm champagne.
+    func setMouseMappingAppearance(index: Int) {
+        let tint: NSColor?
+        switch index {
+        case 1:
+            tint = NSColor(
+                calibratedRed: 0.45,
+                green: 0.72,
+                blue: 0.94,
+                alpha: 0.18
+            )
+        case 2:
+            tint = NSColor(
+                calibratedRed: 0.92,
+                green: 0.66,
+                blue: 0.42,
+                alpha: 0.16
+            )
+        default:
+            tint = nil
+        }
+        displayedMouseImage = tintedMouseImage(tint)
+        needsDisplay = true
+    }
+
+    private func tintedMouseImage(_ tint: NSColor?) -> NSImage? {
+        guard let image, let tint else { return image }
+        let tinted = NSImage(size: image.size)
+        tinted.lockFocus()
+        let rect = NSRect(origin: .zero, size: image.size)
+        image.draw(in: rect)
+        if let context = NSGraphicsContext.current?.cgContext {
+            context.setBlendMode(.sourceAtop)
+            context.setFillColor(tint.cgColor)
+            context.fill(rect)
+        }
+        tinted.unlockFocus()
+        return tinted
+    }
+
     private func prepareMouseSlideBrowse(direction: Int) {
         guard let layer = mouseSlideContainer.layer else { return }
         let transition = CATransition()
@@ -2721,7 +2769,7 @@ final class SettingsContentView: NSView {
         // Group title, parallel to "NATIVE APPS" / "APP PROFILES" on the cards below.
         drawSectionLabel("Mouse Mappings", x: 18, y: 16)
 
-        guard let image = image else { return }
+        guard let image = displayedMouseImage else { return }
         let imageAspect = image.size.height > 0 ? image.size.width / image.size.height : 1
         // Inset chosen so the mouse keeps its v1.4.3 size (267x198) while centred in the
         // taller guide card; the four button controls sit in the card's corners around it.
@@ -4245,6 +4293,8 @@ final class ToggleView: NSView {
         } ?? fallbackID
         guard let profile = mouseProfile(id: id, in: config) else { return }
         viewedMouseProfileID = id
+        let mappingIndex = config.mouseProfiles.firstIndex { $0.id == id } ?? 0
+        contentView.setMouseMappingAppearance(index: mappingIndex)
         contentView.mouseProfileHeader.configure(
             profiles: config.mouseProfiles,
             viewedID: id,

@@ -1147,6 +1147,12 @@ grep -q 'guard profileIDs.indices.contains(next) else { return }' \
 grep -q 'func handleHorizontalScroll(_ event: NSEvent)' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'NSWorkspace.shared.accessibilityDisplayShouldReduceMotion' \
   "$ROOT/Sources/KlikProApp.swift"
+grep -q 'func setMouseMappingAppearance(index: Int)' \
+  "$ROOT/Sources/KlikProApp.swift"
+grep -q 'calibratedRed: 0.45' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'calibratedRed: 0.92' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'context.setBlendMode(.sourceAtop)' \
+  "$ROOT/Sources/KlikProApp.swift"
 grep -q 'contentView.setMouseControlsAvailable(profile.deviceIdentity != nil)' \
   "$ROOT/Sources/KlikProApp.swift"
 grep -q 'thumbWheelCard = NSRect(x: leftX' "$ROOT/Sources/KlikProApp.swift"
