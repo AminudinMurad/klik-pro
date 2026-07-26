@@ -3,6 +3,11 @@
 Status: implementation completed; continuation QA handoff
 Owner decisions recorded: 2026-07-26  
 Branch: `release/v1.5.0`
+Next operator: Claude
+
+This handoff is the current continuation source for Claude. Preserve the two
+completed commits as authored: neither contains `Co-authored-by`, `Generated-by`,
+`Assisted-by`, or other AI attribution trailers.
 
 ## Current continuation state (2026-07-27)
 
@@ -39,13 +44,13 @@ item or submenu, then confirm keyboard activation with Space/Return. Use an
 isolated temporary configuration and do not install or publish the app.
 
 `./tools/check.sh` completed with exit 0 immediately before the final gear-menu
-change (output: `build/check-20260727-002842`). After commit `941be25`, the core
-compilation, mouse-button routing, LaunchAgent installer and App Profiles
-foundation stages passed, but the script exited silently at the known generated
-preview-launch boundary (output: `build/check-20260727-003529`). `git diff
---check` also passed. Treat the latter as the existing macOS preview-launch
-environment issue, but do not claim the post-`941be25` full suite is green until
-a clean exit 0 is obtained.
+change (output: `build/check-20260727-002842`). After commit `941be25`, both the
+ordinary and elevated reruns passed core compilation, mouse-button routing,
+LaunchAgent installer and App Profiles foundation stages, but exited silently
+at the known generated preview-launch boundary. The latest output is
+`build/check-20260727-005023`. `git diff --check` also passed. Treat this as the
+existing macOS preview-launch environment issue, but do not claim the
+post-`941be25` full suite is green until a clean exit 0 is obtained.
 
 The DMG background/arrow remains unresolved in the mounted Finder view. Do not
 claim that the DMG arrow is fixed without fresh visual verification.
