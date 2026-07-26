@@ -1881,6 +1881,12 @@ final class MouseProfileHeaderView: NSView {
         previousButton.action = #selector(browsePrevious)
         nextButton.target = self
         nextButton.action = #selector(browseNext)
+        // Begin native menu tracking on mouse-down. Waiting for the button's
+        // mouse-up action lets that same event immediately dismiss the menu on
+        // some AppKit/window configurations.
+        menuButton.onMouseDown = { [weak self] _ in self?.presentMenu() }
+        // Preserve Space/Return and accessibility-triggered activation, which
+        // still arrive through the button's normal action.
         menuButton.onPress = { [weak self] in self?.presentMenu() }
         menuButton.setAccessibilityLabel("Manage mouse mapping")
 
@@ -2048,21 +2054,17 @@ final class MouseProfileHeaderView: NSView {
             : nil
         delete.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
         menu.addItem(delete)
-        // Start menu tracking after the button's mouse-up/action event has fully
-        // completed. Opening synchronously from the button action can make AppKit
-        // treat that same event as the menu's dismissal, which looks like the gear
-        // did nothing. Retain the menu for the duration of its tracking session.
+        // Retain the menu for the duration of its synchronous tracking session.
+        // Tracking starts from the gear's mouse-down handler, matching native
+        // pull-down controls and preventing the opening click from closing it.
         presentedMenu = menu
-        DispatchQueue.main.async { [weak self, weak menu] in
-            guard let self, let menu, self.presentedMenu === menu else { return }
-            let origin = NSPoint(
-                x: self.menuButton.frame.minX,
-                y: self.menuButton.frame.maxY + 4
-            )
-            menu.popUp(positioning: nil, at: origin, in: self)
-            if self.presentedMenu === menu {
-                self.presentedMenu = nil
-            }
+        let origin = NSPoint(
+            x: menuButton.frame.minX,
+            y: menuButton.frame.maxY + 4
+        )
+        menu.popUp(positioning: nil, at: origin, in: self)
+        if presentedMenu === menu {
+            presentedMenu = nil
         }
     }
 

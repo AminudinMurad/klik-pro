@@ -921,6 +921,7 @@ final class RefreshIconButton: AppProfileButton {
 /// uncrowded. Shares the hover/press pill cue with `AppProfileButton`.
 final class AppProfileGearButton: NSButton {
     var onPress: (() -> Void)?
+    var onMouseDown: ((NSEvent) -> Void)?
     private var hoverTrackingArea: NSTrackingArea?
     private var isHovered = false
     private var isPressedDown = false
@@ -958,6 +959,13 @@ final class AppProfileGearButton: NSButton {
 
     override func mouseEntered(with event: NSEvent) { isHovered = true; updateBackground() }
     override func mouseExited(with event: NSEvent) { isHovered = false; updateBackground() }
+    override func mouseDown(with event: NSEvent) {
+        if let onMouseDown {
+            onMouseDown(event)
+        } else {
+            super.mouseDown(with: event)
+        }
+    }
     override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
     override func highlight(_ flag: Bool) {
         super.highlight(flag); isPressedDown = flag; updateBackground()
