@@ -283,6 +283,34 @@ Sandbox and App-Store checks already sit ahead of this path, so impossible class
 the `continue-028969` worktree on the stale release branch — recreate or move it onto the v1.5.0 branch.
 Then CHANGELOG + release notes for v1.5.0.
 
+## 5. Mouse Profile defaults (owner request, do next)
+
+Change `KlikProConfig.default` (`Sources/KlikProConfig.swift`, the `static let default` block) so a
+fresh install starts quiet, and only the two navigation buttons are live:
+
+| Control | Wanted | Current default |
+|---|---|---|
+| Middle button | **OFF**, no app and no button assignment | `enabled: true` (⌘⇧7) **and** `chatGPTMouseButton: .forward` overlays elsewhere |
+| Gesture button | **OFF**, no app and no button assignment | `enabled: true` (⌘⇧6) |
+| Horizontal thumb wheel | **OFF** | `ThumbWheelConfig(enabled: true, chromeEnabled: true, braveEnabled: true, …)` |
+| Forward button | ON, unchanged | `enabled: true` — leave alone |
+| Back button | ON, unchanged | `enabled: true` — leave alone |
+
+Also clear the default quick-launch overlays so no button arrives pre-assigned to an app:
+`chatGPTMouseButton: .forward` and `claudeMouseButton: .back` both become `nil`
+(`geminiMouseButton` is already `nil`). Note those two currently sit on Forward and Back, so leaving
+them would contradict "no app assignment" even though the buttons themselves stay ON.
+
+**Thumb-wheel browser checklist:** the per-browser checkboxes must reflect what is actually
+installed — grey out and disable any browser that is not present, rather than offering it. Detect by
+bundle identifier through the same app scan the rest of the tab uses
+(`com.google.Chrome`, `com.brave.Browser`, `com.microsoft.edgemac`, `com.vivaldi.Vivaldi`).
+`ThumbWheelConfig`'s stored flags stay as they are; only the control's enabled state changes, so a
+browser that is uninstalled and later reinstalled keeps its prior choice.
+
+Bump the schema only if the decoder needs to distinguish an old config from a new one — existing
+users should **keep** their current mappings; this is a fresh-install default change, not a migration.
+
 ## House rules that apply
 
 - **Never copy code from MacDupl.** It is a third-party product; use it only as market signal for which
