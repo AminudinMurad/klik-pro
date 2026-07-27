@@ -31,22 +31,56 @@ private func knownMouseDisplayName(for identity: MouseDeviceIdentity) -> String?
     }
 }
 
+/// Why a mouse scan came back empty. Without this distinction the UI cannot tell "you
+/// own no external mice" apart from "macOS refused to let us look", and it reported the
+/// first when the truth was the second — sending the user to hunt for a hardware fault
+/// that did not exist.
+enum MouseScanOutcome: Equatable {
+    case scanned([ConnectedMouseDevice])
+    /// `IOHIDManagerOpen` returned `kIOReturnNotPermitted`: Input Monitoring is not
+    /// granted to this bundle.
+    case permissionRequired
+}
+
+/// Asks macOS for Input Monitoring, but only if it has never been asked. Nothing in the
+/// app used to call this, so the system prompt never appeared and Klik PRO never
+/// registered itself in Privacy & Security — leaving Rescan to fail identically forever
+/// with no way for the user to grant the permission it needed.
+///
+/// Only the explicit Assign Mouse…/Rescan path calls this. It blocks while the prompt is
+/// on screen, so it must never run on the main thread, and prompting during launch would
+/// put a permission dialog in front of users who may never assign a mouse at all.
+func requestMouseMonitoringAccessIfNeeded() {
+    guard IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeUnknown else {
+        return
+    }
+    _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
+}
+
 /// Enumerates external mouse-class HID devices without subscribing to input
 /// reports. Built-in SPI devices and keyboard/trackpad services are excluded, so
 /// binding a Mouse Profile cannot accidentally offer the Mac's internal keyboard.
-func connectedMouseDevices() -> [ConnectedMouseDevice] {
+///
+/// Never prompts. Call `requestMouseMonitoringAccessIfNeeded()` first on paths where the
+/// user has explicitly asked to find a mouse.
+func scanConnectedMouseDevices() -> MouseScanOutcome {
     let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
     let match: [String: Any] = [
         kIOHIDDeviceUsagePageKey: kHIDPage_GenericDesktop,
         kIOHIDDeviceUsageKey: kHIDUsage_GD_Mouse,
     ]
     IOHIDManagerSetDeviceMatching(manager, match as CFDictionary)
-    guard IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone)) == kIOReturnSuccess else {
-        return []
+    let openStatus = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
+    guard openStatus == kIOReturnSuccess else {
+        // kIOReturnNotPermitted is precisely what a missing Input Monitoring grant
+        // produces. Any other failure is a genuine inability to enumerate and is
+        // reported as an empty scan, so the user is never sent to a permission pane
+        // that is already granted.
+        return openStatus == kIOReturnNotPermitted ? .permissionRequired : .scanned([])
     }
     defer { IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone)) }
     guard let rawDevices = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice> else {
-        return []
+        return .scanned([])
     }
 
     func number(_ device: IOHIDDevice, _ key: String) -> Int? {
@@ -57,7 +91,7 @@ func connectedMouseDevices() -> [ConnectedMouseDevice] {
     }
 
     var seen = Set<MouseDeviceIdentity>()
-    return rawDevices.compactMap { device -> ConnectedMouseDevice? in
+    return .scanned(rawDevices.compactMap { device -> ConnectedMouseDevice? in
         guard let vendorID = number(device, kIOHIDVendorIDKey),
               let productID = number(device, kIOHIDProductIDKey) else {
             return nil
@@ -99,7 +133,7 @@ func connectedMouseDevices() -> [ConnectedMouseDevice] {
             return $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
         }
         return ($0.identity.serialNumber ?? "") < ($1.identity.serialNumber ?? "")
-    }
+    })
 }
 
 // MARK: - ToggleSwitchView
@@ -1858,6 +1892,8 @@ final class MouseProfileHeaderView: NSView {
     private var viewedDeviceIdentity: MouseDeviceIdentity?
     private var cachedDeviceNames: [MouseDeviceIdentity: String] = [:]
     private var scanningDevices = false
+    /// The last scan was refused for want of Input Monitoring rather than finding nothing.
+    private var mouseAccessRequired = false
     private var swipeDeltaX: CGFloat = 0
     private var swipeLocked = false
     private var presentedMenu: NSMenu?
@@ -1872,6 +1908,7 @@ final class MouseProfileHeaderView: NSView {
     var onDuplicate: ((UUID) -> Void)?
     var onReset: ((UUID) -> Void)?
     var onDelete: ((UUID) -> Void)?
+    var onSetSlideColor: ((UUID, MouseSlideColor) -> Void)?
 
     override var isFlipped: Bool { true }
 
@@ -1900,13 +1937,15 @@ final class MouseProfileHeaderView: NSView {
         profiles: [MouseProfile],
         viewedID: UUID,
         activeID: UUID,
-        connectedDevices: [ConnectedMouseDevice]
+        connectedDevices: [ConnectedMouseDevice],
+        accessRequired: Bool = false
     ) {
         self.profiles = profiles
         profileIDs = profiles.map(\.id)
         viewedProfileID = profileIDs.contains(viewedID) ? viewedID : profileIDs.first
         activeProfileID = activeID
         devices = connectedDevices
+        mouseAccessRequired = accessRequired
         let viewed = profiles.first { $0.id == viewedProfileID }
         viewedDeviceIdentity = viewed?.deviceIdentity
         for device in connectedDevices {
@@ -2034,6 +2073,14 @@ final class MouseProfileHeaderView: NSView {
         rename.image = NSImage(systemSymbolName: "pencil", accessibilityDescription: nil)
         menu.addItem(rename)
 
+        let colour = NSMenuItem(title: "Mouse Colour", action: nil, keyEquivalent: "")
+        colour.image = NSImage(systemSymbolName: "paintpalette", accessibilityDescription: nil)
+        colour.submenu = makeSlideColorMenu(
+            selected: profile.slideColor
+                ?? .unchosenDefault(forSlide: profileIDs.firstIndex(of: id) ?? 0)
+        )
+        menu.addItem(colour)
+
         let duplicate = item("Duplicate Mapping", #selector(duplicateProfile(_:)))
         duplicate.isEnabled = profileIDs.count < MouseProfile.maximumCount
         duplicate.image = NSImage(
@@ -2070,6 +2117,46 @@ final class MouseProfileHeaderView: NSView {
         menu.popUp(positioning: nil, at: origin, in: self)
     }
 
+    /// Plain option selection, in the shape of the Change Icon dialog's colour dots: a
+    /// swatch, a name, and a checkmark on the current one. No live preview and no
+    /// coloured mouse in the menu — picking repaints the slide behind it, which is the
+    /// preview.
+    private func makeSlideColorMenu(selected: MouseSlideColor) -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        for (index, colour) in MouseSlideColor.allCases.enumerated() {
+            let entry = NSMenuItem(
+                title: colour.title,
+                action: #selector(setSlideColor(_:)),
+                keyEquivalent: ""
+            )
+            entry.target = self
+            entry.tag = index
+            entry.state = colour == selected ? .on : .off
+            // The swatch shows the wash at full strength; on the mouse it lands at the
+            // colourway's own alpha, so the dot reads as the colour rather than as the
+            // near-white the artwork actually becomes. Pearl White has no wash at all,
+            // so it gets an outline instead of an invisible white disc.
+            let symbol = colour.tint == nil ? "circle" : "circle.fill"
+            entry.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+                .withSymbolConfiguration(
+                    .init(paletteColors: [swatchColor(for: colour)])
+                )
+            menu.addItem(entry)
+        }
+        return menu
+    }
+
+    private func swatchColor(for colour: MouseSlideColor) -> NSColor {
+        guard let tint = colour.tint else { return .appTextSecondary }
+        return NSColor(
+            calibratedRed: tint.red,
+            green: tint.green,
+            blue: tint.blue,
+            alpha: 1
+        )
+    }
+
     private func makeDeviceMenu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
@@ -2081,6 +2168,33 @@ final class MouseProfileHeaderView: NSView {
             )
             scanning.isEnabled = false
             menu.addItem(scanning)
+        } else if mouseAccessRequired {
+            // Never claim there are no mice when macOS simply refused to let us look.
+            // Klik PRO cannot enumerate any HID device without Input Monitoring, so the
+            // honest report is the permission, plus a way to go and grant it.
+            let blocked = NSMenuItem(
+                title: "Klik PRO needs permission to see your mice.",
+                action: nil,
+                keyEquivalent: ""
+            )
+            blocked.isEnabled = false
+            menu.addItem(blocked)
+            let openSettings = NSMenuItem(
+                title: "Open Input Monitoring Settings…",
+                action: #selector(openMouseMonitoringSettings),
+                keyEquivalent: ""
+            )
+            openSettings.target = self
+            menu.addItem(openSettings)
+            menu.addItem(.separator())
+            let retry = NSMenuItem(
+                title: "Rescan",
+                action: #selector(rescanDevices),
+                keyEquivalent: ""
+            )
+            retry.target = self
+            menu.addItem(retry)
+            return menu
         } else if devices.isEmpty {
             let empty = NSMenuItem(
                 title: "No compatible external mice found.",
@@ -2162,6 +2276,17 @@ final class MouseProfileHeaderView: NSView {
         if let id = representedID(sender) { onBindDevice?(id, nil) }
     }
     @objc private func rescanDevices() { onRescanDevices?() }
+    @objc private func openMouseMonitoringSettings() {
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
+        ) else { return }
+        NSWorkspace.shared.open(url)
+    }
+    @objc private func setSlideColor(_ sender: NSMenuItem) {
+        let colours = MouseSlideColor.allCases
+        guard let id = viewedProfileID, colours.indices.contains(sender.tag) else { return }
+        onSetSlideColor?(id, colours[sender.tag])
+    }
 
     /// The transparent full-card overlay must not steal clicks from the mapping
     /// controls beneath it. Only its three actual NSButtons participate in hit
@@ -2264,7 +2389,9 @@ final class MouseProfileHeaderView: NSView {
 
 final class SettingsContentView: NSView {
     private let image: NSImage?
-    private var displayedMouseImage: NSImage?
+    /// The wash the viewed slide is wearing, or `nil` for the raw Pearl White artwork.
+    /// Only the four components are held — never a tinted copy of the image.
+    private var mouseSlideTint: MouseSlideTint?
 
     let middleButtonRow: RecordableShortcutRowView
     let gestureButtonRow: RecordableShortcutRowView
@@ -2385,7 +2512,7 @@ final class SettingsContentView: NSView {
         if previewRenderingIsActive && !useInstalledPreviewIcon {
             return previewAppIcon(for: target)
         }
-        return NSWorkspace.shared.icon(forFile: applicationURL.path)
+        return VendorAppIconCache.icon(forFile: applicationURL.path)
     }
 
     init(
@@ -2395,12 +2522,10 @@ final class SettingsContentView: NSView {
         specialFeatureAvailable: Bool,
         width: CGFloat
     ) {
-        let deviceImage = Bundle.main.url(
+        image = Bundle.main.url(
             forResource: "device-reference",
             withExtension: "png"
         ).flatMap { NSImage(contentsOf: $0) }
-        image = deviceImage
-        displayedMouseImage = deviceImage
         chatGPTIcon = Self.installedAppIcon(.chatGPT)
         claudeIcon = Self.installedAppIcon(.claude)
         self.specialFeatureOn = specialFeatureAvailable && specialFeatureOn
@@ -2638,45 +2763,20 @@ final class SettingsContentView: NSView {
     required init?(coder: NSCoder) { nil }
 
     /// Gives each slide a quiet visual identity without changing the hardware
-    /// artwork, its geometry, or the persisted mapping model. The tint follows
-    /// slide position: pearl white, mist blue, then warm champagne.
-    func setMouseMappingAppearance(index: Int) {
-        let tint: NSColor?
-        switch index {
-        case 1:
-            tint = NSColor(
-                calibratedRed: 0.45,
-                green: 0.72,
-                blue: 0.94,
-                alpha: 0.18
-            )
-        case 2:
-            tint = NSColor(
-                calibratedRed: 0.92,
-                green: 0.66,
-                blue: 0.42,
-                alpha: 0.16
-            )
-        default:
-            tint = nil
-        }
-        displayedMouseImage = tintedMouseImage(tint)
+    /// artwork, its geometry, or the persisted mapping model. The colour follows the
+    /// mapping set the user is viewing, not its position in the carousel.
+    ///
+    /// This only records the wash. It deliberately does no compositing: the previous
+    /// implementation rebuilt a tinted 1000×742 copy of the artwork through
+    /// `lockFocus()` on every call, and all 17 `refreshMouseProfileEditor()` call sites
+    /// reach it — browse, activate, rename, reset, delete, bind, rescan — so the app
+    /// re-rasterized the mouse even when nothing about the colour had changed. Now an
+    /// unchanged colour costs a comparison, and a changed one costs a redraw.
+    func setMouseSlideColor(_ color: MouseSlideColor) {
+        let tint = color.tint
+        guard tint != mouseSlideTint else { return }
+        mouseSlideTint = tint
         needsDisplay = true
-    }
-
-    private func tintedMouseImage(_ tint: NSColor?) -> NSImage? {
-        guard let image, let tint else { return image }
-        let tinted = NSImage(size: image.size)
-        tinted.lockFocus()
-        let rect = NSRect(origin: .zero, size: image.size)
-        image.draw(in: rect)
-        if let context = NSGraphicsContext.current?.cgContext {
-            context.setBlendMode(.sourceAtop)
-            context.setFillColor(tint.cgColor)
-            context.fill(rect)
-        }
-        tinted.unlockFocus()
-        return tinted
     }
 
     private func prepareMouseSlideBrowse(direction: Int) {
@@ -2794,7 +2894,7 @@ final class SettingsContentView: NSView {
         // Group title, parallel to "NATIVE APPS" / "APP PROFILES" on the cards below.
         drawSectionLabel("Mouse Mappings", x: 18, y: 16)
 
-        guard let image = displayedMouseImage else { return }
+        guard let image else { return }
         let imageAspect = image.size.height > 0 ? image.size.width / image.size.height : 1
         // Inset chosen so the mouse keeps its v1.4.3 size (267x198) while centred in the
         // taller guide card; the four button controls sit in the card's corners around it.
@@ -2809,8 +2909,34 @@ final class SettingsContentView: NSView {
         )
         // respectFlipped: true is required because this view is isFlipped — without it
         // NSImage.draw renders upside-down in the flipped coordinate system.
-        image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1.0,
-                   respectFlipped: true, hints: nil)
+        if let tint = mouseSlideTint, let context = NSGraphicsContext.current?.cgContext {
+            // The wash must see only the mouse's own alpha, so the artwork and the
+            // .sourceAtop fill are composited inside a transparency layer scoped to the
+            // image rect; without the layer the fill would tint the card behind it too.
+            // This is what the offscreen tinted NSImage used to buy, except nothing is
+            // allocated and nothing is cached. The GState is saved because .sourceAtop
+            // would otherwise leak into drawDeviceCallouts below.
+            context.saveGState()
+            context.beginTransparencyLayer(in: rect, auxiliaryInfo: nil)
+            image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1.0,
+                       respectFlipped: true, hints: nil)
+            context.setBlendMode(.sourceAtop)
+            context.setFillColor(
+                NSColor(
+                    calibratedRed: tint.red,
+                    green: tint.green,
+                    blue: tint.blue,
+                    alpha: tint.alpha
+                ).cgColor
+            )
+            context.fill(rect)
+            context.endTransparencyLayer()
+            context.restoreGState()
+        } else {
+            // Pearl White is the raw artwork, so it skips the layer entirely.
+            image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1.0,
+                       respectFlipped: true, hints: nil)
+        }
 
         drawDeviceCallouts(in: rect)
     }
@@ -3849,6 +3975,9 @@ final class ToggleView: NSView {
     /// `config.activeMouseProfileID`: browsing must never change live input.
     private var viewedMouseProfileID: UUID?
     private var availableMouseDevices: [ConnectedMouseDevice] = []
+    /// Set when the last scan was refused for want of Input Monitoring, so the gear can
+    /// say so instead of claiming there are no mice attached.
+    private var mouseAccessRequired = false
     private let saveButton = PrimaryHoverButton(
         title: "Save",
         frame: NSRect(x: 48, y: 854, width: 120, height: 42)
@@ -3905,7 +4034,17 @@ final class ToggleView: NSView {
         config = loadedConfig
         persistedConfig = loadedConfig
         viewedMouseProfileID = loadedConfig.activeMouseProfileID
-        availableMouseDevices = previewRenderingIsActive ? [] : connectedMouseDevices()
+        // The launch scan never prompts: a permission dialog must not greet a user who
+        // may never assign a mouse. It only records the refusal so the gear can explain
+        // itself if they do open it.
+        switch previewRenderingIsActive ? .scanned([]) : scanConnectedMouseDevices() {
+        case .scanned(let devices):
+            availableMouseDevices = devices
+            mouseAccessRequired = false
+        case .permissionRequired:
+            availableMouseDevices = []
+            mouseAccessRequired = true
+        }
         appProfileManager = makeAppProfileManager(forDataRoot: loadedConfig.dataRoot)
         controlState = AppControlState(
             launchAtLogin: launchAtLoginEnabled,
@@ -3968,7 +4107,8 @@ final class ToggleView: NSView {
             profiles: loadedConfig.mouseProfiles,
             viewedID: loadedConfig.activeMouseProfileID,
             activeID: loadedConfig.activeMouseProfileID,
-            connectedDevices: availableMouseDevices
+            connectedDevices: availableMouseDevices,
+            accessRequired: mouseAccessRequired
         )
         saveButton.onPress = { [weak self] in
             self?.saveConfiguration()
@@ -4319,12 +4459,15 @@ final class ToggleView: NSView {
         guard let profile = mouseProfile(id: id, in: config) else { return }
         viewedMouseProfileID = id
         let mappingIndex = config.mouseProfiles.firstIndex { $0.id == id } ?? 0
-        contentView.setMouseMappingAppearance(index: mappingIndex)
+        contentView.setMouseSlideColor(
+            profile.slideColor ?? .unchosenDefault(forSlide: mappingIndex)
+        )
         contentView.mouseProfileHeader.configure(
             profiles: config.mouseProfiles,
             viewedID: id,
             activeID: config.activeMouseProfileID,
-            connectedDevices: availableMouseDevices
+            connectedDevices: availableMouseDevices,
+            accessRequired: mouseAccessRequired
         )
         contentView.middleButtonRow.setMapping(profile.middleButton)
         contentView.gestureButtonRow.setMapping(profile.gestureButton)
@@ -4410,10 +4553,26 @@ final class ToggleView: NSView {
             guard let self else { return }
             self.contentView.mouseProfileHeader.setScanningDevices(true)
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                let devices = previewRenderingIsActive ? [] : connectedMouseDevices()
+                // The user has explicitly asked to find a mouse, so this is the one place
+                // that may prompt. It blocks while the system dialog is up, which is why
+                // it runs here and not on the main thread.
+                let outcome: MouseScanOutcome
+                if previewRenderingIsActive {
+                    outcome = .scanned([])
+                } else {
+                    requestMouseMonitoringAccessIfNeeded()
+                    outcome = scanConnectedMouseDevices()
+                }
                 DispatchQueue.main.async {
                     guard let self else { return }
-                    self.availableMouseDevices = devices
+                    switch outcome {
+                    case .scanned(let devices):
+                        self.availableMouseDevices = devices
+                        self.mouseAccessRequired = false
+                    case .permissionRequired:
+                        self.availableMouseDevices = []
+                        self.mouseAccessRequired = true
+                    }
                     self.contentView.mouseProfileHeader.setScanningDevices(false)
                     self.refreshMouseProfileEditor()
                 }
@@ -4423,6 +4582,22 @@ final class ToggleView: NSView {
         header.onDuplicate = { [weak self] id in self?.duplicateMouseProfile(id) }
         header.onReset = { [weak self] id in self?.resetMouseProfile(id) }
         header.onDelete = { [weak self] id in self?.deleteMouseProfile(id) }
+        header.onSetSlideColor = { [weak self] id, colour in
+            self?.setMouseSlideColor(colour, for: id)
+        }
+    }
+
+    /// Colour belongs to the mapping set, not to its position in the carousel, so it
+    /// travels with the set when another one is added, deleted or reordered around it.
+    /// Two sets may wear the same colour; the name, dots and ACTIVE badge still tell
+    /// them apart, and refusing a colour the user asked for would be worse.
+    private func setMouseSlideColor(_ colour: MouseSlideColor, for id: UUID) {
+        guard var profile = mouseProfile(id: id, in: config),
+              profile.slideColor != colour else { return }
+        profile.slideColor = colour
+        config = replacingMouseProfile(profile, in: config)
+        configurationDidChange()
+        refreshMouseProfileEditor()
     }
 
     private func addMouseProfile(copying source: MouseProfile? = nil) {
@@ -4492,6 +4667,12 @@ final class ToggleView: NSView {
         config = replacingMouseProfile(reset, in: config)
         configurationDidChange()
         refreshMouseProfileEditor()
+        // The Settings tab holds this mapping's Horizontal Thumb Wheel switch and its four
+        // browser checkboxes, and only this call re-reads them from config. Without it a
+        // reset left the tab showing pre-reset values, so the first click on a stale-ON
+        // switch wrote the value it already held and the wheel took two clicks to
+        // re-enable. activateMouseProfile has always made this call; reset did not.
+        refreshActiveMouseProfileSettings()
         refreshButtonAssignmentViews()
     }
 
@@ -4544,6 +4725,18 @@ final class ToggleView: NSView {
     }
 
     private func activateMouseProfile(_ id: UUID) {
+        // Activation repaints the ACTIVE badge and its accessibility label before the save
+        // lands. If a save is already in flight, saveConfiguration() returns early without
+        // even setting a status message, so the badge would claim this mapping is live
+        // while config.json and the running helper still held the old one. Every other
+        // mutating handler already refuses during a save; this one did not.
+        guard !saveInProgress, !appProfileLifecycleInProgress else {
+            showAppProfileAlert(
+                title: "Please wait",
+                message: "Finish the current Save or App Profile change before activating another mapping."
+            )
+            return
+        }
         guard id != config.activeMouseProfileID,
               let selected = mouseProfile(id: id, in: config),
               mouseProfileIsValid(selected, in: config),
@@ -5044,6 +5237,12 @@ final class ToggleView: NSView {
     /// that they must never disagree: one left enabled while the others are busy reads
     /// as a broken control.
     private func setRefreshControlsBusy(_ busy: Bool) {
+        // An explicit refresh is the one moment the user expects icons re-read from disk,
+        // so the vendor icon cache is dropped here and repopulated by the rebuild that
+        // follows. Every other rebuild — pinning, renaming, browsing — reuses it.
+        if busy {
+            VendorAppIconCache.invalidate()
+        }
         appProfilesView.setRefreshing(busy)
         contentView.mappingProfilesView.setRefreshing(busy)
     }

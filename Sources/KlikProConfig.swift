@@ -646,6 +646,88 @@ struct MouseProfileLaunchAssignment: Codable, Equatable {
     var button: QuickLaunchMouseButton
 }
 
+/// A `.sourceAtop` wash laid over the one mouse artwork at draw time. Kept as plain
+/// components so this model type stays renderer-agnostic, exactly as
+/// `AppProfileMenuColor.iconColor` does; the view feeds them to
+/// `NSColor(calibratedRed:green:blue:alpha:)`, which is the space the first three
+/// colourways were authored and measured in.
+struct MouseSlideTint: Equatable {
+    var red: Double
+    var green: Double
+    var blue: Double
+    var alpha: Double
+}
+
+/// The eight colourways a mapping set can wear. There is one PNG on disk
+/// (`device-reference.png`); every colourway is that artwork tinted while it is drawn,
+/// so adding a colour costs no asset, no cached bitmap and no extra memory.
+///
+/// The pastels keep the 0.16–0.18 wash the first three shipped with. Measured on
+/// rendered fixtures that yields a maximum channel delta of 25 (mist blue) and 21
+/// (champagne) against the untinted artwork, which is comfortably visible, so there is
+/// no reason to push them harder. Graphite is the exception and is documented below.
+enum MouseSlideColor: String, Codable, CaseIterable, Equatable {
+    case pearlWhite
+    case mistBlue
+    case champagne
+    case klikGreen
+    case graphite
+    case rose
+    case lilac
+    case slateTeal
+
+    var title: String {
+        switch self {
+        case .pearlWhite: return "Pearl White"
+        case .mistBlue: return "Mist Blue"
+        case .champagne: return "Champagne"
+        case .klikGreen: return "Klik Green"
+        case .graphite: return "Graphite"
+        case .rose: return "Rose"
+        case .lilac: return "Lilac"
+        case .slateTeal: return "Slate Teal"
+        }
+    }
+
+    /// `nil` is the raw artwork. Pearl White is not a wash over the mouse — it *is* the
+    /// mouse — so it costs no compositing at all.
+    var tint: MouseSlideTint? {
+        switch self {
+        case .pearlWhite:
+            return nil
+        case .mistBlue:
+            return MouseSlideTint(red: 0.45, green: 0.72, blue: 0.94, alpha: 0.18)
+        case .champagne:
+            return MouseSlideTint(red: 0.92, green: 0.66, blue: 0.42, alpha: 0.16)
+        case .klikGreen:
+            // KlikProBrand.green, 25/187/19.
+            return MouseSlideTint(red: 0.098, green: 0.733, blue: 0.075, alpha: 0.18)
+        case .graphite:
+            // The only dark option, so it needs a far heavier wash than the pastels to
+            // read as graphite rather than as a dirty white. Even at 0.34 it lands
+            // mid-grey; a true dark colourway would need its own artwork.
+            return MouseSlideTint(red: 0.24, green: 0.26, blue: 0.29, alpha: 0.34)
+        case .rose:
+            return MouseSlideTint(red: 0.90, green: 0.45, blue: 0.53, alpha: 0.18)
+        case .lilac:
+            return MouseSlideTint(red: 0.64, green: 0.55, blue: 0.90, alpha: 0.18)
+        case .slateTeal:
+            return MouseSlideTint(red: 0.27, green: 0.64, blue: 0.62, alpha: 0.18)
+        }
+    }
+
+    /// What a mapping set wears before anyone picks for it. Reproduces the positional
+    /// palette the slides carried when colour followed carousel position, so an existing
+    /// installation looks the same after upgrading as it did before.
+    static func unchosenDefault(forSlide index: Int) -> MouseSlideColor {
+        switch index {
+        case 1: return .mistBlue
+        case 2: return .champagne
+        default: return .pearlWhite
+        }
+    }
+}
+
 /// All behavior specific to one physical/logical mouse slide. Keyboard launch hotkeys
 /// intentionally remain global on `KlikProConfig`; switching mice must never silently
 /// replace a keyboard shortcut.
@@ -666,6 +748,12 @@ struct MouseProfile: Codable, Equatable, Identifiable {
     var backButton: ShortcutMapping
     var thumbWheel: ThumbWheelConfig
     var launchAssignments: [MouseProfileLaunchAssignment]
+    /// Optional on purpose. Synthesized `Codable` decodes a missing key straight to
+    /// `nil` and omits it again on encode, so every config written before colour became
+    /// a choice keeps loading untouched and needs no schema bump. `nil` means nobody has
+    /// picked yet, which `MouseSlideColor.unchosenDefault(forSlide:)` resolves to the
+    /// positional colour that slide already wore.
+    var slideColor: MouseSlideColor?
 
     /// A new slide starts with the same owner-approved quiet defaults as a fresh
     /// installation: only browser Back/Forward are mapped, with no app assignments.

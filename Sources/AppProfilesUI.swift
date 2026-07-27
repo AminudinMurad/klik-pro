@@ -559,6 +559,9 @@ private final class AppCardListView: NSView {
     private let scrollbar: FixedAppCardScrollbarView
     private let refreshOverlay = AppCardRefreshOverlayView(frame: .zero)
     private var rows: [NSView] = []
+    /// The leading run of pinned rows. They live on this view rather than inside the
+    /// scroller's document, so scrolling moves everything except them.
+    private var stickyRows: [NSView] = []
     private var emptyField: NSTextField?
 
     override var isFlipped: Bool { true }
@@ -589,24 +592,52 @@ private final class AppCardListView: NSView {
 
     private func layoutList() {
         let contentWidth = rowContentWidth
-        scrollView.frame = NSRect(x: 0, y: 0, width: contentWidth, height: bounds.height)
+        // Sticky rows keep the list's own pitch, so the seam between them and the
+        // scroller is invisible: it reads as one column in which the pinned card simply
+        // never moves.
+        let pitch = AppCardMetrics.height + innerCardSpacing
+        for (index, row) in stickyRows.enumerated() {
+            row.frame = NSRect(
+                x: 0,
+                y: CGFloat(index) * pitch,
+                width: contentWidth,
+                height: AppCardMetrics.height
+            )
+        }
+        let stickyHeight = stickyRows.isEmpty ? 0 : CGFloat(stickyRows.count) * pitch
+        let scrollHeight = max(0, bounds.height - stickyHeight)
+        scrollView.frame = NSRect(
+            x: 0, y: stickyHeight, width: contentWidth, height: scrollHeight
+        )
         scrollbar.frame = NSRect(
             x: bounds.width - FixedAppCardScrollbarView.width,
-            y: 0,
+            y: stickyHeight,
             width: FixedAppCardScrollbarView.width,
-            height: bounds.height
+            height: scrollHeight
         )
         refreshOverlay.frame = scrollView.frame
         layoutRows()
     }
 
-    func setRows(_ newRows: [NSView], emptyMessage: String) {
-        rows.forEach { $0.removeFromSuperview() }
-        rows = newRows
+    /// `stickyCount` is how many of `newRows` lead the list as pinned. They are lifted
+    /// out of the scroller and parked at the top; the remainder scrolls beneath them.
+    func setRows(_ newRows: [NSView], stickyCount: Int = 0, emptyMessage: String) {
+        (stickyRows + rows).forEach { $0.removeFromSuperview() }
         emptyField?.removeFromSuperview()
         emptyField = nil
 
-        if rows.isEmpty {
+        let pinned = max(0, min(stickyCount, newRows.count))
+        stickyRows = Array(newRows.prefix(pinned))
+        rows = Array(newRows.dropFirst(pinned))
+
+        stickyRows.forEach {
+            $0.isHidden = false
+            addSubview($0)
+        }
+
+        // The empty state keys off the whole list rather than the scrolling part, so a
+        // single pinned card with nothing behind it never sits above "No App Profiles yet".
+        if newRows.isEmpty {
             let empty = NSTextField(labelWithString: emptyMessage)
             empty.font = .systemFont(ofSize: 13)
             empty.textColor = .appTextSecondary
@@ -619,7 +650,7 @@ private final class AppCardListView: NSView {
                 documentView.addSubview($0)
             }
         }
-        layoutRows()
+        layoutList()
     }
 
     private func layoutRows() {
@@ -656,6 +687,10 @@ private final class AppCardListView: NSView {
         scrollView.alphaValue = refreshing ? 0.44 : 1
         scrollbar.alphaValue = refreshing ? 0.64 : 1
         scrollbar.setInteractionEnabled(!refreshing)
+        // Pinned rows dim with the rest so the list reads as one surface, but they keep
+        // their place: a refresh — the launch scan or a force refresh — never makes the
+        // pinned card move or disappear.
+        stickyRows.forEach { $0.alphaValue = refreshing ? 0.44 : 1 }
         refreshOverlay.setActive(refreshing, message: message)
     }
 }
@@ -674,9 +709,37 @@ private func appProfileDisplayIcon(for instance: AppProfileInstance) -> NSImage 
     }
     if instance.launcherKind == .managed,
        FileManager.default.fileExists(atPath: instance.launcherPath) {
-        return NSWorkspace.shared.icon(forFile: instance.launcherPath)
+        return VendorAppIconCache.icon(forFile: instance.launcherPath)
     }
-    return NSWorkspace.shared.icon(forFile: instance.source.bundleURL)
+    return VendorAppIconCache.icon(forFile: instance.source.bundleURL)
+}
+
+/// `NSWorkspace.shared.icon(forFile:)` reaches Icon Services and the disk. Every row in
+/// all four lists asked for its icon on every rebuild, and a single refresh rebuilds the
+/// lists several times over — `setInstances`, `setRuntimeHealth`, `setOriginals` and
+/// `setTopPinnedProfiles` each rebuild independently — so the same handful of icons were
+/// re-fetched dozens of times per refresh, on the main thread.
+///
+/// Only vendor app icons live here. A managed launcher's own `AppIcon.icns` is still read
+/// straight from disk on every rebuild by `appProfileDisplayIcon(for:)`, because Change
+/// Icon has to show up immediately — bypassing a per-path icon cache is the entire reason
+/// that path exists, and caching it here would reintroduce the staleness it was written
+/// to avoid.
+///
+/// Main-thread only: every caller is view code building rows.
+enum VendorAppIconCache {
+    private static var icons: [String: NSImage] = [:]
+
+    static func icon(forFile path: String) -> NSImage {
+        if let cached = icons[path] { return cached }
+        let icon = NSWorkspace.shared.icon(forFile: path)
+        icons[path] = icon
+        return icon
+    }
+
+    /// Dropped on an explicit refresh, so an app replaced on disk since launch still
+    /// picks up its new icon. Rebuilds that are not refreshes keep the cache.
+    static func invalidate() { icons.removeAll() }
 }
 
 class AppProfileButton: NSButton {
@@ -1294,7 +1357,7 @@ private final class DualAppGeneratorCard: NSView {
         nameField.stringValue = candidate?.app.displayName ?? fallbackName
         layoutNameRow()
         if let candidate {
-            iconView.image = NSWorkspace.shared.icon(forFile: candidate.app.bundleURL.path)
+            iconView.image = VendorAppIconCache.icon(forFile: candidate.app.bundleURL.path)
             generateButton.isEnabled = true
             openButton.isEnabled = true
         } else {
@@ -1320,7 +1383,7 @@ private final class DualAppGeneratorCard: NSView {
             nameField.stringValue = candidate.app.displayName
         }
         iconView.image = customDockIcon
-            ?? NSWorkspace.shared.icon(forFile: candidate.app.bundleURL.path)
+            ?? VendorAppIconCache.icon(forFile: candidate.app.bundleURL.path)
     }
 
     /// Pushed from the controller whenever the native launcher's persisted custom
@@ -1722,7 +1785,7 @@ private final class MappingOriginalAppRowView: NSView {
         // row 2 the right-flushed actions, matching the generator card exactly.
         let icon = NSImageView(frame: AppCardMetrics.iconFrame())
         icon.imageScaling = .scaleProportionallyUpOrDown
-        icon.image = NSWorkspace.shared.icon(forFile: app.path)
+        icon.image = VendorAppIconCache.icon(forFile: app.path)
 
         gearButton.frame = AppCardMetrics.gearFrame(cardWidth: width)
         gearButton.toolTip = "Manage this app's menu-bar icon"
@@ -1871,12 +1934,17 @@ private final class MappingSectionCardView: NSView {
     /// Replaces the card's rows. Rows are prebuilt by the owner (so their Open/Assign
     /// callbacks are already wired) at `rowContentWidth`; an empty group shows a
     /// centered caption instead.
-    func setRows(_ rows: [NSView], rowHeight: CGFloat, emptyMessage: String) {
+    func setRows(
+        _ rows: [NSView],
+        rowHeight: CGFloat,
+        stickyCount: Int = 0,
+        emptyMessage: String
+    ) {
         precondition(
             rowHeight == AppCardMetrics.height,
             "Every app list row must use the shared 86-point card height"
         )
-        listView.setRows(rows, emptyMessage: emptyMessage)
+        listView.setRows(rows, stickyCount: stickyCount, emptyMessage: emptyMessage)
     }
 
     /// Initial discovery and manual refresh share the same non-destructive busy veil:
@@ -1904,6 +1972,9 @@ final class MappingAppProfilesView: NSView {
     // False until the first setOriginals call (the app scan reporting in). Until then
     // the Native Apps card shows a loading spinner rather than "No native apps".
     private var originalsLoaded = false
+    /// True between setRefreshing(true) and setRefreshing(false). While it is set, the
+    /// shared busy state owns both cards and setOriginals must not clear either.
+    private var sharedRefreshActive = false
     /// Profiles pinned to the top, in the user's pin order. Natives arrive already
     /// ordered from the controller (it builds `MappingNativeApp`), but this list sorts
     /// its own rows by label, so it needs the pin order to apply afterwards.
@@ -1953,6 +2024,7 @@ final class MappingAppProfilesView: NSView {
 
     /// Keeps both header icons and both list overlays in step during a rescan.
     func setRefreshing(_ refreshing: Bool, message: String = "Refreshing…") {
+        sharedRefreshActive = refreshing
         nativeCard.setRefreshing(refreshing, message: message)
         profilesCard.setRefreshing(refreshing, message: message)
     }
@@ -1973,7 +2045,20 @@ final class MappingAppProfilesView: NSView {
     func setOriginals(_ originals: [MappingNativeApp]) {
         self.originals = originals
         originalsLoaded = true
-        nativeCard.setRefreshing(false)
+        // First arrival owns its own overlay: nobody called setRefreshing(true) for the
+        // launch scan, so this is what ends the initial loading state.
+        //
+        // A user-initiated rescan is the opposite case and must not be cleared here. The
+        // four refresh icons are driven together by setRefreshControlsBusy(_:) and must
+        // never disagree, but the Mappings handler calls refreshOriginalAssignmentViews()
+        // synchronously right after starting the async scan — which lands here and used
+        // to switch the native card off microseconds after it was switched on, leaving
+        // the App Profiles column spinning alone. The native list was being rescanned the
+        // whole time; it just showed no sign of it, which read as "only App Profiles
+        // refreshed". While a shared refresh is in flight, that call owns the state.
+        if !sharedRefreshActive {
+            nativeCard.setRefreshing(false)
+        }
         rebuildRows()
     }
 
@@ -2009,6 +2094,7 @@ final class MappingAppProfilesView: NSView {
             nativeCard.setRows(
                 nativeRows,
                 rowHeight: MappingOriginalAppRowView.rowHeight,
+                stickyCount: originals.prefix { $0.topPinned }.count,
                 emptyMessage: "No native apps installed"
             )
         } else {
@@ -2048,6 +2134,7 @@ final class MappingAppProfilesView: NSView {
         profilesCard.setRows(
             profileRows,
             rowHeight: MappingAppProfileOpenRowView.rowHeight,
+            stickyCount: ordered.prefix { topPinnedProfileIDs.contains($0.id) }.count,
             emptyMessage: "No App Profiles yet"
         )
     }
@@ -2217,10 +2304,14 @@ final class AppProfilesContentView: NSView {
     /// before `setRows` means an absent app leaves neither a row nor spacing behind.
     private func relayoutGeneratorCards() {
         let ordered = topPinnedFirst(generatorCards, pins: topPinnedOriginals) { $0.target }
-        let visibleCards = ordered.compactMap { entry in
-            entry.card.candidate == nil ? nil : entry.card
-        }
-        generatorList.setRows(visibleCards, emptyMessage: "No supported apps installed")
+        // Counted after filtering, not before: a pin whose app is not installed leaves no
+        // card, so counting it would make an unpinned card sticky.
+        let visible = ordered.filter { $0.card.candidate != nil }
+        generatorList.setRows(
+            visible.map { $0.card },
+            stickyCount: visible.prefix { topPinnedOriginals.contains($0.target) }.count,
+            emptyMessage: "No supported apps installed"
+        )
     }
 
     /// Reflects which native apps are pinned to the top of the app lists, and pushes the
@@ -2333,11 +2424,12 @@ final class AppProfilesContentView: NSView {
         let liveIDs = Set(visible.map(\.id))
         let atLimit = topPinnedProfileIDs.filter(liveIDs.contains).count
             >= KlikProConfig.topPinLimit
-        let profileRows: [NSView] = topPinnedFirst(
+        let orderedInstances = topPinnedFirst(
             sorted,
             pins: topPinnedProfileIDs,
             key: { $0.id }
-        ).map { instance in
+        )
+        let profileRows: [NSView] = orderedInstances.map { instance in
             let row = AppProfileInstanceRowView(
                 instance: instance,
                 health: runtimeHealth[instance.id],
@@ -2355,7 +2447,11 @@ final class AppProfilesContentView: NSView {
             row.onTogglePin = { [weak self] in self?.onTogglePinProfile?($0) }
             return row
         }
-        profilesList.setRows(profileRows, emptyMessage: "No App Profiles yet")
+        profilesList.setRows(
+            profileRows,
+            stickyCount: orderedInstances.prefix { topPinnedProfileIDs.contains($0.id) }.count,
+            emptyMessage: "No App Profiles yet"
+        )
     }
 
     func setStatus(_ message: String, color: NSColor = .appTextSecondary) {

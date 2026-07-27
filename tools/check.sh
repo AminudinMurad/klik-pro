@@ -1221,12 +1221,141 @@ grep -q 'guard profileIDs.indices.contains(next) else { return }' \
 grep -q 'func handleHorizontalScroll(_ event: NSEvent)' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'NSWorkspace.shared.accessibilityDisplayShouldReduceMotion' \
   "$ROOT/Sources/KlikProApp.swift"
-grep -q 'func setMouseMappingAppearance(index: Int)' \
+# Input Monitoring. Without it IOHIDManagerOpen returns kIOReturnNotPermitted and the
+# scan finds nothing; nothing used to request the permission, so macOS never prompted,
+# Klik PRO never appeared in Privacy & Security, and the gear reported "no mice found"
+# forever with no way for the user to discover or fix the real cause.
+grep -q 'func requestMouseMonitoringAccessIfNeeded()' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeUnknown' \
   "$ROOT/Sources/KlikProApp.swift"
-grep -q 'calibratedRed: 0.45' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'calibratedRed: 0.92' "$ROOT/Sources/KlikProApp.swift"
+# A refusal must stay distinguishable from an empty result.
+grep -q 'enum MouseScanOutcome' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'openStatus == kIOReturnNotPermitted ? .permissionRequired : .scanned(\[\])' \
+  "$ROOT/Sources/KlikProApp.swift"
+grep -q 'Klik PRO needs permission to see your mice.' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'Privacy_ListenEvent' "$ROOT/Sources/KlikProApp.swift"
+# Exactly one caller may prompt: the explicit rescan. The launch scan runs during
+# phase-1 init on the main thread, where a blocking system dialog would greet users who
+# may never assign a mouse at all.
+access_calls="$(grep -c '^ *requestMouseMonitoringAccessIfNeeded()' \
+  "$ROOT/Sources/KlikProApp.swift")"
+if [[ "$access_calls" != "1" ]]; then
+  echo "Input Monitoring must be requested from exactly one path (the rescan)" >&2
+  exit 1
+fi
+
+# Vendor app icons are cached. Icon Services lookups were repeated for every row of all
+# four lists on every rebuild, several rebuilds deep per refresh, on the main thread.
+grep -q 'enum VendorAppIconCache' "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'VendorAppIconCache.invalidate()' "$ROOT/Sources/KlikProApp.swift"
+if grep -n 'NSWorkspace.shared.icon(forFile:' "$ROOT/Sources/AppProfilesUI.swift" \
+  | grep -v '^[0-9]*:///' \
+  | grep -vq 'let icon = NSWorkspace.shared.icon(forFile: path)'; then
+  echo "App list rows must fetch vendor icons through VendorAppIconCache" >&2
+  exit 1
+fi
+# A managed launcher's own icns stays uncached so Change Icon shows up immediately.
+display_icon_block="$(sed -n '/^private func appProfileDisplayIcon/,/^}/p' \
+  "$ROOT/Sources/AppProfilesUI.swift")"
+if ! grep -q 'NSImage(contentsOf: launcherIconURL)' <<<"$display_icon_block"; then
+  echo "appProfileDisplayIcon must keep reading AppIcon.icns directly" >&2
+  exit 1
+fi
+
+# Reset must resync the Settings tab, or its thumb-wheel switch keeps the pre-reset value
+# and the first click writes the value it already holds.
+reset_block="$(sed -n '/private func resetMouseProfile(_ id: UUID)/,/^    }/p' \
+  "$ROOT/Sources/KlikProApp.swift")"
+if ! grep -q 'refreshActiveMouseProfileSettings()' <<<"$reset_block"; then
+  echo "resetMouseProfile must resync the Settings tab from config" >&2
+  exit 1
+fi
+# Activation repaints the ACTIVE badge before saving, so it must refuse during a save.
+activate_block="$(sed -n '/private func activateMouseProfile(_ id: UUID)/,/^    }/p' \
+  "$ROOT/Sources/KlikProApp.swift")"
+if ! grep -q 'guard !saveInProgress, !appProfileLifecycleInProgress else {' \
+  <<<"$activate_block"; then
+  echo "activateMouseProfile must not repaint the ACTIVE badge during a save" >&2
+  exit 1
+fi
+
+# Mouse slide colourways. Colour follows the mapping set, not its carousel position,
+# and is chosen from the gear rather than derived from an index.
+grep -q 'func setMouseSlideColor(_ color: MouseSlideColor)' \
+  "$ROOT/Sources/KlikProApp.swift"
+grep -q 'var slideColor: MouseSlideColor?' "$ROOT/Sources/KlikProConfig.swift"
+grep -q 'colour.submenu = makeSlideColorMenu(' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'func makeSlideColorMenu(selected: MouseSlideColor)' \
+  "$ROOT/Sources/KlikProApp.swift"
+if [[ "$(grep -c '    case ' <<<"$(sed -n '/^enum MouseSlideColor/,/^    var title/p' \
+  "$ROOT/Sources/KlikProConfig.swift")")" != "8" ]]; then
+  echo "Mouse slide colourways must stay at exactly eight" >&2
+  exit 1
+fi
+# The first three colourways were measured on rendered fixtures at these washes; an
+# existing installation must look the same after upgrading as it did before.
+grep -q 'red: 0.45, green: 0.72, blue: 0.94, alpha: 0.18' "$ROOT/Sources/KlikProConfig.swift"
+grep -q 'red: 0.92, green: 0.66, blue: 0.42, alpha: 0.16' "$ROOT/Sources/KlikProConfig.swift"
+grep -q 'case 1: return .mistBlue' "$ROOT/Sources/KlikProConfig.swift"
+grep -q 'case 2: return .champagne' "$ROOT/Sources/KlikProConfig.swift"
+# The tint is composited while the artwork is drawn, inside a transparency layer so the
+# fill sees only the mouse's own alpha, and inside a saved GState so .sourceAtop cannot
+# leak into the leader lines drawn straight afterwards.
+grep -q 'context.beginTransparencyLayer(in: rect, auxiliaryInfo: nil)' \
+  "$ROOT/Sources/KlikProApp.swift"
 grep -q 'context.setBlendMode(.sourceAtop)' \
   "$ROOT/Sources/KlikProApp.swift"
+grep -q 'context.endTransparencyLayer()' "$ROOT/Sources/KlikProApp.swift"
+# Reject a return to baking the tint into an offscreen copy of the 1000x742 artwork.
+# Every refreshMouseProfileEditor() call reached that path, so it re-rasterized the
+# mouse on browse, activate, rename, reset, delete, bind and rescan alike.
+if grep -Eq 'displayedMouseImage|func tintedMouseImage' "$ROOT/Sources/KlikProApp.swift"; then
+  echo "The mouse slide tint must be drawn, not baked into a cached NSImage" >&2
+  exit 1
+fi
+# An unchanged colour must cost a comparison, not a redraw.
+grep -q 'guard tint != mouseSlideTint else { return }' "$ROOT/Sources/KlikProApp.swift"
+
+# setOriginals still ends the first-launch overlay (guarded above), but it runs
+# synchronously from the Mappings refresh handler while the scan is still in flight, so
+# during a shared refresh it must leave the state to setRefreshControlsBusy(_:) — else the
+# native card drops out of step and only App Profiles appears to refresh.
+grep -q 'sharedRefreshActive = refreshing' "$ROOT/Sources/AppProfilesUI.swift"
+set_originals_block="$(sed -n '/func setOriginals(_ originals: \[MappingNativeApp\])/,/^    }/p' \
+  "$ROOT/Sources/AppProfilesUI.swift")"
+if ! grep -q 'if !sharedRefreshActive {' <<<"$set_originals_block"; then
+  echo "setOriginals must not clear the native card while a shared refresh is running" >&2
+  exit 1
+fi
+
+# Pinned rows are sticky in all four lists: they live on the list view rather than in the
+# scroller's document, so scrolling moves everything except them, and a rebuild from
+# either refresh path re-establishes them.
+grep -q 'private var stickyRows: \[NSView\] = \[\]' "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'func setRows(_ newRows: \[NSView\], stickyCount: Int = 0, emptyMessage: String)' \
+  "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'let stickyHeight = stickyRows.isEmpty ? 0 : CGFloat(stickyRows.count) \* pitch' \
+  "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'scrollView.frame = NSRect(' "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'x: 0, y: stickyHeight, width: contentWidth, height: scrollHeight' \
+  "$ROOT/Sources/AppProfilesUI.swift"
+# All four lists, or the feature is half-applied and the tabs disagree.
+grep -q 'stickyCount: originals.prefix { \$0.topPinned }.count' \
+  "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'stickyCount: ordered.prefix { topPinnedProfileIDs.contains(\$0.id) }.count' \
+  "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'stickyCount: visible.prefix { topPinnedOriginals.contains(\$0.target) }.count' \
+  "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'stickyCount: orderedInstances.prefix { topPinnedProfileIDs.contains(\$0.id) }.count' \
+  "$ROOT/Sources/AppProfilesUI.swift"
+# A lone pinned card must not sit above an "empty list" caption.
+set_rows_block="$(sed -n '/func setRows(_ newRows: \[NSView\], stickyCount/,/^    }/p' \
+  "$ROOT/Sources/AppProfilesUI.swift")"
+if ! grep -q 'if newRows.isEmpty {' <<<"$set_rows_block"; then
+  echo "The list empty state must count sticky rows, not only the scrolling rows" >&2
+  exit 1
+fi
 grep -q 'contentView.setMouseControlsAvailable(profile.deviceIdentity != nil)' \
   "$ROOT/Sources/KlikProApp.swift"
 grep -q 'thumbWheelCard = NSRect(x: leftX' "$ROOT/Sources/KlikProApp.swift"
