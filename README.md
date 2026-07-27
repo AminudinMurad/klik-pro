@@ -4,8 +4,9 @@
 
 # Klik PRO
 
-**Saved mouse-mapping presets and isolated App Profiles for macOS — a lightweight,
-native menu-bar utility, with thumb-wheel tab switching and a keep-awake menu.**
+**App Profiles beyond ChatGPT and Claude, three saved mouse-mapping presets, and
+launcher cards for macOS — a lightweight native menu-bar utility with thumb-wheel
+tab switching.**
 
 [![Latest release](https://img.shields.io/github/v/release/AminudinMurad/klik-pro?label=release&color=2ec458)](https://github.com/AminudinMurad/klik-pro/releases/latest)
 [![License: GPL v3](https://img.shields.io/github/license/AminudinMurad/klik-pro?color=blue)](LICENSE)
@@ -23,6 +24,13 @@ help support continued development and mouse/browser compatibility testing:**
 
 </div>
 
+Klik PRO is no longer limited to ChatGPT / Codex and Claude. Version 1.5.0 expands
+App Profiles into an installed-app catalogue for supported tools including Gemini,
+Canva, Zoom, Spotify, browsers, editors, and work apps, with compatibility badges and
+clear per-app actions. It also adds three saved mouse-mapping slides, explicit
+**Save** and **Activate** behavior, quieter fresh defaults, and a cleaner app-card
+layout across Mappings and App Profiles.
+
 Klik PRO remaps supported middle, forward, back, and Gesture mouse-button events to
 the currently active saved mapping preset. Enabling Gesture replaces the tested
 mouse's standard `⌘Tab` output with the configured Klik PRO shortcut; the physical
@@ -37,11 +45,30 @@ It's a small always-on background helper that does the remapping, plus a setting
 app for recording supported mouse-button shortcuts and checking for conflicts. Its
 adaptive Klik PRO menu-bar icon opens Settings with a left-click; right-click provides
 Settings, About, and Quit. It can be hidden from Settings, and two green button dots
-appear only while its Accessibility input tap is operational. The optional
-**ChatGPT / Codex & Claude Quick Launch** feature adds separate launcher icons and
-hotkeys, and can temporarily link either launcher to a supported mouse button without
-replacing that button's normal mapping. Its icons can be hidden while its hotkeys and
-assigned buttons remain active. Actual button and wheel support varies by hardware.
+appear only while its Accessibility input tap is operational. Optional native-app
+launchers add separate icons, user-recorded hotkeys for ChatGPT / Codex, Claude, and
+Gemini, and temporary mouse-button launch actions where supported. Actual button and
+wheel support varies by hardware.
+
+## v1.5.0 highlights
+
+- **No longer ChatGPT/Claude-only** — App Profiles now starts from a broader
+  installed-app catalogue, including Gemini, Canva, Zoom, Spotify, browsers, editors,
+  and work apps.
+- **Three saved mapping presets** — each preset keeps its own buttons, shortcuts,
+  Open App targets, browser checkboxes, and colour.
+- **Explicit Save and Activate** — edit a slide safely, save it when ready, then
+  activate exactly one live preset for the helper.
+- **Quiet fresh defaults** — Middle, Gesture, thumb-wheel switching, browser
+  checkboxes, app assignments, and app hotkeys start off; Forward and Back keep
+  browser-history defaults.
+- **Cleaner app cards** — Mappings and App Profiles share the same compact card
+  layout, verified/unverified badges, inline refresh buttons, and gear-menu actions.
+- **Pinned favourites** — pin up to three native apps and three App Profiles so the
+  Mappings lists show the apps you actually use first.
+- **Expanded App Profiles catalogue** — installed supported apps appear from the
+  human-tested catalogue instead of a generic unsupported-app browser or the old
+  two-app ChatGPT/Claude limit.
 
 **Guided onboarding** — a four-step first-launch flow (Welcome → Data folder →
 Preferences → an opt-in Accessibility step), with Back navigation and no dead-ends.
@@ -57,9 +84,10 @@ checks:
 
 <img src="assets/screenshot-mappings.png?v=1.5.0-b23" width="940" alt="Klik PRO v1.5.0 Mappings tab with three saved mouse mapping slides, browser checkboxes, shortcut settings, and native apps plus App Profiles as launch targets">
 
-**App Profiles** — generate isolated extra instances of ChatGPT or Claude, each with
-its own login; open or assign each profile, and give it a custom PNG/ICO, colour tint,
-or one-character badge so every account is recognisable at a glance:
+**App Profiles** — generate isolated extra instances for supported apps such as
+ChatGPT / Codex, Claude, and Gemini, each with its own login where the app supports
+profile isolation; open or assign each profile, and give it a custom PNG/ICO, colour
+tint, or one-character badge so every account is recognisable at a glance:
 
 <img src="assets/screenshot-app-profiles.png?v=1.5.0-b23" width="940" alt="Klik PRO App Profiles tab showing native-app Open, New Profile, and Assign Button actions plus individually styled generated profiles">
 
@@ -108,22 +136,32 @@ Once unlocked, point new App Profiles at a durable data folder so their logins s
 - **Native & lightweight** — Swift + AppKit/Carbon, no dependencies or vendor
   drivers; standard controls use macOS event taps and Gesture uses a device-scoped
   macOS HID key map.
-- **Optional ChatGPT / Codex & Claude Quick Launch** — adds separate launcher icons
-  and user-recordable global hotkeys. Each launcher can be linked to Middle, Gesture,
-  Forward, or Back while preserving that button's normal mapping underneath. Fresh
-  configurations start with no Quick Launch hotkeys or mouse-button assignments;
-  users opt in through **Assign Button** and the shortcut recorder. Launcher icons can
-  be hidden independently while configured hotkeys and assignments continue working.
-  Its master toggle is available only when ChatGPT / Codex or Claude is installed;
-  launcher wrappers alone do not count. Each app-specific hotkey and picker clearly
-  disables when its app or launcher wrapper is missing; a stale picker assignment
-  can still be cleared with **None**.
-- **App Profiles** — generate a second icon for ChatGPT or Claude with its own separate
-  login and settings. The original app is never copied, cloned, or modified. Each
-  generated launcher can be renamed; styled with a custom PNG/ICO, one of nine colour
-  tints, or an initial badge; pinned to the Dock or menu bar; assigned to a mouse
-  button; or removed at any time. Its identity stays consistent across App Profiles,
-  Mappings, the menu bar, Launchpad, and Finder. See [App Profiles](#app-profiles).
+- **Optional native-app launchers** — adds separate launcher icons and user-recordable
+  global hotkeys for ChatGPT / Codex, Claude, and Gemini. Supported launchers can be
+  linked to Middle, Gesture, Forward, or Back while preserving that button's normal
+  mapping underneath. Fresh configurations start with no launcher hotkeys or
+  mouse-button assignments; users opt in through **Assign Button** and the shortcut
+  recorder. Launcher icons can be hidden independently while configured hotkeys and
+  assignments continue working. The master toggle is available only when a supported
+  app is installed; launcher wrappers alone do not count. Missing apps clearly disable
+  their hotkey and picker controls, and a stale picker assignment can still be cleared
+  with **None**.
+- **App Profiles** — generate extra isolated icons for installed supported apps,
+  including ChatGPT / Codex, Claude, and Gemini. The original app is never copied,
+  cloned, or modified. Each generated launcher can be renamed; styled with a custom
+  PNG/ICO, one of nine colour tints, or an initial badge; pinned to the Dock or menu
+  bar; assigned to a mouse button where supported; or removed at any time. Its
+  identity stays consistent across App Profiles, Mappings, the menu bar, Launchpad,
+  and Finder. See [App Profiles](#app-profiles).
+- **Supported app catalogue** — App Profiles shows only installed apps from Klik
+  PRO's human-tested catalogue: ChatGPT / Codex, Claude, Gemini, Canva, Zoom, Spotify,
+  Antigravity, Antigravity IDE, Google Chrome, Brave, Cursor, Discord, Notion,
+  Obsidian, Slack, and Visual Studio Code. Compatibility badges show whether each app
+  is verified or still under review, and unsupported apps stay out of the workflow.
+- **Pinned app cards and inline refresh** — every Native App and App Profile card can
+  be pinned near its gear menu. Up to three native apps and three generated profiles
+  appear first on Mappings, while App Profiles keeps the same order. Each list heading
+  has its own refresh button and shows a visible scan state.
 - **App Profile data and maintenance** — Advanced reports whether each managed
   profile is healthy, missing its launcher, missing its data, or archived. Repair
   safely rebuilds a missing launcher; Archive removes runtime access while preserving
@@ -147,10 +185,10 @@ the ZIP contains the same app as an alternative.
 **[Download Klik PRO v1.5.0](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.5.0).**
 
 > [!IMPORTANT]
-> **Update if you use a durable Data Folder.** Version 1.2.9 remembers previously
-> used Data Folders after the active setting is cleared. Deep Scan can also ask for
-> an older Data Folder directly, report markerless UUID folders for manual review,
-> and reveal them in Finder without offering automatic deletion.
+> **Version 1.5.0 changes fresh/reset defaults.** Existing setups keep their saved
+> mappings and shortcuts. New or reset presets start quieter: app hotkeys are blank,
+> Middle and Gesture are off, thumb-wheel browser switching is off, and no app is
+> assigned to a mouse button until you choose one.
 
 Klik PRO is **not notarized or signed with an Apple Developer ID** — it's an
 ad-hoc-signed, self-built utility — so a downloaded copy is quarantined and
@@ -268,13 +306,13 @@ Custom assignments are always sent exactly as recorded.
   red **Unsaved changes** note. **Save** clears it after a successful write; restoring
   the saved or opening values also clears it.
 
-### ChatGPT / Codex & Claude Quick Launch
+### Native app launchers
 
 - The hotkey recorders start unset and disabled on a fresh configuration. Users choose
   and enable their own combinations.
-- Fresh mapping presets have no ChatGPT / Codex or Claude mouse-button assignments.
-  Original-app assignments are optional launch actions and do not depend on the
-  Special Feature toggle once configured.
+- Fresh mapping presets have no original-app mouse-button assignments. Original-app
+  assignments are optional launch actions and do not depend on the Special Feature
+  toggle once configured.
 - Assign or change those logical buttons from the original-app cards in **App Profiles**
   or from **Mappings**. One button slot in the active mapping preset can belong to
   exactly one original app or generated profile.
@@ -308,7 +346,7 @@ LaunchAgent, plus a separate settings app:
   them. **Mappings** shows up to three saved presets. Each preset owns its four mouse
   controls, thumb-wheel browser selections, colour, and optional app assignments.
   **Save** persists the viewed preset; **Activate** makes exactly one preset live in the
-  helper. The tab also checks conflicts and exposes optional Quick Launch actions.
+  helper. The tab also checks conflicts and exposes optional native-app launch actions.
   **Settings** covers
   launch-at-login, main and Special Feature menu-icon visibility, automatic update
   checks, and guided Accessibility setup with live status, a manual **Recheck** action,
@@ -331,11 +369,20 @@ model both executables read, persisted to:
 
 ## App Profiles
 
-The dedicated **App Profiles** tab fills the window height and places equal-width
-ChatGPT and Claude generators on the left and the scrollable profile-management list
-on the right. Click **+ New Profile**, accept or edit the suggested name, and Klik PRO
-creates a small launcher with a separate login and settings, then opens it. The
-original app in `/Applications` is never copied, cloned, renamed, or modified.
+The dedicated **App Profiles** tab fills the window height and shows installed apps
+from Klik PRO's supported catalogue beside the scrollable profile-management list.
+Click **+ New Profile**, accept or edit the suggested name, and Klik PRO creates a
+small launcher with separate profile data where that app supports isolation, then
+opens it. The original app in `/Applications` is never copied, cloned, renamed, or
+modified.
+
+The current catalogue includes ChatGPT / Codex, Claude, Gemini, Canva, Zoom, Spotify,
+Antigravity, Antigravity IDE, Google Chrome, Brave, Cursor, Discord, Notion, Obsidian,
+Slack, and Visual Studio Code. Cards appear only when the app is installed, and each
+native-app card carries a compatibility badge so the support level is visible before
+you create or assign anything. Some catalogue apps can be opened and styled but do not
+yet expose mouse-button assignment; in that case **Assign Button** is disabled and
+explains why instead of pretending the action worked.
 
 Each installed original-app card also has **Open** and **Assign Button**. **Open**
 reopens the true original app even while a generated profile remains running, and
@@ -369,8 +416,7 @@ shows the result before it is applied. Badge composition preserves the source ic
 full native size in Dock and Launchpad, and chosen PNG/ICO artwork uses the same native
 macOS icon footprint without a second inset squircle. **Reset to
 App Icon** restores the source app artwork. Custom icon data is kept with the profile
-and survives durable-folder recovery; the original ChatGPT or Claude app remains
-untouched.
+and survives durable-folder recovery; the original source app remains untouched.
 
 The naming dialog includes an unchecked **Add launcher icon to Dock** option for
 users who want the generated launcher pinned immediately, and each profile's gear
@@ -398,15 +444,14 @@ heading — one per list, all doing the same rescan — so whichever list you ar
 has it to hand. It rescans installed apps and refreshes the profile list when an app
 is installed or removed while Klik PRO is already open.
 
-Every card also carries a **pin**, beside its gear. Pinning keeps one card at the very
-top of its list on both tabs, while the Mappings lists continue to show three cards at
-a time. Each list has one sticky pin slot — one for native apps and one for App
-Profiles. Nothing is pinned until you pin it, and Klik PRO never pins anything on your
-behalf. To pin another card, first unpin the current one; Klik PRO never silently
-replaces it. The pin is a bare gear-sized glyph, rotated 20° clockwise and shown in
-black when active. Pinning only changes the order: every other card remains available
-by scrolling, an app keeps its mouse-button assignment whether pinned or not, and
-pinning never counts as an unsaved change.
+Every card also carries a **pin**, beside its gear. Pinning keeps up to three native
+apps and up to three App Profiles at the top of their lists on both tabs, while the
+Mappings lists show those three cards first without scrolling. Nothing is pinned until
+you pin it, and Klik PRO never pins anything on your behalf. Once a list has three
+pins, a fourth pin is refused until you unpin one; Klik PRO never silently replaces a
+pinned card. Pinning only changes the order: every other card remains available by
+scrolling, an app keeps its mouse-button assignment whether pinned or not, and pinning
+never counts as an unsaved change.
 
 Generated launchers use the name you choose for their visible `.app` icon, while
 their profile data remains safely UUID-keyed inside Klik PRO's Application Support
@@ -426,8 +471,8 @@ without changing their profile data or login. A pinned Dock tile may continue sh
 macOS's cached old icon until that tile is clicked or the user next logs in; the menu
 bar, Launchpad, Finder, App Profiles, and Mappings update immediately.
 
-Existing ChatGPT and Claude launchers remain untouched and appear under **Your App
-Profiles** with **Open** and **Assign Button**. Generated entries also offer
+Existing generated launchers remain untouched and appear under **Your App Profiles**
+with **Open** and **Assign Button** where supported. Generated entries also offer
 **Rename** and **Remove from Klik PRO** — Remove deletes the generated launcher and
 managed entry, but keeps its login/profile data on disk for recovery. **Delete Data**
 in Advanced first asks whether to **Remove Icons (Keep Data)** or **Delete All Data**.
@@ -436,8 +481,8 @@ All Data then removes validated profile data after offering Move to Trash or Del
 Permanently. Assigning a button on either tab updates the active mapping preset
 immediately. The four working mouse controls can each be set to a **Keyboard Shortcut** or **Open App**,
 while thumb-wheel browser switching is unchanged. Only installed apps on Klik PRO's
-small, human-tested list are shown; there is no general app search, unsupported-app
-list, Browse flow, or Convert action.
+small, human-tested catalogue are shown; there is no general app search,
+unsupported-app list, Browse flow, or Convert action.
 
 ## Advanced tab
 
@@ -528,8 +573,8 @@ flowchart TD
 
 Possible directions for future releases — not committed, and subject to change:
 
-- **More apps for App Profiles.** Extend isolated App Profiles beyond ChatGPT and
-  Claude to additional supported apps.
+- **More app coverage for App Profiles.** Extend verified isolation and assignment
+  support across more apps in the supported catalogue.
 - **Built-in system controls.** Preconfigured actions you can assign to a mouse button
   — brightness, volume, media playback, and the like — without recording a keyboard
   shortcut yourself.
