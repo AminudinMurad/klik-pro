@@ -731,6 +731,15 @@ enum VendorAppIconCache {
     private static var icons: [String: NSImage] = [:]
 
     static func icon(forFile path: String) -> NSImage {
+        // Deterministic preview fixtures bypass the cache. Icon Services can hand back a
+        // placeholder that resolves a moment later; re-fetching per row gave a render
+        // several chances to catch the real icon, while caching freezes whatever the
+        // first call returned for the whole render. That turns a latent race into a
+        // visible diff between two runs of the same fixture, and check.sh requires those
+        // two renders to be byte-identical.
+        guard !previewRenderingIsActive else {
+            return NSWorkspace.shared.icon(forFile: path)
+        }
         if let cached = icons[path] { return cached }
         let icon = NSWorkspace.shared.icon(forFile: path)
         icons[path] = icon

@@ -1844,6 +1844,27 @@ final class MouseSlideContainerView: NSView {
 /// keyboard focus and native accessibility behavior while the borderless symbol
 /// keeps the control visually subordinate to the mapping editor.
 final class MouseSlideNavigationButton: NSButton {
+    private var hoverTrackingArea: NSTrackingArea?
+    private var isHovered = false
+
+    /// The glyph is deliberately quiet, which left nothing to say it was a control: the
+    /// arrows worked but read as decoration until you happened to click one. Hover gives
+    /// them the same soft rounded wash the rest of the app's icon buttons use, and the
+    /// boundary state is dimmed much harder so "no more slides that way" is visible
+    /// rather than a shade of grey away from the live one.
+    private static let restingTint = NSColor.appTextSecondary
+    private static let hoverTint = NSColor.labelColor
+    private static let disabledTint = NSColor.appTextSecondary.withAlphaComponent(0.28)
+
+    override var isEnabled: Bool {
+        didSet {
+            guard isEnabled != oldValue else { return }
+            if !isEnabled { isHovered = false }
+            applyTint()
+            needsDisplay = true
+        }
+    }
+
     init(symbolName: String, accessibility: String, frame: NSRect) {
         super.init(frame: frame)
         isBordered = false
@@ -1857,12 +1878,60 @@ final class MouseSlideNavigationButton: NSButton {
         image = symbol?.withSymbolConfiguration(
             NSImage.SymbolConfiguration(pointSize: 19, weight: .medium)
         )
-        contentTintColor = .appTextSecondary
+        applyTint()
         setAccessibilityLabel(accessibility)
         toolTip = accessibility
     }
 
     required init?(coder: NSCoder) { nil }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea {
+            removeTrackingArea(hoverTrackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) { setHovered(true) }
+    override func mouseExited(with event: NSEvent) { setHovered(false) }
+
+    private func setHovered(_ hovered: Bool) {
+        // A disabled arrow must not light up: at a boundary there is nothing to go to,
+        // and a hover response would promise a slide that is not there.
+        let next = hovered && isEnabled
+        guard isHovered != next else { return }
+        isHovered = next
+        applyTint()
+        needsDisplay = true
+    }
+
+    private func applyTint() {
+        if !isEnabled {
+            contentTintColor = Self.disabledTint
+        } else {
+            contentTintColor = isHovered ? Self.hoverTint : Self.restingTint
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        if isHovered && isEnabled {
+            NSColor.labelColor.withAlphaComponent(0.08).setFill()
+            NSBezierPath(
+                roundedRect: bounds.insetBy(dx: 4, dy: 8),
+                xRadius: 7,
+                yRadius: 7
+            ).fill()
+        }
+        super.draw(dirtyRect)
+    }
 }
 
 /// Controls layered over the full mouse-mapping card. Browsing is deliberately
@@ -4698,6 +4767,18 @@ final class ToggleView: NSView {
     }
 
     private func bindMouseDevice(_ identity: MouseDeviceIdentity?, to id: UUID) {
+        // Binding commits, like Activate beside it in the same gear menu. It used to only
+        // stage the change, which was invisible: the five toggles enable the moment a
+        // device is set, so the assignment looked applied while nothing had been written
+        // and the helper still knew nothing about it. Two neighbouring menu items with
+        // different persistence rules and no visual difference is worse than either rule.
+        guard !saveInProgress, !appProfileLifecycleInProgress else {
+            showAppProfileAlert(
+                title: "Please wait",
+                message: "Finish the current Save or App Profile change before assigning a mouse."
+            )
+            return
+        }
         guard var profile = mouseProfile(id: id, in: config) else { return }
         if let identity,
            let other = config.mouseProfiles.first(where: {
@@ -4722,6 +4803,7 @@ final class ToggleView: NSView {
         config = replacingMouseProfile(profile, in: config)
         configurationDidChange()
         refreshMouseProfileEditor()
+        saveConfiguration()
     }
 
     private func activateMouseProfile(_ id: UUID) {

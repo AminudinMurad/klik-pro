@@ -1245,16 +1245,47 @@ if [[ "$access_calls" != "1" ]]; then
   exit 1
 fi
 
+# Assign/Unassign Mouse commits, like Activate beside it in the same gear menu. Staging it
+# was invisible, because the five toggles enable the moment a device is set.
+bind_block="$(sed -n '/private func bindMouseDevice(_ identity: MouseDeviceIdentity?, to id: UUID)/,/^    }/p' \
+  "$ROOT/Sources/KlikProApp.swift")"
+grep -q 'saveConfiguration()' <<<"$bind_block"
+if ! grep -q 'guard !saveInProgress, !appProfileLifecycleInProgress else {' <<<"$bind_block"; then
+  echo "bindMouseDevice must refuse while a save is already running" >&2
+  exit 1
+fi
+
+# The slide arrows must show they are controls. The glyph alone read as decoration, so
+# hover gives them a wash, and a boundary arrow is dimmed hard rather than a shade away
+# from the live one — and must not light up, since there is no slide to go to.
+nav_button_block="$(sed -n '/^final class MouseSlideNavigationButton: NSButton {/,/^}/p' \
+  "$ROOT/Sources/KlikProApp.swift")"
+grep -q 'override func mouseEntered(with event: NSEvent) { setHovered(true) }' \
+  <<<"$nav_button_block"
+grep -q 'override func mouseExited(with event: NSEvent) { setHovered(false) }' \
+  <<<"$nav_button_block"
+grep -q 'let next = hovered && isEnabled' <<<"$nav_button_block"
+grep -q 'disabledTint = NSColor.appTextSecondary.withAlphaComponent(0.28)' \
+  <<<"$nav_button_block"
+if ! grep -q 'if isHovered && isEnabled {' <<<"$nav_button_block"; then
+  echo "A disabled slide arrow must not draw a hover wash" >&2
+  exit 1
+fi
+
 # Vendor app icons are cached. Icon Services lookups were repeated for every row of all
 # four lists on every rebuild, several rebuilds deep per refresh, on the main thread.
 grep -q 'enum VendorAppIconCache' "$ROOT/Sources/AppProfilesUI.swift"
 grep -q 'VendorAppIconCache.invalidate()' "$ROOT/Sources/KlikProApp.swift"
+# Only the two lookups inside VendorAppIconCache itself may call NSWorkspace directly:
+# the caching one, and the preview bypass that keeps fixture renders deterministic.
 if grep -n 'NSWorkspace.shared.icon(forFile:' "$ROOT/Sources/AppProfilesUI.swift" \
   | grep -v '^[0-9]*:///' \
-  | grep -vq 'let icon = NSWorkspace.shared.icon(forFile: path)'; then
+  | grep -v 'let icon = NSWorkspace.shared.icon(forFile: path)' \
+  | grep -vq 'return NSWorkspace.shared.icon(forFile: path)'; then
   echo "App list rows must fetch vendor icons through VendorAppIconCache" >&2
   exit 1
 fi
+grep -q 'guard !previewRenderingIsActive else {' "$ROOT/Sources/AppProfilesUI.swift"
 # A managed launcher's own icns stays uncached so Change Icon shows up immediately.
 display_icon_block="$(sed -n '/^private func appProfileDisplayIcon/,/^}/p' \
   "$ROOT/Sources/AppProfilesUI.swift")"
