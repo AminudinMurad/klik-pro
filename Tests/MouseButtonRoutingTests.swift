@@ -224,8 +224,8 @@ private struct MouseButtonRoutingTests {
         expect(shortcutSlot(forMouseButtonNumber: 5) == nil,
                "unmanaged button 5 must pass through")
 
-        expect(KlikProConfig.default.schemaVersion == 15,
-               "new configurations must use schema 15 browser-only shortcuts")
+        expect(KlikProConfig.default.schemaVersion == 16,
+               "new configurations must use schema 16")
         expect(!KlikProConfig.default.onboardingCompleted,
                "a new configuration must begin with onboarding pending")
         expect(!KlikProConfig.default.showMenuBarIcon,
@@ -245,18 +245,20 @@ private struct MouseButtonRoutingTests {
                && !KlikProConfig.default.thumbWheel.firefoxEnabled
                && !KlikProConfig.default.thumbWheel.safariEnabled,
                "a fresh install must start with the thumb wheel and every browser off")
-        // Only Forward and Back arrive mapped, and to a keyboard shortcut (browser
-        // Back/Forward) — never to an app. No mouse button is pre-assigned.
+        // No mouse action arrives enabled or pre-assigned. Back/Forward retain their
+        // browser combos as dormant defaults, ready if the user turns either row on.
         expect(KlikProConfig.default.chatGPTMouseButton == nil
                && KlikProConfig.default.claudeMouseButton == nil
                && KlikProConfig.default.geminiMouseButton == nil,
                "no mouse button may arrive pre-assigned to an app")
         expect(!KlikProConfig.default.middleButton.enabled
-               && !KlikProConfig.default.gestureButton.enabled,
-               "Middle and Gesture must start off; only Forward and Back are mapped")
-        expect(KlikProConfig.default.forwardButton.enabled
-               && KlikProConfig.default.backButton.enabled,
-               "Forward and Back keep their browser-shortcut defaults")
+               && !KlikProConfig.default.gestureButton.enabled
+               && !KlikProConfig.default.forwardButton.enabled
+               && !KlikProConfig.default.backButton.enabled,
+               "all four mouse-button toggles must start off")
+        expect(KlikProConfig.default.forwardButton.combo == defaultBrowserForwardCombo
+               && KlikProConfig.default.backButton.combo == defaultBrowserBackCombo,
+               "Forward and Back keep their dormant browser-shortcut defaults")
         var staleShortcutConfig = KlikProConfig.default
         staleShortcutConfig.middleButton = ShortcutMapping(
             enabled: true,
@@ -275,6 +277,11 @@ private struct MouseButtonRoutingTests {
             MouseProfileLaunchAssignment(target: .original(.claude), button: .middle)
         ]
         staleShortcutConfig.mouseProfiles = [staleProfile]
+        let preservedShortcutConfig = applyingBrowserOnlyShortcutPolicy(staleShortcutConfig)
+        expect(preservedShortcutConfig.middleButton == staleShortcutConfig.middleButton
+               && preservedShortcutConfig.mouseProfiles[0].middleButton
+                    == staleProfile.middleButton,
+               "load/save normalization must preserve user-recorded mouse shortcuts")
         let cleanMouseConfig = resettingMouseControlsForSchema15(staleShortcutConfig)
         expect(cleanMouseConfig.mouseProfiles.count == 1
                && cleanMouseConfig.activeMouseProfileID == MouseProfile.defaultProfileID,
@@ -288,12 +295,44 @@ private struct MouseButtonRoutingTests {
                && !cleanMouseConfig.chatGPTHotkey.combo.isSet,
                "schema 15 must delete every obsolete shortcut")
         expect(cleanMouseConfig.forwardButton.combo == defaultBrowserForwardCombo
-               && cleanMouseConfig.backButton.combo == defaultBrowserBackCombo,
-               "schema 15 must retain only fixed browser Forward and Back")
-        expect(KlikProConfig.default.mouseProfiles.count == 1
+               && cleanMouseConfig.backButton.combo == defaultBrowserBackCombo
+               && !cleanMouseConfig.forwardButton.enabled
+               && !cleanMouseConfig.backButton.enabled,
+               "schema 15 reset must retain dormant browser defaults with every toggle off")
+        expect(KlikProConfig.default.mouseProfiles.count == 3
                && KlikProConfig.default.activeMouseProfileID
                     == MouseProfile.defaultProfileID,
-               "a fresh install must have exactly one active UUID-keyed mouse profile")
+               "a fresh install must have three profiles with only the first active")
+        expect(KlikProConfig.default.mouseProfiles.allSatisfy {
+                   !$0.middleButton.enabled
+                       && !$0.gestureButton.enabled
+                       && !$0.forwardButton.enabled
+                       && !$0.backButton.enabled
+                       && !$0.thumbWheel.enabled
+                       && $0.launchAssignments.isEmpty
+                       && $0.deviceIdentity == nil
+               },
+               "all three fresh profiles must start quiet, unassigned, and unbound")
+        expect(KlikProConfig.default.mouseProfiles.allSatisfy {
+                   $0.actionMode(for: .middle) == .openApp
+                       && $0.actionMode(for: .gesture) == .openApp
+                       && $0.actionMode(for: .forward) == .shortcut
+                       && $0.actionMode(for: .back) == .shortcut
+               },
+               "all three fresh profiles must expose the requested default action types")
+        expect(KlikProConfig.default.mouseProfiles.map(\.slideColor)
+                == [.pearlWhite, .mistBlue, .rose],
+               "fresh profile colors must be Pearl White, Mist Blue, and Rose")
+        var twoProfileSchema15 = KlikProConfig.default
+        twoProfileSchema15.schemaVersion = 15
+        twoProfileSchema15.mouseProfiles.removeLast()
+        let completedSchema16 = completingThreeMouseProfilesForSchema16(
+            twoProfileSchema15
+        )
+        expect(completedSchema16.mouseProfiles.count == 3
+               && completedSchema16.mouseProfiles[2].name == "Mouse 3"
+               && completedSchema16.mouseProfiles[2].slideColor == .rose,
+               "schema 16 must add the missing Rose third preset once")
         guard let defaultMouseProfile = activeMouseProfile(in: KlikProConfig.default) else {
             fputs("FAIL: default mouse profile must be resolvable\n", stderr)
             exit(1)
@@ -327,20 +366,58 @@ private struct MouseButtonRoutingTests {
             to: .original(.chatGPT),
             in: workMouse
         )
+        let calculatorTarget = InstalledApplicationTarget(
+            bundleIdentifier: "com.apple.calculator",
+            bundlePath: "/System/Applications/Calculator.app",
+            name: "Calculator"
+        )
+        workMouse = assigningMouseButton(
+            .forward,
+            to: .application(calculatorTarget),
+            in: workMouse
+        )
         var travelMouse = MouseProfile.quietDefault(name: "Travel Mouse")
         travelMouse.deviceIdentity = MouseDeviceIdentity(
             vendorID: 0x046D,
             productID: 0xC548,
             serialNumber: nil
         )
+        travelMouse.middleButton = ShortcutMapping(
+            enabled: true,
+            combo: KeyCombo(
+                keyCode: UInt16(kVK_ANSI_T), keyDisplay: "T",
+                command: true, option: false, control: true, shift: false
+            )
+        )
         travelMouse = assigningMouseButton(
             .gesture,
             to: .original(.claude),
             in: travelMouse
         )
+        var defaultProfileConfig = KlikProConfig.default
+        var personalMouse = activeMouseProfile(in: defaultProfileConfig)!
+        personalMouse.middleButton = ShortcutMapping(
+            enabled: true,
+            combo: KeyCombo(
+                keyCode: UInt16(kVK_ANSI_P), keyDisplay: "P",
+                command: true, option: false, control: false, shift: true
+            )
+        )
+        // Explicit Open App must remain selected even though a dormant shortcut
+        // is preserved underneath it.
+        personalMouse.setActionMode(.openApp, for: .middle)
+        defaultProfileConfig = replacingMouseProfile(
+            personalMouse,
+            in: defaultProfileConfig
+        )
+        // Exercise incremental add semantics from a single-profile collection;
+        // the shipping fresh-install fixture intentionally already contains all
+        // three visible slots.
+        defaultProfileConfig.mouseProfiles = [personalMouse]
+        defaultProfileConfig.activeMouseProfileID = personalMouse.id
         var threeMouseConfig = addingMouseProfile(
             workMouse,
-            to: KlikProConfig.default
+            to: defaultProfileConfig
         )!
         threeMouseConfig = addingMouseProfile(
             travelMouse,
@@ -359,10 +436,21 @@ private struct MouseButtonRoutingTests {
             in: workMouse
         ) == .gesture
                && mouseButton(
+                    assignedTo: .application(calculatorTarget),
+                    in: workMouse
+               ) == .forward
+               && mouseButton(
                     assignedTo: .original(.claude),
                     in: travelMouse
                ) == .gesture,
                "each mouse profile must own an independent launch namespace")
+        expect(mouseButtonShortcutDispatch(
+            slot: .forwardButton,
+            shortcut: workMouse.forwardButton,
+            frontmostBundleIdentifier: nil,
+            applicationTarget: calculatorTarget
+        ) == .launchApplication(calculatorTarget),
+        "a mouse button must dispatch an arbitrary installed application directly")
         expect(mouseProfileCanActivate(id: workMouse.id, in: threeMouseConfig),
                "a valid bound profile must be activatable")
         threeMouseConfig = activatingMouseProfile(
@@ -376,12 +464,49 @@ private struct MouseButtonRoutingTests {
                "activation must load the selected profile into the downgrade shadow")
         expect(activeMouseProfile(in: threeMouseConfig) == workMouse,
                "active profile lookup must follow the persisted active UUID")
+        expect(assignedInstalledApplicationTarget(
+            for: .forwardButton,
+            in: threeMouseConfig
+        ) == calculatorTarget,
+        "the active profile must resolve its arbitrary installed-app assignment")
+        do {
+            let data = try JSONEncoder().encode(threeMouseConfig)
+            let decoded = try JSONDecoder().decode(KlikProConfig.self, from: data)
+            expect(decoded == threeMouseConfig,
+                   "all three profiles and arbitrary installed-app targets must round-trip")
+        } catch {
+            fputs("FAIL: unable to round-trip three mouse profiles: \(error)\n", stderr)
+            exit(1)
+        }
+        let travelActivated = activatingMouseProfile(
+            id: travelMouse.id,
+            in: applyingBrowserOnlyShortcutPolicy(threeMouseConfig)
+        )!
+        expect(travelActivated.middleButton == travelMouse.middleButton
+               && activeMouseProfile(in: travelActivated) == travelMouse,
+               "activating profile 3 must replace the previous active shortcut map")
+        let personalActivated = activatingMouseProfile(
+            id: personalMouse.id,
+            in: applyingBrowserOnlyShortcutPolicy(travelActivated)
+        )!
+        expect(personalActivated.middleButton == personalMouse.middleButton
+               && activeMouseProfile(in: personalActivated) == personalMouse
+               && activeMouseProfile(in: personalActivated)?
+                    .actionMode(for: .middle) == .openApp,
+               "activating profile 1 must restore its independent shortcut map")
+        threeMouseConfig = activatingMouseProfile(
+            id: workMouse.id,
+            in: applyingBrowserOnlyShortcutPolicy(personalActivated)
+        )!
+        expect(threeMouseConfig.middleButton == workMouse.middleButton,
+               "reactivating profile 2 must restore its own saved shortcut map")
         expect(removingMouseProfile(
             id: workMouse.id,
             from: threeMouseConfig
         )?.activeMouseProfileID == MouseProfile.defaultProfileID,
                "removing the active slide must deterministically activate the first survivor")
-        let oneMouseConfig = KlikProConfig.default
+        var oneMouseConfig = KlikProConfig.default
+        oneMouseConfig.mouseProfiles = [oneMouseConfig.mouseProfiles[0]]
         expect(removingMouseProfile(
             id: oneMouseConfig.activeMouseProfileID,
             from: oneMouseConfig
@@ -526,8 +651,8 @@ private struct MouseButtonRoutingTests {
             expect(!decoded.thumbWheel.firefoxEnabled,
                    "a legacy config must preserve its Firefox behavior from the generic fallback")
             let normalized = normalizedQuickLaunchConfig(decoded)
-            expect(normalized.schemaVersion == 15,
-                   "schema-4 configs must normalize through the layered migrations to schema 15")
+            expect(normalized.schemaVersion == 16,
+                   "schema-4 configs must normalize through the layered migrations to schema 16")
             expect(normalized.instances.count == 2,
                    "pre-v2 configs must receive both legacy-external instance rows")
             expect(normalized.middleButton == legacyConfig.middleButton,
@@ -597,7 +722,7 @@ private struct MouseButtonRoutingTests {
                    "keyboard launch hotkeys must remain global during mouse-profile migration")
             let normalized = normalizedQuickLaunchConfig(decoded)
             expect(normalized.schemaVersion == KlikProConfig.currentSchemaVersion,
-                   "schema 13 normalization must repair the historic 12/13 split to schema 15")
+                   "schema 13 normalization must repair the historic 12/13 split to schema 16")
         } catch {
             fputs("FAIL: unable to verify schema-13 mouse-profile migration: \(error)\n", stderr)
             exit(1)
@@ -615,6 +740,43 @@ private struct MouseButtonRoutingTests {
                    "combined-service Special Feature state must persist in config")
         } catch {
             fputs("FAIL: unable to round-trip onboarding state: \(error)\n", stderr)
+            exit(1)
+        }
+
+        do {
+            let directory = NSTemporaryDirectory()
+                + "/klik-pro-schema16-profile-test-\(UUID().uuidString)"
+            try FileManager.default.createDirectory(
+                atPath: directory,
+                withIntermediateDirectories: true
+            )
+            defer { try? FileManager.default.removeItem(atPath: directory) }
+            var schema15 = KlikProConfig.default
+            schema15.schemaVersion = 15
+            schema15.mouseProfiles.removeLast()
+            let file = directory + "/config.json"
+            try JSONEncoder().encode(schema15).write(
+                to: URL(fileURLWithPath: file),
+                options: .atomic
+            )
+            setenv("KLIK_PRO_CONFIG_DIRECTORY", directory, 1)
+            defer { unsetenv("KLIK_PRO_CONFIG_DIRECTORY") }
+            let migrated = KlikProConfigStore.load()
+            expect(migrated.schemaVersion == 16
+                   && migrated.mouseProfiles.count == 3
+                   && migrated.mouseProfiles[2].slideColor == .rose,
+                   "loading schema 15 must add and persist the Rose third preset")
+            let withoutThird = removingMouseProfile(
+                id: migrated.mouseProfiles[2].id,
+                from: migrated
+            )!
+            expect(KlikProConfigStore.save(withoutThird),
+                   "the user must be able to save after deleting the added third preset")
+            let reloaded = KlikProConfigStore.load()
+            expect(reloaded.mouseProfiles.count == 2,
+                   "schema 16 must not recreate a preset the user later deletes")
+        } catch {
+            fputs("FAIL: unable to verify one-time schema-16 profile migration: \(error)\n", stderr)
             exit(1)
         }
 
@@ -868,8 +1030,9 @@ private struct MouseButtonRoutingTests {
         var duplicateHotkeyConfig = instanceNativeConfig
         // `chatGPTHotkey` now ships unset and disabled (owner call 2026-07-26), and an unset
         // combo is deliberately not treated as a registration — so inheriting it would no
-        // longer collide with anything and this assertion would pass vacuously. Collide with
-        // Forward instead, which is one of the two rows a fresh install still maps.
+        // longer collide with anything and this assertion would pass vacuously. Explicitly
+        // enable Forward, then collide with its dormant browser-default combo.
+        duplicateHotkeyConfig.forwardButton.enabled = true
         duplicateHotkeyConfig.instances[duplicateHotkeyConfig.instances.count - 1].hotkey
             = ShortcutMapping(enabled: true, combo: duplicateHotkeyConfig.forwardButton.combo)
         expect(!appProfileAssignmentsAreValid(duplicateHotkeyConfig),
@@ -1077,6 +1240,7 @@ private struct MouseButtonRoutingTests {
         "Chrome profile traversal must discover configured extension commands read-only")
 
         var chromeConflictCandidate = KlikProConfig.default
+        chromeConflictCandidate.forwardButton.enabled = true
         chromeConflictCandidate.forwardButton.combo = KeyCombo(
             keyCode: UInt16(kVK_ANSI_E), keyDisplay: "E",
             command: true, option: false, control: false, shift: false
@@ -1110,6 +1274,7 @@ private struct MouseButtonRoutingTests {
         // ships off, so this fixture turns it on explicitly: the rule under test is
         // about a restored base mapping's conflicts, not about the shipped default.
         dormantLinkedCandidate.middleButton.enabled = true
+        dormantLinkedCandidate.backButton.enabled = true
         dormantLinkedCandidate.middleButton.combo = dormantLinkedCandidate.backButton.combo
         let dormantStatuses = evaluateShortcutConflicts(
             candidate: dormantLinkedCandidate,
@@ -1154,6 +1319,7 @@ private struct MouseButtonRoutingTests {
                && linkedStatuses[.middleButton] == .mayConflict,
                "a linked mouse row must inherit its launcher's extension warning")
 
+        linkedConflictCandidate.backButton.enabled = true
         linkedConflictCandidate.backButton.combo = linkedConflictCandidate.chatGPTHotkey.combo
         linkedStatuses = evaluateShortcutConflicts(
             candidate: linkedConflictCandidate,

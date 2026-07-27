@@ -344,6 +344,18 @@ final class ThumbWheelBrowsersButton: NSPopUpButton {
             )
             item.target = self
             item.representedObject = browser.rawValue
+            let checkboxSymbol = NSImage.SymbolConfiguration(
+                pointSize: 13,
+                weight: .regular
+            )
+            item.onStateImage = NSImage(
+                systemSymbolName: "checkmark.square.fill",
+                accessibilityDescription: "\(browser.label) selected"
+            )?.withSymbolConfiguration(checkboxSymbol)
+            item.offStateImage = NSImage(
+                systemSymbolName: "square",
+                accessibilityDescription: "\(browser.label) not selected"
+            )?.withSymbolConfiguration(checkboxSymbol)
             popMenu.addItem(item)
         }
         menu = popMenu
@@ -644,7 +656,10 @@ final class ShortcutRecorderView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         // While recording, show only a blinking caret (no placeholder text). Otherwise
         // show the current combo.
-        let text = isRecording ? (caretVisible ? "|" : "") : (displayOverride ?? combo.displayString)
+        let isEmpty = !combo.isSet && displayOverride == nil
+        let text = isRecording
+            ? (caretVisible ? "|" : "")
+            : (isEmpty ? "Record…" : (displayOverride ?? combo.displayString))
         let dim: CGFloat = isEnabled ? 1 : 0.35
         let borderColor = isRecording
             ? NSColor.controlAccentColor
@@ -664,9 +679,13 @@ final class ShortcutRecorderView: NSView {
         // Proportional font + letter-spacing so the ⌘⌥⌃⇧ glyphs breathe (monospaced
         // crammed them together), vertically centered with comfortable left padding.
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: displayOverride == nil ? 14 : 13, weight: .medium),
-            .foregroundColor: NSColor.appTextPrimary.withAlphaComponent(dim),
-            .kern: displayOverride == nil ? 2.5 : 0.4
+            .font: NSFont.systemFont(
+                ofSize: isEmpty ? 13 : (displayOverride == nil ? 14 : 13),
+                weight: isEmpty ? .regular : .medium
+            ),
+            .foregroundColor: (isEmpty ? NSColor.appTextSecondary : NSColor.appTextPrimary)
+                .withAlphaComponent(dim),
+            .kern: isEmpty ? 0 : (displayOverride == nil ? 2.5 : 0.4)
         ]
         let ts = (text as NSString).size(withAttributes: attrs)
         (text as NSString).draw(at: NSPoint(x: bounds.minX + 12, y: bounds.midY - ts.height / 2), withAttributes: attrs)
@@ -848,7 +867,8 @@ private enum ShortcutRowLayout {
     }
 }
 
-/// A row showing "No shortcut" hides both its Reset control and its conflict badge.
+/// A row showing the empty "Record…" prompt hides both its Reset control and its
+/// conflict badge.
 /// Reset, because there is no default to return to — and on rows whose default IS unset,
 /// Reset doubles as "clear", which is how a recorded shortcut gets back to blank at all.
 /// The badge, because an unset combo cannot conflict, so `✓ OK` beside it would assert a
@@ -878,6 +898,7 @@ final class RecordableShortcutRowView: NSView {
     var onToggleChange: ((Bool) -> Void)?
     var onComboChange: ((KeyCombo) -> Void)?
     var onOpenAppChange: ((LaunchAssignmentTarget?) -> Void)?
+    var onActionModeChange: ((MouseButtonActionMode) -> Void)?
     private let defaultCombo: KeyCombo
     private let showsShortcutControls: Bool
     private var linkedTarget: QuickLaunchTarget?
@@ -1006,14 +1027,22 @@ final class RecordableShortcutRowView: NSView {
 
     func setOpenAppOptions(
         _ targets: [(target: LaunchAssignmentTarget, label: String)],
-        assignedTarget: LaunchAssignmentTarget?
+        assignedTarget: LaunchAssignmentTarget?,
+        actionMode: MouseButtonActionMode
     ) {
         updatingActionControls = true
+        let targetsChanged = appTargets.count != targets.count
+            || zip(appTargets, targets).contains {
+                $0.target != $1.target || $0.label != $1.label
+            }
         appTargets = targets
         assignedAppTarget = assignedTarget
-        appPicker.removeAllItems()
-        targets.forEach { appPicker.addItem(withTitle: $0.label) }
-        if usesCompactStackedLayout {
+        if targetsChanged {
+            appPicker.removeAllItems()
+            appPicker.addItem(withTitle: "Choose App…")
+            targets.forEach { appPicker.addItem(withTitle: $0.label) }
+        }
+        if usesCompactStackedLayout && targetsChanged {
             // Hug the widest app/profile name (with the popup's own padding), clamped so a
             // very long name can't blow out the narrow callout.
             appPicker.sizeToFit()
@@ -1022,7 +1051,14 @@ final class RecordableShortcutRowView: NSView {
         if let assignedTarget,
            let index = targets.firstIndex(where: { $0.target == assignedTarget }) {
             actionPicker.selectItem(at: 1)
-            appPicker.selectItem(at: index)
+            appPicker.selectItem(at: index + 1)
+            recorder.isHidden = true
+            resetButton.isHidden = true
+            badge.isHidden = true
+            appPicker.isHidden = false
+        } else if actionMode == .openApp {
+            actionPicker.selectItem(at: 1)
+            appPicker.selectItem(at: 0)
             recorder.isHidden = true
             resetButton.isHidden = true
             badge.isHidden = true
@@ -1064,21 +1100,29 @@ final class RecordableShortcutRowView: NSView {
     @objc private func actionModeChanged() {
         guard !updatingActionControls else { return }
         if actionPicker.indexOfSelectedItem == 0 {
-            onOpenAppChange?(nil)
-        } else if let first = appTargets.first {
-            appPicker.selectItem(at: 0)
-            onOpenAppChange?(first.target)
+            onActionModeChange?(.shortcut)
         } else {
-            NSSound.beep()
-            actionPicker.selectItem(at: 0)
+            appPicker.selectItem(at: 0)
+            recorder.isHidden = true
+            resetButton.isHidden = true
+            badge.isHidden = true
+            appPicker.isHidden = false
+            needsDisplay = true
+            onActionModeChange?(.openApp)
         }
     }
 
     @objc private func appTargetChanged() {
-        guard !updatingActionControls,
-              appPicker.indexOfSelectedItem >= 0,
-              appPicker.indexOfSelectedItem < appTargets.count else { return }
-        onOpenAppChange?(appTargets[appPicker.indexOfSelectedItem].target)
+        guard !updatingActionControls else { return }
+        let selectedIndex = appPicker.indexOfSelectedItem
+        guard selectedIndex >= 0 else { return }
+        if selectedIndex == 0 {
+            onOpenAppChange?(nil)
+            return
+        }
+        let targetIndex = selectedIndex - 1
+        guard appTargets.indices.contains(targetIndex) else { return }
+        onOpenAppChange?(appTargets[targetIndex].target)
     }
 
     func setLinked(
@@ -2004,6 +2048,7 @@ final class MouseProfileHeaderView: NSView {
     var onBrowse: ((UUID) -> Void)?
     var onBrowseAnimation: ((Int) -> Void)?
     var onAdd: (() -> Void)?
+    var onSave: ((UUID) -> Void)?
     var onActivate: ((UUID) -> Void)?
     var onBindDevice: ((UUID, MouseDeviceIdentity?) -> Void)?
     var onRescanDevices: (() -> Void)?
@@ -2153,6 +2198,16 @@ final class MouseProfileHeaderView: NSView {
             return item
         }
 
+        let save = item(
+            "Save “\(profile.name)”",
+            #selector(saveProfile(_:))
+        )
+        save.image = NSImage(
+            systemSymbolName: "square.and.arrow.down",
+            accessibilityDescription: nil
+        )
+        menu.addItem(save)
+
         let activate = item(
             "Activate “\(profile.name)”",
             #selector(activateProfile(_:))
@@ -2161,19 +2216,6 @@ final class MouseProfileHeaderView: NSView {
         activate.image = NSImage(systemSymbolName: "checkmark.circle", accessibilityDescription: nil)
         menu.addItem(activate)
 
-        let assign = NSMenuItem(
-            title: profile.deviceIdentity == nil ? "Assign Mouse…" : "Change Mouse…",
-            action: nil,
-            keyEquivalent: ""
-        )
-        assign.image = NSImage(systemSymbolName: "computermouse", accessibilityDescription: nil)
-        assign.submenu = makeDeviceMenu()
-        menu.addItem(assign)
-
-        let unassign = item("Unassign Mouse", #selector(unassignMouse(_:)))
-        unassign.isEnabled = profile.deviceIdentity != nil
-        unassign.image = NSImage(systemSymbolName: "xmark.circle", accessibilityDescription: nil)
-        menu.addItem(unassign)
         menu.addItem(.separator())
 
         let add = item("Add Mapping", #selector(addProfile(_:)))
@@ -2368,6 +2410,9 @@ final class MouseProfileHeaderView: NSView {
     @objc private func activateProfile(_ sender: NSMenuItem) {
         if let id = representedID(sender) { onActivate?(id) }
     }
+    @objc private func saveProfile(_ sender: NSMenuItem) {
+        if let id = representedID(sender) { onSave?(id) }
+    }
     @objc private func addProfile(_ sender: NSMenuItem) { onAdd?() }
     @objc private func renameProfile(_ sender: NSMenuItem) {
         if let id = representedID(sender) { onRename?(id) }
@@ -2426,7 +2471,7 @@ final class MouseProfileHeaderView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         ("Horizontal Thumb Wheel" as NSString).draw(
-            at: NSPoint(x: 380, y: 43),
+            at: NSPoint(x: 380, y: 49),
             withAttributes: [
                 .font: NSFont.systemFont(ofSize: 12, weight: .medium),
                 .foregroundColor: NSColor.appTextPrimary,
@@ -2555,7 +2600,7 @@ final class SettingsContentView: NSView {
     let thumbWheelToggle: ToggleSwitchView
     let thumbWheelBrowsers: ThumbWheelBrowsersButton
     let mouseProfileHeader = MouseProfileHeaderView(
-        frame: NSRect(x: 0, y: 0, width: 872, height: 344)
+        frame: NSRect(x: 0, y: 0, width: 872, height: 368)
     )
     private let mouseSlideContainer: MouseSlideContainerView
     var onThumbWheelToggle: ((Bool) -> Void)?
@@ -2593,9 +2638,9 @@ final class SettingsContentView: NSView {
     // The mouse-guide + callouts row is prioritised (it's the point of this tab); the
     // bottom two columns are a quick-access companion — full management lives on the
     // App Profiles tab — so the guide gets the larger share of the height.
-    static let deviceCard         = NSRect(x: 0, y: 0, width: rightCardX + rightCardW, height: 344)
+    static let deviceCard         = NSRect(x: 0, y: 0, width: rightCardX + rightCardW, height: 368)
     // Native apps + App Profiles, side by side across the full width, below the guide.
-    static let mappingBottomCard  = NSRect(x: 0, y: 360, width: rightCardX + rightCardW, height: 368)
+    static let mappingBottomCard  = NSRect(x: 0, y: 384, width: rightCardX + rightCardW, height: 344)
 
     private static func previewAppIcon(for target: QuickLaunchTarget) -> NSImage {
         let label = target == .chatGPT ? "G" : "C"
@@ -2664,15 +2709,14 @@ final class SettingsContentView: NSView {
         // doesn't sit too low against the app lists below.
         let shortcutBottomLeftX: CGFloat = 110   // bottom-left (Forward); inner edge ≈ x 300
         let shortcutBottomRightX: CGFloat = 574  // bottom-right (Gesture); symmetric
-        let shortcutTopY: CGFloat = 40    // leaves a header strip for the "Mouse Mappings" title
-        let shortcutBottomY: CGFloat = 204
+        let shortcutTopY: CGFloat = 52    // leaves a header strip for the "Mouse Mappings" title
+        let shortcutBottomY: CGFloat = 216
         middleButtonRow = RecordableShortcutRowView(
             title: "Middle Button",
             mapping: config.middleButton,
             defaultCombo: KlikProConfig.default.middleButton.combo,
             status: statuses[.middleButton] ?? .ok,
-            baseActionTitle: "No Action",
-            showsShortcutControls: false,
+            baseActionTitle: "Shortcut",
             frame: NSRect(x: shortcutLeftX, y: shortcutTopY, width: shortcutRowW, height: shortcutRowH)
         )
         gestureButtonRow = RecordableShortcutRowView(
@@ -2680,8 +2724,7 @@ final class SettingsContentView: NSView {
             mapping: config.gestureButton,
             defaultCombo: KlikProConfig.default.gestureButton.combo,
             status: statuses[.gestureButton] ?? .ok,
-            baseActionTitle: "No Action",
-            showsShortcutControls: false,
+            baseActionTitle: "Shortcut",
             frame: NSRect(x: shortcutBottomRightX, y: shortcutBottomY, width: shortcutRowW, height: shortcutRowH)
         )
         let forwardDisplay = browserHistoryDisplayOverride(
@@ -2700,7 +2743,6 @@ final class SettingsContentView: NSView {
                 browserHistoryDisplayOverride(slot: .forwardButton, combo: combo)
             },
             baseActionTitle: "Browser Forward",
-            showsShortcutControls: false,
             frame: NSRect(x: shortcutBottomLeftX, y: shortcutBottomY, width: shortcutRowW, height: shortcutRowH)
         )
         backRow = RecordableShortcutRowView(
@@ -2711,7 +2753,6 @@ final class SettingsContentView: NSView {
                 browserHistoryDisplayOverride(slot: .backButton, combo: combo)
             },
             baseActionTitle: "Browser Back",
-            showsShortcutControls: false,
             frame: NSRect(x: shortcutRightX, y: shortcutTopY, width: shortcutRowW, height: shortcutRowH)
         )
         [middleButtonRow, gestureButtonRow, forwardRow, backRow].forEach {
@@ -2811,10 +2852,10 @@ final class SettingsContentView: NSView {
         // is drawn as its title in draw(); the leader anchors just below it (see deviceCallouts).
         thumbWheelToggle = ToggleSwitchView(
             isOn: config.thumbWheel.enabled,
-            frame: NSRect(x: 332, y: 40, width: 40, height: 22)
+            frame: NSRect(x: 332, y: 43, width: 40, height: 22)
         )
         thumbWheelBrowsers = ThumbWheelBrowsersButton(
-            frame: NSRect(x: 380, y: 68, width: 150, height: 26)
+            frame: NSRect(x: 380, y: 74, width: 150, height: 26)
         )
 
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: 728))
@@ -2903,7 +2944,7 @@ final class SettingsContentView: NSView {
         let transition = CATransition()
         // 0.20s read as a jump rather than a slide. This is still a single layer
         // transition — the cost does not change with the duration.
-        transition.duration = 0.34
+        transition.duration = 0.42
         transition.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             transition.type = .fade
@@ -2938,7 +2979,11 @@ final class SettingsContentView: NSView {
         needsDisplay = true
     }
 
-    func updateQuickLaunchAssignments(config: KlikProConfig, featureActive: Bool) {
+    func updateQuickLaunchAssignments(
+        config: KlikProConfig,
+        featureActive: Bool,
+        installedApps: [InstalledApp] = []
+    ) {
         chatGPTButtonPicker.setSelection(config.chatGPTMouseButton)
         claudeButtonPicker.setSelection(config.claudeMouseButton)
         chatGPTButtonPicker.setUnavailable(config.claudeMouseButton, owner: .claude)
@@ -2958,9 +3003,36 @@ final class SettingsContentView: NSView {
                 guard quickLaunchTargetIsInstalled(target) else { return nil }
                 return (.original(target), target.title)
             }
-        let appTargets = originalTargets + availableInstances.map {
+        let knownOriginalBundleIDs = Set(
+            QuickLaunchTarget.allCases.map(\.applicationBundleIdentifier)
+        )
+        var seenApplicationIDs = Set<String>()
+        var applicationTargets = installedApps.compactMap {
+            app -> (target: LaunchAssignmentTarget, label: String)? in
+            guard !knownOriginalBundleIDs.contains(app.bundleIdentifier),
+                  seenApplicationIDs.insert(app.bundleIdentifier).inserted else {
+                return nil
+            }
+            return (
+                .application(InstalledApplicationTarget(app: app)),
+                app.displayName
+            )
+        }
+        // Keep an assigned app visible even if it has moved or was temporarily
+        // unavailable during this scan, so the user can change or clear it.
+        if let profile = activeMouseProfile(in: config) {
+            for assignment in profile.launchAssignments {
+                guard case .application(let application) = assignment.target,
+                      seenApplicationIDs.insert(application.bundleIdentifier).inserted
+                else { continue }
+                applicationTargets.append((assignment.target, application.name))
+            }
+        }
+        let managedTargets = availableInstances.map {
             (target: LaunchAssignmentTarget.profile($0.id), label: $0.label)
         }
+        let appTargets = (originalTargets + applicationTargets + managedTargets)
+            .sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
         let rows: [(QuickLaunchMouseButton, RecordableShortcutRowView)] = [
             (.middle, middleButtonRow), (.gesture, gestureButtonRow),
             (.forward, forwardRow), (.back, backRow),
@@ -2969,7 +3041,9 @@ final class SettingsContentView: NSView {
             row.setLinked(to: nil)
             row.setOpenAppOptions(
                 appTargets,
-                assignedTarget: launchAssignmentOwner(of: button, in: config)
+                assignedTarget: launchAssignmentOwner(of: button, in: config),
+                actionMode: activeMouseProfile(in: config)?.actionMode(for: button)
+                    ?? (button == .middle || button == .gesture ? .openApp : .shortcut)
             )
         }
         _ = featureActive
@@ -3025,7 +3099,7 @@ final class SettingsContentView: NSView {
         let imageAspect = image.size.height > 0 ? image.size.width / image.size.height : 1
         // Inset chosen so the mouse keeps its v1.4.3 size (267x198) while centred in the
         // taller guide card; the four button controls sit in the card's corners around it.
-        let available = card.insetBy(dx: 190, dy: 73)
+        let available = card.insetBy(dx: 190, dy: 85)
         let drawHeight = min(available.height, available.width / imageAspect)
         let drawWidth = drawHeight * imageAspect
         let rect = NSRect(
@@ -3084,16 +3158,19 @@ final class SettingsContentView: NSView {
 
     // fx/fy are fractions of the drawn mouse rect (top-left origin), measured on the
     // 1000x742 device artwork. controlAnchor points match the narrow corner controls set in
-    // init: the top row's inner edges are x 282 (left) / x 590 (right) with centre y 88 (the
+    // init: the top row's inner edges are x 282 (left) / x 590 (right) with centre y 100 (the
     // top row sits below the "Mouse Mappings" header strip); the bottom row is pulled in a
-    // little further — inner edges x 300 (left) / x 574 (right) with centre y 252. Each anchor
+    // little further — the forward leader starts at x 342 (just beyond its popup) and the
+    // gesture edge is x 574, both with centre y 264. Each anchor
     // is the control edge nearest the mouse, so the leader runs from there to the button.
     private static let deviceCallouts: [DeviceCallout] = [
-        DeviceCallout(title: "Middle Button (Scroll Wheel)", fx: 0.245, fy: 0.413, controlAnchor: NSPoint(x: 282, y: 88)),
-        DeviceCallout(title: "Forward Button",               fx: 0.584, fy: 0.546, controlAnchor: NSPoint(x: 300, y: 252)),
-        DeviceCallout(title: "Horizontal Thumb Wheel",       fx: 0.594, fy: 0.422, controlAnchor: NSPoint(x: 436, y: 94)),
-        DeviceCallout(title: "Back Button",                  fx: 0.692, fy: 0.447, controlAnchor: NSPoint(x: 590, y: 88)),
-        DeviceCallout(title: "Gesture Button",               fx: 0.755, fy: 0.745, controlAnchor: NSPoint(x: 574, y: 252)),
+        DeviceCallout(title: "Middle Button (Scroll Wheel)", fx: 0.245, fy: 0.413, controlAnchor: NSPoint(x: 282, y: 100)),
+        // The compact action popup extends past the row's nominal frame, so start the
+        // leader just beyond its real right edge instead of drawing through its arrow.
+        DeviceCallout(title: "Forward Button",               fx: 0.584, fy: 0.546, controlAnchor: NSPoint(x: 342, y: 264)),
+        DeviceCallout(title: "Horizontal Thumb Wheel",       fx: 0.594, fy: 0.422, controlAnchor: NSPoint(x: 436, y: 100)),
+        DeviceCallout(title: "Back Button",                  fx: 0.692, fy: 0.447, controlAnchor: NSPoint(x: 590, y: 100)),
+        DeviceCallout(title: "Gesture Button",               fx: 0.755, fy: 0.745, controlAnchor: NSPoint(x: 574, y: 264)),
     ]
 
     private func drawDeviceCallouts(in mouseRect: NSRect) {
@@ -4103,6 +4180,9 @@ final class ToggleView: NSView {
     )
     private var supportedAppCandidateCache: [AppProfileCandidate]?
     private var supportedAppDiscoveryInProgress = false
+    // Populated by the background health pass. Profile browsing must remain a
+    // memory-only operation and never synchronously touch every managed launcher.
+    private var launchableInstanceIDsCache = Set<UUID>()
     /// The carousel page being edited. It is intentionally separate from
     /// `config.activeMouseProfileID`: browsing must never change live input.
     private var viewedMouseProfileID: UUID?
@@ -4166,17 +4246,10 @@ final class ToggleView: NSView {
         config = loadedConfig
         persistedConfig = loadedConfig
         viewedMouseProfileID = loadedConfig.activeMouseProfileID
-        // The launch scan never prompts: a permission dialog must not greet a user who
-        // may never assign a mouse. It only records the refusal so the gear can explain
-        // itself if they do open it.
-        switch previewRenderingIsActive ? .scanned([]) : scanConnectedMouseDevices() {
-        case .scanned(let devices):
-            availableMouseDevices = devices
-            mouseAccessRequired = false
-        case .permissionRequired:
-            availableMouseDevices = []
-            mouseAccessRequired = true
-        }
+        // Mapping presets apply globally. Do not scan for physical mice or imply
+        // per-device routing until the input layer can actually provide it.
+        availableMouseDevices = []
+        mouseAccessRequired = false
         appProfileManager = makeAppProfileManager(forDataRoot: loadedConfig.dataRoot)
         controlState = AppControlState(
             launchAtLogin: launchAtLoginEnabled,
@@ -4225,6 +4298,7 @@ final class ToggleView: NSView {
         advancedView = AdvancedSettingsContentView(dataRoot: loadedConfig.dataRoot, width: 872)
 
         super.init(frame: frameRect)
+        launchableInstanceIDsCache = initialLaunchableInstanceIDs
         wantsLayer = true
         layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
 
@@ -4606,7 +4680,10 @@ final class ToggleView: NSView {
         contentView.forwardRow.setMapping(profile.forwardButton)
         contentView.backRow.setMapping(profile.backButton)
         contentView.setThumbWheel(profile.thumbWheel)
-        contentView.setMouseControlsAvailable(profile.deviceIdentity != nil)
+        // A mapping can be fully edited before activation and without pretending
+        // it is attached to a particular physical mouse. The one ACTIVE profile
+        // is the sole mapping consumed by the input helper.
+        contentView.setMouseControlsAvailable(true)
 
         // Reuse the established assignment presentation by activating a temporary
         // copy only. This repaints the viewed slide's app targets without changing
@@ -4614,7 +4691,8 @@ final class ToggleView: NSView {
         let displayConfig = configViewingMouseProfile(id, from: config)
         contentView.updateQuickLaunchAssignments(
             config: displayConfig,
-            featureActive: menuRunning
+            featureActive: menuRunning,
+            installedApps: supportedAppCandidateCache?.map(\.app) ?? []
         )
         recomputeConflictBadges()
     }
@@ -4674,42 +4752,8 @@ final class ToggleView: NSView {
             self?.refreshMouseProfileEditor()
         }
         header.onAdd = { [weak self] in self?.addMouseProfile() }
+        header.onSave = { [weak self] id in self?.saveMouseProfile(id) }
         header.onActivate = { [weak self] id in self?.activateMouseProfile(id) }
-        header.onBindDevice = { [weak self] id, identity in
-            self?.bindMouseDevice(identity, to: id)
-        }
-        // This closure is stored *on* the header, so capturing `header` would make it
-        // retain itself. Every other callback here reaches the controller through
-        // `self`; this one reaches the header the same way.
-        header.onRescanDevices = { [weak self] in
-            guard let self else { return }
-            self.contentView.mouseProfileHeader.setScanningDevices(true)
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                // The user has explicitly asked to find a mouse, so this is the one place
-                // that may prompt. It blocks while the system dialog is up, which is why
-                // it runs here and not on the main thread.
-                let outcome: MouseScanOutcome
-                if previewRenderingIsActive {
-                    outcome = .scanned([])
-                } else {
-                    requestMouseMonitoringAccessIfNeeded()
-                    outcome = scanConnectedMouseDevices()
-                }
-                DispatchQueue.main.async {
-                    guard let self else { return }
-                    switch outcome {
-                    case .scanned(let devices):
-                        self.availableMouseDevices = devices
-                        self.mouseAccessRequired = false
-                    case .permissionRequired:
-                        self.availableMouseDevices = []
-                        self.mouseAccessRequired = true
-                    }
-                    self.contentView.mouseProfileHeader.setScanningDevices(false)
-                    self.refreshMouseProfileEditor()
-                }
-            }
-        }
         header.onRename = { [weak self] id in self?.renameMouseProfile(id) }
         header.onDuplicate = { [weak self] id in self?.duplicateMouseProfile(id) }
         header.onReset = { [weak self] id in self?.resetMouseProfile(id) }
@@ -4755,6 +4799,17 @@ final class ToggleView: NSView {
         refreshMouseProfileEditor()
     }
 
+    private func saveMouseProfile(_ id: UUID) {
+        guard mouseProfile(id: id, in: config) != nil else {
+            NSSound.beep()
+            return
+        }
+        // Mouse profiles share one atomic config file, so this transaction persists
+        // the viewed profile together with the collection that owns its UUID. It does
+        // not change activeMouseProfileID; Save and Activate are deliberately distinct.
+        saveConfiguration()
+    }
+
     private func renameMouseProfile(_ id: UUID) {
         guard let profile = mouseProfile(id: id, in: config) else { return }
         let field = NSTextField(string: profile.name)
@@ -4784,18 +4839,20 @@ final class ToggleView: NSView {
     }
 
     private func resetMouseProfile(_ id: UUID) {
-        guard let existing = mouseProfile(id: id, in: config) else { return }
+        guard let existing = mouseProfile(id: id, in: config),
+              let profileIndex = config.mouseProfiles.firstIndex(where: { $0.id == id })
+        else { return }
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Reset \(existing.name)?"
         alert.informativeText =
             "Forward and Back return to their browser defaults. Every other button, "
-            + "thumb-wheel option, and app assignment is cleared."
+            + "thumb-wheel option, app assignment, and appearance returns to its default."
         alert.addButton(withTitle: "Reset")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         var reset = MouseProfile.quietDefault(id: existing.id, name: existing.name)
-        reset.deviceIdentity = existing.deviceIdentity
+        reset.slideColor = .unchosenDefault(forSlide: profileIndex)
         config = replacingMouseProfile(reset, in: config)
         configurationDidChange()
         refreshMouseProfileEditor()
@@ -5208,6 +5265,18 @@ final class ToggleView: NSView {
         contentView.backRow.onOpenAppChange = { [weak self] target in
             self?.setDualAppMapping(target: target, button: .back)
         }
+        contentView.middleButtonRow.onActionModeChange = { [weak self] mode in
+            self?.setMouseButtonActionMode(mode, button: .middle)
+        }
+        contentView.gestureButtonRow.onActionModeChange = { [weak self] mode in
+            self?.setMouseButtonActionMode(mode, button: .gesture)
+        }
+        contentView.forwardRow.onActionModeChange = { [weak self] mode in
+            self?.setMouseButtonActionMode(mode, button: .forward)
+        }
+        contentView.backRow.onActionModeChange = { [weak self] mode in
+            self?.setMouseButtonActionMode(mode, button: .back)
+        }
 
         contentView.chatGPTHotkeyRow.onComboChange = { [weak self] combo in
             self?.config.chatGPTHotkey.combo = combo
@@ -5276,10 +5345,10 @@ final class ToggleView: NSView {
     /// edits made before an Activate survived, because Activate saves the whole staged
     /// config, and edits made after it did not.
     ///
-    /// Save deliberately does not also close. `saveConfiguration()` runs asynchronously
-    /// and terminating on top of it risks truncating the write — the exact failure this
-    /// is here to prevent. It saves, the window stays, and the next Close finds nothing
-    /// pending. Auto-closing needs the save-completion callback threaded through first.
+    /// Save waits for the asynchronous write/apply transaction, then retries termination.
+    /// The delegate sees the newly persisted snapshot and allows that second request
+    /// through. A failed save or an edit made while Save was running leaves the window
+    /// open, so quitting can never silently discard a newer draft.
     func confirmCloseDiscardingUnsavedChanges() -> Bool {
         guard hasUnsavedConfigurationChanges, !previewRenderingIsActive else { return true }
         let alert = NSAlert()
@@ -5293,7 +5362,10 @@ final class ToggleView: NSView {
         alert.addButton(withTitle: "Cancel")
         switch alert.runModal() {
         case .alertFirstButtonReturn:
-            saveConfiguration()
+            saveConfiguration { savedCurrentDraft in
+                guard savedCurrentDraft else { return }
+                NSApp.terminate(nil)
+            }
             return false
         case .alertSecondButtonReturn:
             return true
@@ -5340,9 +5412,27 @@ final class ToggleView: NSView {
             }
         }
 
+        profile.setActionMode(.openApp, for: button)
         if let target {
             profile = assigningMouseButton(button, to: target, in: profile)
         } else if let currentOwner {
+            profile = clearingMouseButton(from: currentOwner, in: profile)
+        }
+        config = replacingMouseProfile(profile, in: config)
+        configurationDidChange()
+        refreshButtonAssignmentViews()
+        refreshMouseProfileEditor()
+    }
+
+    private func setMouseButtonActionMode(
+        _ mode: MouseButtonActionMode,
+        button: QuickLaunchMouseButton
+    ) {
+        guard let profileID = viewedMouseProfileID,
+              var profile = mouseProfile(id: profileID, in: config) else { return }
+        profile.setActionMode(mode, for: button)
+        if mode == .shortcut,
+           let currentOwner = launchAssignmentOwner(of: button, in: profile) {
             profile = clearingMouseButton(from: currentOwner, in: profile)
         }
         config = replacingMouseProfile(profile, in: config)
@@ -5400,12 +5490,16 @@ final class ToggleView: NSView {
         setRefreshControlsBusy(true)
         appProfileQueue.async { [weak self] in
             guard let self else { return }
-            let supported = self.appProfileManager.supportedCandidates()
+            // Keep the complete launchable-app scan for mouse-button Open App
+            // menus. The App Profiles view filters this same catalogue down to
+            // candidates with an approved managed-profile compatibility rule.
+            let supported = self.appProfileManager.candidates()
             DispatchQueue.main.async {
                 self.supportedAppDiscoveryInProgress = false
                 self.supportedAppCandidateCache = supported
                 self.appProfilesView.setSupportedCandidates(supported)
                 self.refreshOriginalAssignmentViews()
+                self.refreshQuickLaunchAssignments()
                 self.setRefreshControlsBusy(false)
             }
         }
@@ -8878,6 +8972,7 @@ final class ToggleView: NSView {
     private func refreshAppProfileHealth() {
         let instances = persistedConfig.instances
         if previewRenderingIsActive {
+            launchableInstanceIDsCache = Set(instances.map(\.id))
             appProfilesView.setRuntimeHealth(
                 Dictionary(uniqueKeysWithValues: instances.map { ($0.id, .ready) })
             )
@@ -8905,10 +9000,14 @@ final class ToggleView: NSView {
                 additionalVaultRoots: additionalVaultRoots
             )
             DispatchQueue.main.async {
+                self.launchableInstanceIDsCache = Set(runtimeHealth.compactMap {
+                    $0.value == .ready ? $0.key : nil
+                })
                 self.appProfilesView.setRuntimeHealth(runtimeHealth)
                 self.advancedView.setMaintenanceInstances(
                     instances, health: maintenanceHealth, orphans: orphans
                 )
+                self.recomputeConflictBadges()
             }
         }
     }
@@ -9382,12 +9481,9 @@ final class ToggleView: NSView {
     /// Launch hook: after an update, if the user relies on the helper (menu-bar
     /// icon on) but it is no longer trusted, walk them through the re-grant
     /// instead of leaving the raw system prompt unexplained.
-    /// Both permissions are checked here on the first launch after an install or an
-    /// update. `consumeBundleVersionChanged()` is single-shot, so both checks have to read
-    /// it in one place — a second consumer would always see false.
-    ///
-    /// Accessibility keeps its extra `showMenuBarIcon` condition; Input Monitoring does
-    /// not, because mouse assignment is unrelated to the menu bar.
+    /// The active mapping preset is global, so this checks only the Accessibility
+    /// permission used by the helper. Input Monitoring belongs to future physical
+    /// mouse routing and is deliberately not requested in this release.
     func guideAccessibilityRegrantAfterUpdateIfNeeded() {
         guard !previewRenderingIsActive else { return }
         let updated = consumeBundleVersionChanged()
@@ -9395,7 +9491,6 @@ final class ToggleView: NSView {
         if config.showMenuBarIcon {
             guideAccessibilityRegrantIfStillMissing()
         }
-        guideMouseMonitoringRegrantIfStillMissing()
     }
 
     /// Input Monitoring decays on every update for the same reason Accessibility does: the
@@ -9527,7 +9622,8 @@ final class ToggleView: NSView {
         let displayConfig = configViewingMouseProfile(viewedMouseProfileID, from: config)
         contentView.updateQuickLaunchAssignments(
             config: displayConfig,
-            featureActive: menuRunning
+            featureActive: menuRunning,
+            installedApps: supportedAppCandidateCache?.map(\.app) ?? []
         )
     }
 
@@ -9551,6 +9647,7 @@ final class ToggleView: NSView {
     ) -> String {
         switch target {
         case .original(let original): return original.title
+        case .application(let application): return application.name
         case .profile(let id):
             return config.instances.first { $0.id == id }?.label ?? "App Profile"
         }
@@ -9680,12 +9777,6 @@ final class ToggleView: NSView {
         } else {
             persistedDisplayConfig = persistedConfig
         }
-        let launchableInstanceIDs = launchableAppProfileInstanceIDs(
-            in: displayConfig,
-            instanceIsLaunchable: { [appProfileRuntime] instance in
-                !previewRenderingIsActive && appProfileRuntime.health(for: instance) == .ready
-            }
-        )
         let statuses = evaluateShortcutConflicts(
             candidate: displayConfig,
             persisted: persistedDisplayConfig,
@@ -9693,7 +9784,7 @@ final class ToggleView: NSView {
             specialFeatureActive: menuRunning,
             chatGPTAvailable: quickLaunchTargetIsAvailable(.chatGPT),
             claudeAvailable: quickLaunchTargetIsAvailable(.claude),
-            activeInstanceIDs: launchableInstanceIDs
+            activeInstanceIDs: launchableInstanceIDsCache
         )
         contentView.middleButtonRow.badge.status = statuses[.middleButton] ?? .ok
         contentView.gestureButtonRow.badge.status = statuses[.gestureButton] ?? .ok
@@ -9703,33 +9794,43 @@ final class ToggleView: NSView {
         contentView.claudeHotkeyRow.setConflictStatus(statuses[.claudeHotkey] ?? .ok)
     }
 
-    private func saveConfiguration() {
+    private func saveConfiguration(
+        completion: ((Bool) -> Void)? = nil
+    ) {
         guard !appProfileLifecycleInProgress else {
             saveStatusMessage = "Wait for the App Profile change to finish."
             needsDisplay = true
+            completion?(false)
             return
         }
-        guard !saveInProgress else { return }
+        guard !saveInProgress else {
+            completion?(false)
+            return
+        }
         if !mouseProfilesAreValid(config) {
             saveStatusMessage =
                 "A mouse mapping has an invalid or duplicate device/button assignment."
             needsDisplay = true
+            completion?(false)
             return
         }
         if !quickLaunchMouseAssignmentsAreValid(config),
            let button = config.chatGPTMouseButton {
             saveStatusMessage = "\(button.title) is already assigned to both launchers."
             needsDisplay = true
+            completion?(false)
             return
         }
         if configuredSlotUsingGestureSentinel(in: config) != nil {
             saveStatusMessage = "⌘F20 is reserved for the Gesture Button."
             needsDisplay = true
+            completion?(false)
             return
         }
         if configuredGlobalHotKeyUsingReservedCommandTab(in: config) != nil {
             saveStatusMessage = "⌘Tab is reserved for keyboard app switching and cannot be a global hotkey."
             needsDisplay = true
+            completion?(false)
             return
         }
         let previousConfig = persistedConfig
@@ -9767,12 +9868,14 @@ final class ToggleView: NSView {
 
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
+                let savedCurrentDraft: Bool
                 if saved {
                     self.persistedConfig = configToSave
                     self.persistedControlState = controlStateToSave
                     self.recomputeConflictBadges()
                     let newerEditsRemain = self.config != configToSave
                         || self.controlState != controlStateToSave
+                    savedCurrentDraft = !newerEditsRemain
                     if !gestureCleanupOK {
                         self.saveStatusMessage = applied
                             ? "Saved — Gesture cleanup will retry."
@@ -9787,10 +9890,12 @@ final class ToggleView: NSView {
                             : "Saved — helper apply timed out."
                     }
                 } else {
+                    savedCurrentDraft = false
                     self.saveStatusMessage = "Save failed — check permissions."
                 }
                 self.setSaveInProgress(false)
                 self.needsDisplay = true
+                completion?(savedCurrentDraft)
             }
         }
     }

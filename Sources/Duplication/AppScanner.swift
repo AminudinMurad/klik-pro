@@ -14,7 +14,9 @@ struct AppScanner {
         let roots = searchRoots ?? [
             URL(fileURLWithPath: "/Applications", isDirectory: true),
             fileManager.homeDirectoryForCurrentUser
-                .appendingPathComponent("Applications", isDirectory: true)
+                .appendingPathComponent("Applications", isDirectory: true),
+            URL(fileURLWithPath: "/System/Applications", isDirectory: true),
+            URL(fileURLWithPath: "/System/Applications/Utilities", isDirectory: true),
         ]
 
         var seen = Set<String>()

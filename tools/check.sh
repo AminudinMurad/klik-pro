@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'echo "Check failed at line $LINENO: $BASH_COMMAND" >&2' ERR
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SDK="${KLIK_PRO_SDK_PATH:-$(xcrun --sdk macosx --show-sdk-path)}"
@@ -317,9 +318,9 @@ if sed -n '/func resolvedEnvironment/,/^    }/p' "$ROOT/Sources/Duplication/Engi
   exit 1
 fi
 require_source_literal \
-  'static let currentSchemaVersion = 15' \
+  'static let currentSchemaVersion = 16' \
   "$ROOT/Sources/KlikProConfig.swift" \
-  "KlikProConfig.currentSchemaVersion must remain 15"
+  "KlikProConfig.currentSchemaVersion must remain 16"
 require_source_literal \
   'schemaVersion: KlikProConfig.currentSchemaVersion' \
   "$ROOT/Sources/KlikProConfig.swift" \
@@ -903,7 +904,7 @@ grep -q 'private let appProfilesView: AppProfilesContentView' "$ROOT/Sources/Kli
 # Tab rects are recomputed each draw for the centered pill bar, so they are vars.
 grep -q 'private var appProfilesTabRect' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'refreshSupportedAppCandidates()' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'appProfileManager.supportedCandidates()' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'appProfileManager.candidates()' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'func supportedCandidates(searchRoots:' \
   "$ROOT/Sources/Duplication/AppProfileManager.swift"
 grep -q 'appProfilesView.onGenerate' "$ROOT/Sources/KlikProApp.swift"
@@ -1184,9 +1185,9 @@ grep -q 'recorder.setCombo(self.defaultCombo)' "$ROOT/Sources/KlikProApp.swift"
 grep -Eq 'static let deviceCard +=' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'drawDeviceCard(in: SettingsContentView.deviceCard)' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'drawSectionLabel("Mouse Mappings"' "$ROOT/Sources/KlikProApp.swift"
-grep -Eq 'static let deviceCard += NSRect\(x: 0, y: 0, width: .* height: 344\)' \
+grep -Eq 'static let deviceCard += NSRect\(x: 0, y: 0, width: .* height: 368\)' \
   "$ROOT/Sources/KlikProApp.swift"
-grep -Eq 'static let mappingBottomCard += NSRect\(x: 0, y: 360,' \
+grep -Eq 'static let mappingBottomCard += NSRect\(x: 0, y: 384,' \
   "$ROOT/Sources/KlikProApp.swift"
 grep -q 'private let menuButton = AppProfileGearButton' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'private var presentedMenu: NSMenu?' "$ROOT/Sources/KlikProApp.swift"
@@ -1207,15 +1208,18 @@ grep -q 'menu.popUp(positioning: nil, at: origin, in: self)' \
   "$ROOT/Sources/KlikProApp.swift"
 grep -q 'let listY: CGFloat = 50' "$ROOT/Sources/AppProfilesUI.swift"
 grep -Fq '"Activate “\(profile.name)”"' "$ROOT/Sources/KlikProApp.swift"
-grep -q '"Assign Mouse…"' "$ROOT/Sources/KlikProApp.swift"
-grep -q '"Change Mouse…"' "$ROOT/Sources/KlikProApp.swift"
-grep -q '"Unassign Mouse"' "$ROOT/Sources/KlikProApp.swift"
 grep -q '"Add Mapping"' "$ROOT/Sources/KlikProApp.swift"
 grep -q '"Rename Mapping…"' "$ROOT/Sources/KlikProApp.swift"
 grep -q '"Duplicate Mapping"' "$ROOT/Sources/KlikProApp.swift"
 grep -q '"Reset Mapping…"' "$ROOT/Sources/KlikProApp.swift"
 grep -q '"Delete Mapping…"' "$ROOT/Sources/KlikProApp.swift"
-grep -q '"No compatible external mice found."' "$ROOT/Sources/KlikProApp.swift"
+profile_menu_block="$(sed -n '/private func presentMenu()/,/private func makeSlideColorMenu/p' \
+  "$ROOT/Sources/KlikProApp.swift")"
+if grep -Eq 'Assign Mouse|Change Mouse|Unassign Mouse|makeDeviceMenu' \
+  <<<"$profile_menu_block"; then
+  echo "Mapping preset menu must not imply unsupported physical-mouse routing" >&2
+  exit 1
+fi
 # The carousel wraps. This replaces the original stop-at-each-end rule: with the cap of
 # three mappings in use, stopping dead at an edge read as a broken arrow. A single mapping
 # still goes nowhere, so browse refuses rather than animating a slide onto itself.
@@ -1226,6 +1230,8 @@ grep -q 'let canBrowse = profileIDs.count > 1' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'func handleHorizontalScroll(_ event: NSEvent)' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'NSWorkspace.shared.accessibilityDisplayShouldReduceMotion' \
   "$ROOT/Sources/KlikProApp.swift"
+grep -q 'systemSymbolName: "checkmark.square.fill"' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'systemSymbolName: "square"' "$ROOT/Sources/KlikProApp.swift"
 # Input Monitoring. Without it IOHIDManagerOpen returns kIOReturnNotPermitted and the
 # scan finds nothing; nothing used to request the permission, so macOS never prompted,
 # Klik PRO never appeared in Privacy & Security, and the gear reported "no mice found"
@@ -1240,13 +1246,12 @@ grep -q 'openStatus == kIOReturnNotPermitted ? .permissionRequired : .scanned(\[
   "$ROOT/Sources/KlikProApp.swift"
 grep -q 'Klik PRO needs permission to see your mice.' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'Privacy_ListenEvent' "$ROOT/Sources/KlikProApp.swift"
-# Exactly one caller may prompt: the explicit rescan. The launch scan runs during
-# phase-1 init on the main thread, where a blocking system dialog would greet users who
-# may never assign a mouse at all.
+# The dormant scanner remains available for future physical-device routing, but
+# global mapping presets must never request its permission.
 access_calls="$(grep -c '^ *requestMouseMonitoringAccessIfNeeded()' \
-  "$ROOT/Sources/KlikProApp.swift")"
-if [[ "$access_calls" != "1" ]]; then
-  echo "Input Monitoring must be requested from exactly one path (the rescan)" >&2
+  "$ROOT/Sources/KlikProApp.swift" || true)"
+if [[ "$access_calls" != "0" ]]; then
+  echo "Global mapping presets must not request Input Monitoring" >&2
   exit 1
 fi
 
@@ -1264,18 +1269,12 @@ if grep -q 'drawDeviceCallouts(in: rect)' <<<"$settings_draw"; then
   exit 1
 fi
 
-# Both permissions are checked on the first launch after an install or an update.
-# consumeBundleVersionChanged() is single-shot, so both checks must read it in one place.
-grep -q 'func guideMouseMonitoringRegrantIfStillMissing()' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'func resetMouseMonitoringApproval() -> Bool' "$ROOT/Sources/KlikProApp.swift"
-grep -q '"reset", "ListenEvent", Bundle.main.bundleIdentifier ?? "local.klik-pro",' \
-  "$ROOT/Sources/KlikProApp.swift"
-grep -q 'IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) != kIOHIDAccessTypeGranted' \
-  "$ROOT/Sources/KlikProApp.swift"
+# Mapping presets currently apply globally, so an update must not ask for Input
+# Monitoring as though physical-device routing were active.
 after_update="$(sed -n '/func guideAccessibilityRegrantAfterUpdateIfNeeded()/,/^    }/p' \
   "$ROOT/Sources/KlikProApp.swift")"
-if ! grep -q 'guideMouseMonitoringRegrantIfStillMissing()' <<<"$after_update"; then
-  echo "The post-update check must cover Input Monitoring as well as Accessibility" >&2
+if grep -q 'guideMouseMonitoringRegrantIfStillMissing()' <<<"$after_update"; then
+  echo "The post-update check must not request dormant mouse-binding permission" >&2
   exit 1
 fi
 if grep -cq 'consumeBundleVersionChanged()' <<<"$after_update"; then
@@ -1298,16 +1297,12 @@ grep -q 'func applicationShouldTerminate(' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'guard controller?.confirmCloseDiscardingUnsavedChanges() ?? true else {' \
   "$ROOT/Sources/KlikProApp.swift"
 grep -q 'return .terminateCancel' "$ROOT/Sources/KlikProApp.swift"
-
-# Assign/Unassign Mouse commits, like Activate beside it in the same gear menu. Staging it
-# was invisible, because the five toggles enable the moment a device is set.
-bind_block="$(sed -n '/private func bindMouseDevice(_ identity: MouseDeviceIdentity?, to id: UUID)/,/^    }/p' \
-  "$ROOT/Sources/KlikProApp.swift")"
-grep -q 'saveConfiguration()' <<<"$bind_block"
-if ! grep -q 'guard !saveInProgress, !appProfileLifecycleInProgress else {' <<<"$bind_block"; then
-  echo "bindMouseDevice must refuse while a save is already running" >&2
-  exit 1
-fi
+# Choosing Save in the quit warning must finish the asynchronous transaction before
+# terminating. Keeping the window open after a successful save made the command look
+# ignored and encouraged a second, destructive quit attempt.
+grep -q 'saveConfiguration { savedCurrentDraft in' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'completion?(savedCurrentDraft)' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'savedCurrentDraft = !newerEditsRemain' "$ROOT/Sources/KlikProApp.swift"
 
 # The slide arrows must show they are controls. The glyph alone read as decoration, so
 # hover gives them a wash, and a boundary arrow is dimmed hard rather than a shade away
@@ -1378,12 +1373,12 @@ if [[ "$(grep -c '    case ' <<<"$(sed -n '/^enum MouseSlideColor/,/^    var tit
   echo "Mouse slide colourways must stay at exactly eight" >&2
   exit 1
 fi
-# The first three colourways were measured on rendered fixtures at these washes; an
-# existing installation must look the same after upgrading as it did before.
+# The palette washes remain stable; the three default slides deliberately use
+# Pearl White, Mist Blue, and Rose.
 grep -q 'red: 0.45, green: 0.72, blue: 0.94, alpha: 0.18' "$ROOT/Sources/KlikProConfig.swift"
 grep -q 'red: 0.92, green: 0.66, blue: 0.42, alpha: 0.16' "$ROOT/Sources/KlikProConfig.swift"
 grep -q 'case 1: return .mistBlue' "$ROOT/Sources/KlikProConfig.swift"
-grep -q 'case 2: return .champagne' "$ROOT/Sources/KlikProConfig.swift"
+grep -q 'case 2: return .rose' "$ROOT/Sources/KlikProConfig.swift"
 # The tint is composited while the artwork is drawn, inside a transparency layer so the
 # fill sees only the mouse's own alpha, and inside a saved GState so .sourceAtop cannot
 # leak into the leader lines drawn straight afterwards.
@@ -1441,13 +1436,26 @@ if ! grep -q 'if newRows.isEmpty {' <<<"$set_rows_block"; then
   echo "The list empty state must count sticky rows, not only the scrolling rows" >&2
   exit 1
 fi
-grep -q 'contentView.setMouseControlsAvailable(profile.deviceIdentity != nil)' \
+grep -q 'contentView.setMouseControlsAvailable(true)' \
   "$ROOT/Sources/KlikProApp.swift"
+grep -q '"Save “\\(profile.name)”"' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'header.onSave = ' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'private func saveMouseProfile(_ id: UUID)' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'thumbWheelCard = NSRect(x: leftX' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'actionPicker.addItems(withTitles: \[baseActionTitle, "Open App"\])' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'baseActionTitle: "Browser Forward"' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'baseActionTitle: "Browser Back"' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'baseActionTitle: "No Action"' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'baseActionTitle: "Shortcut"' "$ROOT/Sources/KlikProApp.swift"
+if grep -q 'showsShortcutControls: false' "$ROOT/Sources/KlikProApp.swift"; then
+  echo "All four mouse-button rows must expose their shortcut recorder" >&2
+  exit 1
+fi
+grep -q 'case application(InstalledApplicationTarget)' "$ROOT/Sources/KlikProConfig.swift"
+grep -q 'case launchApplication(InstalledApplicationTarget)' "$ROOT/Sources/KlikProConfig.swift"
+grep -q 'URL(fileURLWithPath: "/System/Applications"' \
+  "$ROOT/Sources/Duplication/AppScanner.swift"
+grep -q 'URL(fileURLWithPath: "/System/Applications/Utilities"' \
+  "$ROOT/Sources/Duplication/AppScanner.swift"
 grep -q 'func setDualAppMapping(' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'target: LaunchAssignmentTarget?' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'static let dormantLinkGap: CGFloat = 6' "$ROOT/Sources/KlikProApp.swift"

@@ -164,6 +164,11 @@ enum QuickLaunchMouseButton: String, Codable, CaseIterable, Equatable {
     }
 }
 
+enum MouseButtonActionMode: String, Codable, Equatable {
+    case shortcut
+    case openApp
+}
+
 enum QuickLaunchTarget: Int, CaseIterable, Hashable, Codable {
     case chatGPT
     case claude
@@ -722,7 +727,7 @@ enum MouseSlideColor: String, Codable, CaseIterable, Equatable {
     static func unchosenDefault(forSlide index: Int) -> MouseSlideColor {
         switch index {
         case 1: return .mistBlue
-        case 2: return .champagne
+        case 2: return .rose
         default: return .pearlWhite
         }
     }
@@ -748,6 +753,13 @@ struct MouseProfile: Codable, Equatable, Identifiable {
     var backButton: ShortcutMapping
     var thumbWheel: ThumbWheelConfig
     var launchAssignments: [MouseProfileLaunchAssignment]
+    // Optional fields preserve decoding compatibility with profiles saved before
+    // the action picker itself became persistent. A nil legacy value is resolved
+    // from the existing mapping below, then from the owner-approved defaults.
+    var middleButtonActionMode: MouseButtonActionMode? = nil
+    var gestureButtonActionMode: MouseButtonActionMode? = nil
+    var forwardButtonActionMode: MouseButtonActionMode? = nil
+    var backButtonActionMode: MouseButtonActionMode? = nil
     /// Optional on purpose. Synthesized `Codable` decodes a missing key straight to
     /// `nil` and omits it again on encode, so every config written before colour became
     /// a choice keeps loading untouched and needs no schema bump. `nil` means nobody has
@@ -756,7 +768,8 @@ struct MouseProfile: Codable, Equatable, Identifiable {
     var slideColor: MouseSlideColor?
 
     /// A new slide starts with the same owner-approved quiet defaults as a fresh
-    /// installation: only browser Back/Forward are mapped, with no app assignments.
+    /// installation: every action is off, while Back/Forward retain their browser
+    /// combos so enabling either switch restores the familiar action immediately.
     static func quietDefault(
         id: UUID = UUID(),
         name: String = "Mouse Profile"
@@ -768,11 +781,11 @@ struct MouseProfile: Codable, Equatable, Identifiable {
             middleButton: ShortcutMapping(enabled: false, combo: .unset),
             gestureButton: ShortcutMapping(enabled: false, combo: .unset),
             forwardButton: ShortcutMapping(
-                enabled: true,
+                enabled: false,
                 combo: defaultBrowserForwardCombo
             ),
             backButton: ShortcutMapping(
-                enabled: true,
+                enabled: false,
                 combo: defaultBrowserBackCombo
             ),
             thumbWheel: ThumbWheelConfig(
@@ -786,12 +799,53 @@ struct MouseProfile: Codable, Equatable, Identifiable {
             launchAssignments: []
         )
     }
+
+    func actionMode(for button: QuickLaunchMouseButton) -> MouseButtonActionMode {
+        let explicit: MouseButtonActionMode?
+        let mapping: ShortcutMapping
+        switch button {
+        case .middle:
+            explicit = middleButtonActionMode
+            mapping = middleButton
+        case .gesture:
+            explicit = gestureButtonActionMode
+            mapping = gestureButton
+        case .forward:
+            explicit = forwardButtonActionMode
+            mapping = forwardButton
+        case .back:
+            explicit = backButtonActionMode
+            mapping = backButton
+        }
+        if let explicit { return explicit }
+        if launchAssignments.contains(where: { $0.button == button }) {
+            return .openApp
+        }
+        // Preserve a recorded legacy shortcut instead of hiding it after upgrade.
+        if mapping.combo.isSet { return .shortcut }
+        switch button {
+        case .middle, .gesture: return .openApp
+        case .forward, .back: return .shortcut
+        }
+    }
+
+    mutating func setActionMode(
+        _ mode: MouseButtonActionMode,
+        for button: QuickLaunchMouseButton
+    ) {
+        switch button {
+        case .middle: middleButtonActionMode = mode
+        case .gesture: gestureButtonActionMode = mode
+        case .forward: forwardButtonActionMode = mode
+        case .back: backButtonActionMode = mode
+        }
+    }
 }
 
 // MARK: - Top-level config
 
 struct KlikProConfig: Codable, Equatable {
-    static let currentSchemaVersion = 15
+    static let currentSchemaVersion = 16
 
     var schemaVersion: Int
     // New schema-10 installations begin with onboarding pending. Configurations from
@@ -1137,33 +1191,12 @@ let defaultBrowserForwardCombo = KeyCombo(
     command: true, option: false, control: false, shift: false
 )
 
-private let removedShortcutMapping = ShortcutMapping(enabled: false, combo: .unset)
-
-/// Product policy: Klik PRO exposes only the fixed browser Forward/Back actions.
-/// Middle, Gesture, global app hotkeys, and App Profile hotkeys are app-opening
-/// controls only; stale shortcuts from older releases must never remain as hidden
-/// fallbacks. Keep the legacy Codable fields until a future schema can remove them.
+/// Compatibility hook retained at the load/save boundary. Earlier schema-15 builds
+/// used it to erase recorded shortcuts and force-enable Back/Forward. Mouse buttons
+/// once again support user-recorded keyboard combos, so normalization must preserve
+/// every mapping exactly as the user configured it.
 func applyingBrowserOnlyShortcutPolicy(_ config: KlikProConfig) -> KlikProConfig {
-    var updated = config
-    updated.middleButton = removedShortcutMapping
-    updated.gestureButton = removedShortcutMapping
-    updated.chatGPTHotkey = removedShortcutMapping
-    updated.claudeHotkey = removedShortcutMapping
-    updated.geminiHotkey = removedShortcutMapping
-    updated.forwardButton = ShortcutMapping(enabled: true, combo: defaultBrowserForwardCombo)
-    updated.backButton = ShortcutMapping(enabled: true, combo: defaultBrowserBackCombo)
-    for index in updated.mouseProfiles.indices {
-        updated.mouseProfiles[index].middleButton = removedShortcutMapping
-        updated.mouseProfiles[index].gestureButton = removedShortcutMapping
-        updated.mouseProfiles[index].forwardButton =
-            ShortcutMapping(enabled: true, combo: defaultBrowserForwardCombo)
-        updated.mouseProfiles[index].backButton =
-            ShortcutMapping(enabled: true, combo: defaultBrowserBackCombo)
-    }
-    for index in updated.instances.indices {
-        updated.instances[index].hotkey = removedShortcutMapping
-    }
-    return updated
+    config
 }
 
 /// Schema 15 deliberately gives existing users the same clean mouse-control state
@@ -1185,14 +1218,75 @@ func resettingMouseControlsForSchema15(_ config: KlikProConfig) -> KlikProConfig
     updated.chatGPTMouseButton = nil
     updated.claudeMouseButton = nil
     updated.geminiMouseButton = nil
+    updated.chatGPTHotkey = ShortcutMapping(enabled: false, combo: .unset)
+    updated.claudeHotkey = ShortcutMapping(enabled: false, combo: .unset)
+    updated.geminiHotkey = ShortcutMapping(enabled: false, combo: .unset)
     for index in updated.instances.indices {
         updated.instances[index].mouseButton = nil
+        updated.instances[index].hotkey = ShortcutMapping(enabled: false, combo: .unset)
     }
     return applyingBrowserOnlyShortcutPolicy(updated)
 }
 
+/// Schema 16 exposes the complete three-preset carousel to existing installations
+/// once. Because the schema is persisted after migration, a user who later deletes
+/// Mouse 2 or Mouse 3 will not have it recreated on subsequent launches.
+func completingThreeMouseProfilesForSchema16(
+    _ config: KlikProConfig
+) -> KlikProConfig {
+    var updated = config
+    let additions: [(id: UUID, name: String, color: MouseSlideColor)] = [
+        (
+            MouseProfile.defaultProfileID,
+            "Default",
+            .pearlWhite
+        ),
+        (
+            UUID(uuidString: "A08FEEC9-E7F9-4A96-AE91-54EA47C05E15")!,
+            "Mouse 2",
+            .mistBlue
+        ),
+        (
+            UUID(uuidString: "A08FEEC9-E7F9-4A96-AE91-54EA47C05E16")!,
+            "Mouse 3",
+            .rose
+        ),
+    ]
+    while updated.mouseProfiles.count < MouseProfile.maximumCount {
+        let addition = additions[updated.mouseProfiles.count]
+        var profile = MouseProfile.quietDefault(
+            id: addition.id,
+            name: addition.name
+        )
+        profile.slideColor = addition.color
+        guard let withProfile = addingMouseProfile(profile, to: updated) else { break }
+        updated = withProfile
+    }
+    return updated
+}
+
 extension KlikProConfig {
     static let `default`: KlikProConfig = {
+        var firstProfile = MouseProfile.quietDefault(
+            id: MouseProfile.defaultProfileID,
+            name: "Default"
+        )
+        firstProfile.slideColor = .pearlWhite
+        var secondProfile = MouseProfile.quietDefault(
+            id: UUID(uuidString: "A08FEEC9-E7F9-4A96-AE91-54EA47C05E15")!,
+            name: "Mouse 2"
+        )
+        secondProfile.slideColor = .mistBlue
+        var thirdProfile = MouseProfile.quietDefault(
+            id: UUID(uuidString: "A08FEEC9-E7F9-4A96-AE91-54EA47C05E16")!,
+            name: "Mouse 3"
+        )
+        thirdProfile.slideColor = .rose
+        let freshProfiles = [
+            firstProfile,
+            secondProfile,
+            thirdProfile,
+        ]
         var config = KlikProConfig(
             schemaVersion: KlikProConfig.currentSchemaVersion,
             onboardingCompleted: false,
@@ -1226,11 +1320,11 @@ extension KlikProConfig {
             claudeMouseButton: nil,
             geminiMouseButton: nil,
             forwardButton: ShortcutMapping(
-            enabled: true,
+            enabled: false,
             combo: defaultBrowserForwardCombo
         ),
             backButton: ShortcutMapping(
-            enabled: true,
+            enabled: false,
             combo: defaultBrowserBackCombo
         ),
             // A fresh install starts quiet: the thumb wheel is off AND every
@@ -1239,10 +1333,13 @@ extension KlikProConfig {
             // actually want when they turn the wheel on. Existing configs keep their
             // stored flags — this is a fresh-install default, not a migration.
             thumbWheel: ThumbWheelConfig(
-            enabled: false, chromeEnabled: false, braveEnabled: false,
-            firefoxEnabled: false, safariEnabled: false, defaultFallbackEnabled: false
-        ),
-            instances: []
+                enabled: false, chromeEnabled: false, braveEnabled: false,
+                firefoxEnabled: false, safariEnabled: false,
+                defaultFallbackEnabled: false
+            ),
+            instances: [],
+            mouseProfiles: freshProfiles,
+            activeMouseProfileID: MouseProfile.defaultProfileID
         )
         config.instances = synchronizedLegacyQuickLaunchInstances(in: config)
         return config
@@ -1314,12 +1411,18 @@ enum KlikProConfigStore {
         let requiresMouseProfilesMigration =
             decoded.schemaVersion < KlikProConfig.currentSchemaVersion
         let requiresCleanMouseControlsMigration = decoded.schemaVersion < 15
+        let requiresThreeMouseProfilesMigration = decoded.schemaVersion < 16
         var normalized = applyingBrowserOnlyShortcutPolicy(addingDiscoveredExternalDualApps(
             to: normalizedQuickLaunchConfig(decoded)
         ))
         if requiresCleanMouseControlsMigration {
             normalized = normalizedQuickLaunchConfig(
                 resettingMouseControlsForSchema15(normalized)
+            )
+        }
+        if requiresThreeMouseProfilesMigration {
+            normalized = normalizedQuickLaunchConfig(
+                completingThreeMouseProfilesForSchema16(normalized)
             )
         }
         if let previewOverride = specialFeatureEnabledPreviewOverride {
@@ -1342,10 +1445,12 @@ enum KlikProConfigStore {
         } else if requiresVaultMigration
                     || requiresLifecycleMigration
                     || requiresMouseProfilesMigration {
-            // Schema 10 → 11, 11 → 12, 13 → 14, and 14 → 15 are additive. Schema 14 moves
+            // Schema 10 → 11, 11 → 12, 13 → 14, 14 → 15, and 15 → 16 are additive.
+            // Schema 14 moves
             // existing mouse behavior into one Default profile while retaining a
             // synchronized legacy shadow. Schema 15 removes every legacy shortcut except
-            // fixed browser Forward/Back, so no destructive-migration backup is needed.
+            // fixed browser Forward/Back. Schema 16 fills the carousel to three quiet
+            // presets once, so no destructive-migration backup is needed.
             _ = save(normalized)
         }
         // The "all Settings toggles start OFF" policy applies once to existing users too.
@@ -1945,6 +2050,8 @@ enum MouseButtonShortcutDispatch: Equatable {
     /// Direct dispatch prevents the mirrored keyboard combo leaking into the frontmost
     /// app if a menu hotkey is temporarily unavailable.
     case launch(QuickLaunchTarget)
+    /// Consume the mouse pair and open any launchable application discovered on this Mac.
+    case launchApplication(InstalledApplicationTarget)
     /// UUID-keyed M2 dispatch. The helper resolves and revalidates the persisted
     /// instance immediately before managed launch/focus.
     case launchInstance(UUID)
@@ -2019,10 +2126,14 @@ func mouseButtonShortcutDispatch(
     shortcut: ShortcutMapping,
     frontmostBundleIdentifier: String?,
     quickLaunchTarget: QuickLaunchTarget? = nil,
+    applicationTarget: InstalledApplicationTarget? = nil,
     appProfileInstanceID: UUID? = nil
 ) -> MouseButtonShortcutDispatch {
     if let appProfileInstanceID = appProfileInstanceID {
         return .launchInstance(appProfileInstanceID)
+    }
+    if let applicationTarget {
+        return .launchApplication(applicationTarget)
     }
     if let quickLaunchTarget = quickLaunchTarget {
         return .launch(quickLaunchTarget)
@@ -2338,8 +2449,33 @@ func quickLaunchMouseButton(
 /// Original installed apps deliberately remain separate from managed App Profiles:
 /// this type unifies mouse-button ownership without giving originals a UUID-backed
 /// data lifecycle, launcher ownership, repair, archive, or deletion semantics.
+struct InstalledApplicationTarget: Codable, Equatable, Hashable {
+    var bundleIdentifier: String
+    var bundlePath: String
+    var name: String
+
+    init(bundleIdentifier: String, bundlePath: String, name: String) {
+        self.bundleIdentifier = bundleIdentifier
+        self.bundlePath = bundlePath
+        self.name = name
+    }
+
+    init(app: InstalledApp) {
+        bundleIdentifier = app.bundleIdentifier
+        bundlePath = app.bundleURL.path
+        name = app.displayName
+    }
+
+    var isStructurallyValid: Bool {
+        !bundleIdentifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && URL(fileURLWithPath: bundlePath).pathExtension.lowercased() == "app"
+    }
+}
+
 enum LaunchAssignmentTarget: Codable, Equatable, Hashable {
     case original(QuickLaunchTarget)
+    case application(InstalledApplicationTarget)
     case profile(UUID)
 }
 
@@ -2463,6 +2599,10 @@ func mouseProfileIsValid(
     for assignment in profile.launchAssignments {
         if case .profile(let instanceID) = assignment.target,
            !config.instances.contains(where: { $0.id == instanceID }) {
+            return false
+        }
+        if case .application(let application) = assignment.target,
+           !application.isStructurallyValid {
             return false
         }
     }
@@ -3058,6 +3198,24 @@ func assignedQuickLaunchTarget(
     }
 }
 
+func assignedInstalledApplicationTarget(
+    for slot: ShortcutSlot,
+    in config: KlikProConfig
+) -> InstalledApplicationTarget? {
+    guard quickLaunchMouseAssignmentsAreValid(config),
+          let button = QuickLaunchMouseButton.allCases.first(where: {
+              $0.shortcutSlot == slot
+          }),
+          let profile = activeMouseProfile(in: config),
+          case .application(let application) = launchAssignmentOwner(
+              of: button,
+              in: profile
+          ) else {
+        return nil
+    }
+    return application
+}
+
 func activeQuickLaunchTarget(
     for slot: ShortcutSlot,
     in config: KlikProConfig,
@@ -3180,6 +3338,23 @@ func slotOpensAppProfileInstance(_ slot: ShortcutSlot, in config: KlikProConfig)
     }
 }
 
+/// True when the active mouse profile routes this physical button to an arbitrary
+/// installed application. Original apps and managed profiles have their own
+/// availability-aware checks; this covers the new general Launchpad-app target.
+func slotHasDirectLaunchAssignment(_ slot: ShortcutSlot, in config: KlikProConfig) -> Bool {
+    guard let button = QuickLaunchMouseButton.allCases.first(where: {
+        $0.shortcutSlot == slot
+    }),
+    let profile = activeMouseProfile(in: config) else {
+        return false
+    }
+    guard let owner = launchAssignmentOwner(of: button, in: profile),
+          case .application = owner else {
+        return false
+    }
+    return true
+}
+
 private let reservedSystemShortcuts: [KeyCombo.Signature] = [
     KeyCombo.Signature(keyCode: UInt16(kVK_Space), command: true, option: false, control: false, shift: false),           // Cmd-Space
     KeyCombo.Signature(keyCode: UInt16(kVK_Tab), command: true, option: false, control: false, shift: false),             // Cmd-Tab
@@ -3249,7 +3424,11 @@ func evaluateShortcutConflicts(
     })
 
     for slot in ShortcutSlot.allCases {
-        if managedLaunchSlots.contains(slot) { result[slot] = .ok; continue }
+        if managedLaunchSlots.contains(slot)
+            || slotHasDirectLaunchAssignment(slot, in: candidate) {
+            result[slot] = .ok
+            continue
+        }
 
         let mine = mapping(
             for: slot,
@@ -3263,12 +3442,6 @@ func evaluateShortcutConflicts(
         // A button that opens an App Profile instance is in Open-App mode: its
         // stored shortcut is dormant (the button launches the app, never emits
         // the combo), so it is neither a conflict itself nor a source of one.
-        if !specialFeatureActive,
-           slotOpensAppProfileInstance(slot, in: candidate) {
-            result[slot] = .ok
-            continue
-        }
-
         let intentionalCounterpart = linkedShortcutCounterpart(
             of: slot,
             in: candidate,
@@ -3284,8 +3457,7 @@ func evaluateShortcutConflicts(
             // when the caller has not supplied the runtime launchability set.
             // Its stored keyboard combo is dormant and must not make another
             // shortcut appear duplicated.
-            if !specialFeatureActive,
-               slotOpensAppProfileInstance(other, in: candidate) {
+            if slotHasDirectLaunchAssignment(other, in: candidate) {
                 return false
             }
             let otherMapping = mapping(

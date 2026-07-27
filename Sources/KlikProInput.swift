@@ -133,6 +133,12 @@ private func activeOriginalAppTarget(for slot: ShortcutSlot) -> QuickLaunchTarge
     )
 }
 
+private func activeInstalledApplicationTarget(
+    for slot: ShortcutSlot
+) -> InstalledApplicationTarget? {
+    assignedInstalledApplicationTarget(for: slot, in: config)
+}
+
 private func effectiveMapping(for slot: ShortcutSlot) -> ShortcutMapping {
     if let instance = activeAppProfileInstance(for: slot) {
         return ShortcutMapping(enabled: true, combo: instance.hotkey.combo)
@@ -140,6 +146,11 @@ private func effectiveMapping(for slot: ShortcutSlot) -> ShortcutMapping {
     if activeOriginalAppTarget(for: slot) != nil {
         // The combo is dormant for direct app dispatch, but keeping the underlying
         // value makes the mapping safe if this event is ever re-evaluated.
+        var mapping = baseMapping(for: slot, in: config)
+        mapping.enabled = true
+        return mapping
+    }
+    if activeInstalledApplicationTarget(for: slot) != nil {
         var mapping = baseMapping(for: slot, in: config)
         mapping.enabled = true
         return mapping
@@ -177,6 +188,49 @@ private func launch(_ target: QuickLaunchTarget) {
             logMessage("Native \(target.title) action completed with pid \(pid)")
         case .failure(let error):
             logMessage("Native \(target.title) action failed: \(error)")
+        }
+    }
+}
+
+private func resolvedApplicationURL(
+    for target: InstalledApplicationTarget
+) -> URL? {
+    let recorded = URL(fileURLWithPath: target.bundlePath).standardizedFileURL
+    let registered = NSWorkspace.shared.urlForApplication(
+        withBundleIdentifier: target.bundleIdentifier
+    )?.standardizedFileURL
+    for candidate in [recorded, registered].compactMap({ $0 }) {
+        guard candidate.pathExtension.lowercased() == "app",
+              let bundle = Bundle(url: candidate),
+              bundle.bundleIdentifier == target.bundleIdentifier,
+              bundle.executableURL.map({
+                  FileManager.default.isExecutableFile(atPath: $0.path)
+              }) == true else {
+            continue
+        }
+        return candidate
+    }
+    return nil
+}
+
+private func launch(_ target: InstalledApplicationTarget) {
+    guard let applicationURL = resolvedApplicationURL(for: target) else {
+        logMessage("Installed app target is unavailable: \(target.name)")
+        return
+    }
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.activates = true
+    NSWorkspace.shared.openApplication(
+        at: applicationURL,
+        configuration: configuration
+    ) { application, error in
+        if let error {
+            logMessage("Installed app launch failed for \(target.name): \(error)")
+        } else {
+            logMessage(
+                "Installed app action completed for \(target.name), "
+                + "pid \(application?.processIdentifier ?? 0)"
+            )
         }
     }
 }
@@ -911,6 +965,14 @@ private let handler: EventHandlerUPP = { _, event, _ in
         if let instance = activeAppProfileInstance(for: .gestureButton) {
             logMessage("Physical Gesture Button received; launching UUID-keyed instance")
             DispatchQueue.main.async { launch(instanceID: instance.id) }
+        } else if let application = activeInstalledApplicationTarget(
+            for: .gestureButton
+        ) {
+            logMessage("Physical Gesture Button received; launching \(application.name)")
+            DispatchQueue.main.async { launch(application) }
+        } else if let original = activeOriginalAppTarget(for: .gestureButton) {
+            logMessage("Physical Gesture Button received; launching \(original.title)")
+            DispatchQueue.main.async { launch(original) }
         } else {
             logMessage("Physical Gesture Button received; sending \(shortcut.combo.displayString)")
             postKeyStroke(
@@ -1036,6 +1098,7 @@ private func setupMouseMappings() {
                 let shortcut = effectiveMapping(for: slot)
                 let linkedInstance = activeAppProfileInstance(for: slot)
                 let originalAppTarget = activeOriginalAppTarget(for: slot)
+                let installedApplicationTarget = activeInstalledApplicationTarget(for: slot)
                 guard shortcut.enabled else {
                     _ = mouseButtonDispatchState.begin(
                         buttonNumber: buttonNumber,
@@ -1058,6 +1121,7 @@ private func setupMouseMappings() {
                         shortcut: shortcut,
                         frontmostBundleIdentifier: frontmostBundleIdentifier,
                         quickLaunchTarget: originalAppTarget,
+                        applicationTarget: installedApplicationTarget,
                         appProfileInstanceID: linkedInstance?.id
                     )
                 )
@@ -1070,6 +1134,10 @@ private func setupMouseMappings() {
                     return Unmanaged.passRetained(event)
                 case .launch(let target):
                     logMessage("\(buttonName) received; launching \(target.title)")
+                    DispatchQueue.main.async { launch(target) }
+                    return nil
+                case .launchApplication(let target):
+                    logMessage("\(buttonName) received; launching \(target.name)")
                     DispatchQueue.main.async { launch(target) }
                     return nil
                 case .launchInstance(let instanceID):
@@ -1091,12 +1159,14 @@ private func setupMouseMappings() {
                 let shortcut = effectiveMapping(for: slot)
                 let linkedInstance = activeAppProfileInstance(for: slot)
                 let originalAppTarget = activeOriginalAppTarget(for: slot)
+                let installedApplicationTarget = activeInstalledApplicationTarget(for: slot)
                 let orphanFallback: MouseButtonShortcutDispatch = shortcut.enabled
                     ? mouseButtonShortcutDispatch(
                         slot: slot,
                         shortcut: shortcut,
                         frontmostBundleIdentifier: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
                         quickLaunchTarget: originalAppTarget,
+                        applicationTarget: installedApplicationTarget,
                         appProfileInstanceID: linkedInstance?.id
                     )
                     : .nativePassThrough

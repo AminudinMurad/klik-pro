@@ -256,7 +256,6 @@ private struct MouseSlideHitTestMain {
         }
 
         var trackedTitles: [String] = []
-        var assignSubmenuTitles: [String] = []
         var trackingMenu: NSMenu?
         let observer = NotificationCenter.default.addObserver(
             forName: NSMenu.didBeginTrackingNotification,
@@ -266,9 +265,6 @@ private struct MouseSlideHitTestMain {
             guard let menu = note.object as? NSMenu, trackingMenu == nil else { return }
             trackingMenu = menu
             trackedTitles = menu.items.map(\.title)
-            if let assign = menu.items.first(where: { $0.title.hasSuffix("Mouse…") }) {
-                assignSubmenuTitles = assign.submenu?.items.map(\.title) ?? []
-            }
             // Cancelling from inside didBeginTracking is too early to take effect,
             // so hand it back to the tracking loop first.
             RunLoop.main.perform(inModes: [.eventTracking, .default]) {
@@ -330,8 +326,6 @@ private struct MouseSlideHitTestMain {
         check(!trackedTitles.isEmpty, "a menu began tracking from the gear's mouse-down")
         for expected in [
             "Activate “Mapping 2”",
-            "Assign Mouse…",
-            "Unassign Mouse",
             "Add Mapping",
             "Rename Mapping…",
             "Duplicate Mapping",
@@ -344,12 +338,10 @@ private struct MouseSlideHitTestMain {
             )
         }
         check(
-            assignSubmenuTitles.contains("Rescan for Mice"),
-            "Assign Mouse… carries a device submenu with a rescan action"
-        )
-        check(
-            assignSubmenuTitles.contains("No compatible external mice found."),
-            "the device submenu reports an empty scan"
+            !trackedTitles.contains("Assign Mouse…")
+                && !trackedTitles.contains("Change Mouse…")
+                && !trackedTitles.contains("Unassign Mouse"),
+            "mapping presets do not imply unsupported physical-mouse routing"
         )
         if !trackedTitles.isEmpty {
             print("  menu items: \(trackedTitles.filter { !$0.isEmpty }.joined(separator: " | "))")
