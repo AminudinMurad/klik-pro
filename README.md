@@ -4,7 +4,7 @@
 
 # Klik PRO
 
-**Recordable mouse-button shortcuts and isolated App Profiles for macOS — a lightweight,
+**Saved mouse-mapping presets and isolated App Profiles for macOS — a lightweight,
 native menu-bar utility, with thumb-wheel tab switching and a keep-awake menu.**
 
 [![Latest release](https://img.shields.io/github/v/release/AminudinMurad/klik-pro?label=release&color=2ec458)](https://github.com/AminudinMurad/klik-pro/releases/latest)
@@ -19,15 +19,19 @@ help support continued development and mouse/browser compatibility testing:**
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/aminudinmurad)
 [![PayPal](https://img.shields.io/badge/PayPal-Support-003087?logo=paypal&logoColor=white)](https://www.paypal.com/paypalme/aminudinmurad)
 
-[Features](#features) · [Install](#install-pre-built-release) · [Shortcuts](#default-shortcuts) · [App Profiles](#app-profiles) · [Advanced](#advanced-tab) · [Changelog](CHANGELOG.md) · [How it works](#how-it-works) · [Building](#building) · [Tested with](#tested-with) · [Support](#support-development) · [Contributing](#contributing) · [License](#license)
+[Features](#features) · [Install](#install-pre-built-release) · [Fresh defaults](#fresh-install-defaults) · [App Profiles](#app-profiles) · [Advanced](#advanced-tab) · [Changelog](CHANGELOG.md) · [How it works](#how-it-works) · [Building](#building) · [Tested with](#tested-with) · [Support](#support-development) · [Contributing](#contributing) · [License](#license)
 
 </div>
 
-Klik PRO remaps middle, forward, and back mouse-button events to recordable keyboard
-shortcuts. On supported device profiles, enabling Gesture replaces the mouse's standard
-`⌘Tab` output with the configured Klik PRO shortcut; the physical keyboard's `⌘Tab`
-remains unchanged. The horizontal thumb wheel provides configurable browser-tab
-switching. Left- and right-click are left untouched.
+Klik PRO remaps supported middle, forward, back, and Gesture mouse-button events to
+the currently active saved mapping preset. Enabling Gesture replaces the tested
+mouse's standard `⌘Tab` output with the configured Klik PRO shortcut; the physical
+keyboard's `⌘Tab` remains unchanged. The horizontal thumb wheel provides configurable
+browser-tab switching. Left- and right-click are left untouched.
+
+The three mapping slides are presets, not yet true hardware profiles: connected mice
+share the one active preset. A future sender-aware device-routing implementation is
+planned separately in [`docs/TRUE_MOUSE_PROFILE_PLAN.md`](docs/TRUE_MOUSE_PROFILE_PLAN.md).
 
 It's a small always-on background helper that does the remapping, plus a settings
 app for recording supported mouse-button shortcuts and checking for conflicts. Its
@@ -81,8 +85,8 @@ Once unlocked, point new App Profiles at a durable data folder so their logins s
 
 ## Features
 
-- **Four recordable button shortcuts on the tested mouse** — middle, Gesture,
-  forward, and back. When enabled, Gesture overrides the mouse's standard `⌘Tab`
+- **Four configurable controls on the tested mouse** — middle, Gesture, forward,
+  and back. When enabled, Gesture overrides the mouse's standard `⌘Tab`
   output with its configured shortcut without changing keyboard `⌘Tab`. Left- and
   right-click are never touched.
 - **Live conflict checking** — flags duplicate assignments, reserved macOS
@@ -104,13 +108,12 @@ Once unlocked, point new App Profiles at a durable data folder so their logins s
 - **Native & lightweight** — Swift + AppKit/Carbon, no dependencies or vendor
   drivers; standard controls use macOS event taps and Gesture uses a device-scoped
   macOS HID key map.
-- **Optional ChatGPT / Codex & Claude Quick Launch** — adds separate launcher icons +
-  global hotkeys for ChatGPT / Codex and Claude. Each launcher can also be linked to
-  Middle, Gesture, Forward, or Back while preserving that button's normal mapping
-  underneath. New configurations start with Forward assigned to ChatGPT / Codex and
-  Back assigned to Claude; both remain changeable or removable through **None**.
-  Its launcher icons can be hidden independently while the hotkeys and assigned mouse
-  buttons continue working.
+- **Optional ChatGPT / Codex & Claude Quick Launch** — adds separate launcher icons
+  and user-recordable global hotkeys. Each launcher can be linked to Middle, Gesture,
+  Forward, or Back while preserving that button's normal mapping underneath. Fresh
+  configurations start with no Quick Launch hotkeys or mouse-button assignments;
+  users opt in through **Assign Button** and the shortcut recorder. Launcher icons can
+  be hidden independently while configured hotkeys and assignments continue working.
   Its master toggle is available only when ChatGPT / Codex or Claude is installed;
   launcher wrappers alone do not count. Each app-specific hotkey and picker clearly
   disables when its app or launcher wrapper is missing; a stale picker assignment
@@ -238,21 +241,22 @@ any stale **Klik PRO Helper** entry with **−** and turn the newly listed one o
 
 Prefer to compile it yourself? See [Building](#building).
 
-## Default shortcuts
+## Fresh-install defaults
 
 | Buttons & Scroll Wheels | Klik PRO default key combination | System Default / Routing |
 |---|---|---|
-| **Middle Button** (scroll-wheel click) | ⇧⌘7 | Native middle click |
-| **Gesture Button** | ⇧⌘6 | ⌘Tab |
-| **Forward Button** | ⌘] (fallback) | Native Forward side-button event |
-| **Back Button** | ⌘[ (fallback) | Native Back side-button event |
-| **Horizontal Thumb Wheel** | ⌘⌥← / ⌘⌥→, with ⇧⌘← / ⇧⌘→ for a supported browser override | Native horizontal scrolling |
+| **Middle Button** (scroll-wheel click) | No shortcut; toggle off | Native middle click |
+| **Gesture Button** | No shortcut; toggle off | ⌘Tab remains unchanged |
+| **Forward Button** | Browser Forward (⌘]); toggle off | Native Forward side-button event |
+| **Back Button** | Browser Back (⌘[); toggle off | Native Back side-button event |
+| **Horizontal Thumb Wheel** | No browsers selected; toggle off | Native horizontal scrolling |
 
 ### Browser Back and Forward
 
-Default Back and Forward use the original side-button events in compatible browsers,
-so browser extensions cannot claim synthetic keyboard shortcuts. The recorded combo is
-only a fallback; custom assignments are always sent exactly as recorded.
+Forward and Back start with browser-history combos but remain disabled until the user
+turns their mapping toggle on. In compatible browsers, the helper prefers the original
+side-button event, so browser extensions cannot claim a synthetic keyboard shortcut.
+Custom assignments are always sent exactly as recorded.
 
 ### Editing and saving shortcuts
 
@@ -266,13 +270,14 @@ only a fallback; custom assignments are always sent exactly as recorded.
 
 ### ChatGPT / Codex & Claude Quick Launch
 
-- The independently recordable hotkeys default to ⌃⌥⌘G and ⌃⌥⌘C.
-- On a new configuration, **Forward** opens the original ChatGPT / Codex app and
-  **Back** opens the original Claude app. Original-app mouse assignments are normal
-  launch actions and do not depend on the Special Feature toggle.
-- Assign or change those buttons from the original-app cards in **App Profiles** or
-  from **Mappings**. One physical button can belong to exactly one original app or
-  generated profile.
+- The hotkey recorders start unset and disabled on a fresh configuration. Users choose
+  and enable their own combinations.
+- Fresh mapping presets have no ChatGPT / Codex or Claude mouse-button assignments.
+  Original-app assignments are optional launch actions and do not depend on the
+  Special Feature toggle once configured.
+- Assign or change those logical buttons from the original-app cards in **App Profiles**
+  or from **Mappings**. One button slot in the active mapping preset can belong to
+  exactly one original app or generated profile.
 - Original-app button assignments remain active independently of the Special Feature
   toggle. Choose **None — Clear assignment** from **Assign Button** to restore that
   button's normal mapping.
@@ -298,11 +303,12 @@ LaunchAgent, plus a separate settings app:
   helper, if one is still installed.
 - **Settings app** (`Sources/KlikProApp.swift`) — a small AppKit window with four
   tabs—Mappings, Settings, App Profiles, and a lock-gated Advanced tab—plus a
-  one-time welcome sheet for fresh installations. The sheet
-  explains the required Accessibility approval, the ready-to-try defaults, and where
-  to customize them. **Mappings** records shortcuts for the four supported mouse controls,
-  toggles them on/off, checks for conflicts, switches the optional Quick Launch toggle,
-  and links ChatGPT / Codex or Claude to a supported mouse button when requested.
+  one-time welcome sheet for fresh installations. The sheet explains the required
+  Accessibility approval, the quiet ready-to-configure defaults, and where to customize
+  them. **Mappings** shows up to three saved presets. Each preset owns its four mouse
+  controls, thumb-wheel browser selections, colour, and optional app assignments.
+  **Save** persists the viewed preset; **Activate** makes exactly one preset live in the
+  helper. The tab also checks conflicts and exposes optional Quick Launch actions.
   **Settings** covers
   launch-at-login, main and Special Feature menu-icon visibility, automatic update
   checks, and guided Accessibility setup with live status, a manual **Recheck** action,
@@ -346,12 +352,13 @@ recoloured launcher is **durable**: it keeps its name and icon across App Profil
 generation and gear **Replace**, and the generator card tile itself updates to match,
 returning to the native app's own name and icon after a reset.
 
-The **Mappings** tab uses the same two-column structure: mouse-button shortcuts and
-thumb-wheel tab switching stay on the left, while a scrollable profile list on the
-right provides **Open** and **Assign Button** for original apps and generated profiles.
-Both tabs render the
-same current profile icon immediately after a change. The remaining management
-actions and the **Menu Bar Icon** toggle stay on the App Profiles tab.
+The **Mappings** tab is the home for saved mouse-mapping presets. Use the carousel
+arrows or swipe to view a preset, edit its controls, then choose **Save**. Choosing
+**Activate** from the preset gear makes it the one mapping the helper currently uses;
+activating one preset deactivates the previous preset. The app/profile cards below
+the carousel provide optional **Open** and **Assign Button** actions for the active
+preset. These logical button assignments are not physical mouse bindings: all
+connected mice still share the active preset.
 
 For generated profiles, the gear menu groups **Rename**, **Change Icon**, and
 **Remove from Klik PRO**. **Change Icon** accepts PNG or ICO artwork whose shortest
@@ -378,7 +385,8 @@ switch for showing or hiding that instance in Klik PRO's menu-bar launchers. The
 menu-bar controls are independent of **Launch at login**: disabling automatic startup
 does not hide the icons that are already running in the current session.
 
-If an App Profile already owns a mouse button, its **Assign Button** control shows
+If an App Profile already owns a logical button in the active mapping preset, its
+**Assign Button** control shows
 that button as its own label — for example **Forward Button** — with a chain-link
 icon, and switches to **Change ⋯** on hover. A profile with no button assigned shows
 a link-with-plus icon on **Assign Button**.
@@ -425,8 +433,8 @@ managed entry, but keeps its login/profile data on disk for recovery. **Delete D
 in Advanced first asks whether to **Remove Icons (Keep Data)** or **Delete All Data**.
 Both choices clear the launcher, Dock tile, Launchpad entry, and menu-bar icon; Delete
 All Data then removes validated profile data after offering Move to Trash or Delete
-Permanently. Assigning a button on either tab updates the other immediately. The four
-working mouse controls can each be set to a **Keyboard Shortcut** or **Open App**,
+Permanently. Assigning a button on either tab updates the active mapping preset
+immediately. The four working mouse controls can each be set to a **Keyboard Shortcut** or **Open App**,
 while thumb-wheel browser switching is unchanged. Only installed apps on Klik PRO's
 small, human-tested list are shown; there is no general app search, unsupported-app
 list, Browse flow, or Convert action.
@@ -525,6 +533,9 @@ Possible directions for future releases — not committed, and subject to change
 - **Built-in system controls.** Preconfigured actions you can assign to a mouse button
   — brightness, volume, media playback, and the like — without recording a keyboard
   shortcut yourself.
+- **True hardware-bound mouse profiles.** Route events from simultaneously connected
+  mice using sender-aware HID identity instead of applying one active preset to every
+  mouse. See [`docs/TRUE_MOUSE_PROFILE_PLAN.md`](docs/TRUE_MOUSE_PROFILE_PLAN.md).
 
 Have a request? [Open an issue](https://github.com/AminudinMurad/klik-pro/issues).
 
