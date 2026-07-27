@@ -1264,6 +1264,27 @@ if grep -q 'drawDeviceCallouts(in: rect)' <<<"$settings_draw"; then
   exit 1
 fi
 
+# Both permissions are checked on the first launch after an install or an update.
+# consumeBundleVersionChanged() is single-shot, so both checks must read it in one place.
+grep -q 'func guideMouseMonitoringRegrantIfStillMissing()' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'func resetMouseMonitoringApproval() -> Bool' "$ROOT/Sources/KlikProApp.swift"
+grep -q '"reset", "ListenEvent", Bundle.main.bundleIdentifier ?? "local.klik-pro",' \
+  "$ROOT/Sources/KlikProApp.swift"
+grep -q 'IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) != kIOHIDAccessTypeGranted' \
+  "$ROOT/Sources/KlikProApp.swift"
+after_update="$(sed -n '/func guideAccessibilityRegrantAfterUpdateIfNeeded()/,/^    }/p' \
+  "$ROOT/Sources/KlikProApp.swift")"
+if ! grep -q 'guideMouseMonitoringRegrantIfStillMissing()' <<<"$after_update"; then
+  echo "The post-update check must cover Input Monitoring as well as Accessibility" >&2
+  exit 1
+fi
+if grep -cq 'consumeBundleVersionChanged()' <<<"$after_update"; then
+  :
+else
+  echo "Both permission checks must share the one consumeBundleVersionChanged() read" >&2
+  exit 1
+fi
+
 # Closing must not silently discard staged edits. Nearly every mouse-mapping change only
 # stages, so quitting threw them away while the footer said "Unsaved changes" and nothing
 # acted on it.

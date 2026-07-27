@@ -31,6 +31,26 @@ private func knownMouseDisplayName(for identity: MouseDeviceIdentity) -> String?
     }
 }
 
+/// Clears Klik PRO's own Input Monitoring approval, the counterpart to
+/// `resetAccessibilityApproval(bundleIdentifier:)` for the helper. The System Settings "+"
+/// button does not readily surface the .app, so removing and re-adding by hand is not a
+/// realistic recovery path — the app has to do this itself.
+@discardableResult
+func resetMouseMonitoringApproval() -> Bool {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+    process.arguments = [
+        "reset", "ListenEvent", Bundle.main.bundleIdentifier ?? "local.klik-pro",
+    ]
+    do {
+        try process.run()
+        process.waitUntilExit()
+        return process.terminationStatus == 0
+    } catch {
+        return false
+    }
+}
+
 /// Why a mouse scan came back empty. Without this distinction the UI cannot tell "you
 /// own no external mice" apart from "macOS refused to let us look", and it reported the
 /// first when the truth was the second — sending the user to hunt for a hardware fault
@@ -9345,6 +9365,7 @@ final class ToggleView: NSView {
     // then appears is confusing, so we proactively explain the remove-and-
     // re-grant steps. Shown at most once per launch.
     private var didGuideAccessibilityRegrantThisSession = false
+    private var didGuideMouseMonitoringThisSession = false
     private static let lastRunBundleVersionKey = "klikpro.lastRunBundleVersion"
 
     /// Records the running build and reports an update. Existing installations
@@ -9361,11 +9382,58 @@ final class ToggleView: NSView {
     /// Launch hook: after an update, if the user relies on the helper (menu-bar
     /// icon on) but it is no longer trusted, walk them through the re-grant
     /// instead of leaving the raw system prompt unexplained.
+    /// Both permissions are checked here on the first launch after an install or an
+    /// update. `consumeBundleVersionChanged()` is single-shot, so both checks have to read
+    /// it in one place — a second consumer would always see false.
+    ///
+    /// Accessibility keeps its extra `showMenuBarIcon` condition; Input Monitoring does
+    /// not, because mouse assignment is unrelated to the menu bar.
     func guideAccessibilityRegrantAfterUpdateIfNeeded() {
         guard !previewRenderingIsActive else { return }
         let updated = consumeBundleVersionChanged()
-        guard updated, config.onboardingCompleted, config.showMenuBarIcon else { return }
-        guideAccessibilityRegrantIfStillMissing()
+        guard updated, config.onboardingCompleted else { return }
+        if config.showMenuBarIcon {
+            guideAccessibilityRegrantIfStillMissing()
+        }
+        guideMouseMonitoringRegrantIfStillMissing()
+    }
+
+    /// Input Monitoring decays on every update for the same reason Accessibility does: the
+    /// grant is bound to an ad-hoc signature that changes with each build, while its row
+    /// in System Settings stays visible and switched on. Nothing checked it at launch, so
+    /// the first sign of trouble was Assign Mouse quietly finding no devices.
+    ///
+    /// This only inspects — `IOHIDCheckAccess` never prompts, so it is safe during launch.
+    /// A grant that is intact is left strictly alone, because resetting a working grant
+    /// revokes it.
+    func guideMouseMonitoringRegrantIfStillMissing() {
+        guard !previewRenderingIsActive,
+              config.onboardingCompleted,
+              !didGuideMouseMonitoringThisSession,
+              IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) != kIOHIDAccessTypeGranted,
+              let window = window,
+              window.attachedSheet == nil else { return }
+        didGuideMouseMonitoringThisSession = true
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Klik PRO needs Input Monitoring again."
+        alert.informativeText =
+            "macOS forgets this permission when Klik PRO updates, because Klik PRO is not "
+            + "notarized by Apple. Until it is restored, Klik PRO cannot see your mice and "
+            + "Assign Mouse finds nothing. Your existing mappings keep working.\n\n"
+            + "Resetting clears the stale approval so macOS can ask again the next time you "
+            + "assign a mouse."
+        alert.addButton(withTitle: "Reset and Open Settings")
+        alert.addButton(withTitle: "Later")
+        alert.beginSheetModal(for: window) { response in
+            guard response == .alertFirstButtonReturn else { return }
+            resetMouseMonitoringApproval()
+            if let url = URL(
+                string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
+            ) {
+                NSWorkspace.shared.open(url)
+            }
+        }
     }
 
     /// Menu-bar toggle turned ON (or launch-after-update): give the helper a
