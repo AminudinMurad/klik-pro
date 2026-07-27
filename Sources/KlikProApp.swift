@@ -2023,8 +2023,12 @@ final class MouseProfileHeaderView: NSView {
 
         let isActive = viewedProfileID == activeProfileID
         let index = viewedProfileID.flatMap(profileIDs.firstIndex(of:)) ?? 0
-        previousButton.isEnabled = index > 0
-        nextButton.isEnabled = index + 1 < profileIDs.count
+        // The carousel wraps, so neither arrow has a boundary to stop at. Both stay live
+        // whenever there is somewhere else to go; with one mapping there is not, and both
+        // dim rather than animating a slide onto itself.
+        let canBrowse = profileIDs.count > 1
+        previousButton.isEnabled = canBrowse
+        nextButton.isEnabled = canBrowse
         menuButton.isEnabled = viewedProfileID != nil
         let name = viewed?.name ?? "Mouse mapping"
         menuButton.setAccessibilityLabel("Manage \(name) mapping")
@@ -2079,12 +2083,20 @@ final class MouseProfileHeaderView: NSView {
         return isHorizontal
     }
 
+    /// The carousel wraps: past the last mapping comes the first, and vice versa. This
+    /// reverses the original "stop at each end, dim the arrow there" decision, taken when
+    /// a slide could be the only one. With the cap of three in use, stopping dead at an
+    /// edge reads as a broken arrow rather than a boundary.
+    ///
+    /// A single mapping still goes nowhere — wrapping onto itself would animate a
+    /// transition between a slide and that same slide.
     private func browse(offset: Int) {
         guard let viewedProfileID,
               let index = profileIDs.firstIndex(of: viewedProfileID),
-              !profileIDs.isEmpty else { return }
-        let next = index + offset
-        guard profileIDs.indices.contains(next) else { return }
+              profileIDs.count > 1 else { return }
+        let count = profileIDs.count
+        // Modulo twice: Swift's % keeps the sign of the dividend, so -1 % 3 is -1.
+        let next = ((index + offset) % count + count) % count
         onBrowseAnimation?(offset)
         onBrowse?(profileIDs[next])
     }
@@ -3950,7 +3962,8 @@ final class ToggleWindowController: NSWindowController {
         window.contentView = content
         super.init(window: window)
         content.onClose = { [weak self] in
-            self?.close()
+            guard let self, self.content.confirmCloseDiscardingUnsavedChanges() else { return }
+            self.close()
             NSApp.terminate(nil)
         }
     }
@@ -5203,6 +5216,39 @@ final class ToggleView: NSView {
         }
         preferencesView.safariCheck.onChange = { [weak self] on in
             self?.updateActiveMouseProfile { $0.thumbWheel.safariEnabled = on }
+        }
+    }
+
+    /// Close used to terminate outright. Almost every mouse-mapping edit only stages —
+    /// `updateViewedMouseProfile` marks the config dirty and stops there — so quitting
+    /// discarded them without a word. The footer had been saying "Unsaved changes" the
+    /// whole time and nothing ever acted on it, which made persistence look arbitrary:
+    /// edits made before an Activate survived, because Activate saves the whole staged
+    /// config, and edits made after it did not.
+    ///
+    /// Save deliberately does not also close. `saveConfiguration()` runs asynchronously
+    /// and terminating on top of it risks truncating the write — the exact failure this
+    /// is here to prevent. It saves, the window stays, and the next Close finds nothing
+    /// pending. Auto-closing needs the save-completion callback threaded through first.
+    func confirmCloseDiscardingUnsavedChanges() -> Bool {
+        guard hasUnsavedConfigurationChanges, !previewRenderingIsActive else { return true }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "You have unsaved changes."
+        alert.informativeText =
+            "Your mouse mappings and settings have changes that are not saved yet. "
+            + "Closing now discards them."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Discard and Close")
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            saveConfiguration()
+            return false
+        case .alertSecondButtonReturn:
+            return true
+        default:
+            return false
         }
     }
 

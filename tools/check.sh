@@ -1216,8 +1216,13 @@ grep -q '"Duplicate Mapping"' "$ROOT/Sources/KlikProApp.swift"
 grep -q '"Reset Mapping…"' "$ROOT/Sources/KlikProApp.swift"
 grep -q '"Delete Mapping…"' "$ROOT/Sources/KlikProApp.swift"
 grep -q '"No compatible external mice found."' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'guard profileIDs.indices.contains(next) else { return }' \
+# The carousel wraps. This replaces the original stop-at-each-end rule: with the cap of
+# three mappings in use, stopping dead at an edge read as a broken arrow. A single mapping
+# still goes nowhere, so browse refuses rather than animating a slide onto itself.
+grep -q 'let next = ((index + offset) % count + count) % count' \
   "$ROOT/Sources/KlikProApp.swift"
+grep -q 'profileIDs.count > 1 else { return }' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'let canBrowse = profileIDs.count > 1' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'func handleHorizontalScroll(_ event: NSEvent)' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'NSWorkspace.shared.accessibilityDisplayShouldReduceMotion' \
   "$ROOT/Sources/KlikProApp.swift"
@@ -1244,6 +1249,14 @@ if [[ "$access_calls" != "1" ]]; then
   echo "Input Monitoring must be requested from exactly one path (the rescan)" >&2
   exit 1
 fi
+
+# Closing must not silently discard staged edits. Nearly every mouse-mapping change only
+# stages, so quitting threw them away while the footer said "Unsaved changes" and nothing
+# acted on it.
+grep -q 'func confirmCloseDiscardingUnsavedChanges() -> Bool' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'guard let self, self.content.confirmCloseDiscardingUnsavedChanges() else { return }' \
+  "$ROOT/Sources/KlikProApp.swift"
+grep -q 'alert.addButton(withTitle: "Discard and Close")' "$ROOT/Sources/KlikProApp.swift"
 
 # Assign/Unassign Mouse commits, like Activate beside it in the same gear menu. Staging it
 # was invisible, because the five toggles enable the moment a device is set.
