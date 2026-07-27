@@ -2,7 +2,7 @@
 
 All notable changes to Klik PRO are documented here.
 
-## 1.5.0 (unreleased)
+## 1.5.0
 
 The app lists on Mappings and App Profiles now use one card, and a fresh install starts quiet.
 
