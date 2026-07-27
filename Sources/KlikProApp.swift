@@ -1838,6 +1838,20 @@ final class ToggleOnlyRowView: NSView {
 
 final class MouseSlideContainerView: NSView {
     override var isFlipped: Bool { true }
+
+    /// The mouse artwork and its five leader lines are drawn here rather than by the
+    /// superview. They used to be painted *behind* this container, which put them outside
+    /// the layer the browse CATransition animates — so the control rows slid across while
+    /// the mouse and its callouts sat perfectly still.
+    ///
+    /// This container's frame is `SettingsContentView.deviceCard`, which is at the origin
+    /// and flipped exactly like its superview, so `bounds` is the very same rectangle the
+    /// artwork was already positioned against. Nothing needed re-measuring.
+    var drawArtwork: ((NSRect) -> Void)?
+
+    override func draw(_ dirtyRect: NSRect) {
+        drawArtwork?(bounds)
+    }
 }
 
 /// Large, quiet side control used to browse mapping slides. NSButton supplies
@@ -2786,6 +2800,9 @@ final class SettingsContentView: NSView {
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: 728))
 
         mouseSlideContainer.wantsLayer = true
+        mouseSlideContainer.drawArtwork = { [weak self] card in
+            self?.drawMouseArtwork(in: card)
+        }
         addSubview(mouseSlideContainer)
         [
             middleButtonRow, gestureButtonRow, forwardRow, backRow,
@@ -2857,13 +2874,16 @@ final class SettingsContentView: NSView {
         let tint = color.tint
         guard tint != mouseSlideTint else { return }
         mouseSlideTint = tint
-        needsDisplay = true
+        // The artwork is drawn by the container now, so that is what has to repaint.
+        mouseSlideContainer.needsDisplay = true
     }
 
     private func prepareMouseSlideBrowse(direction: Int) {
         guard let layer = mouseSlideContainer.layer else { return }
         let transition = CATransition()
-        transition.duration = 0.20
+        // 0.20s read as a jump rather than a slide. This is still a single layer
+        // transition — the cost does not change with the duration.
+        transition.duration = 0.34
         transition.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             transition.type = .fade
@@ -2975,6 +2995,12 @@ final class SettingsContentView: NSView {
         // Group title, parallel to "NATIVE APPS" / "APP PROFILES" on the cards below.
         drawSectionLabel("Mouse Mappings", x: 18, y: 16)
 
+    }
+
+    /// Called by `mouseSlideContainer` during its own draw, so the artwork travels with
+    /// the controls when a slide changes. `card` is that container's bounds, which is the
+    /// same rect this used to receive as `SettingsContentView.deviceCard`.
+    private func drawMouseArtwork(in card: NSRect) {
         guard let image else { return }
         let imageAspect = image.size.height > 0 ? image.size.width / image.size.height : 1
         // Inset chosen so the mouse keeps its v1.4.3 size (267x198) while centred in the
@@ -3970,6 +3996,10 @@ final class ToggleWindowController: NSWindowController {
 
     func showFirstLaunchOnboardingIfNeeded() {
         content.showFirstLaunchOnboardingIfNeeded()
+    }
+
+    func confirmCloseDiscardingUnsavedChanges() -> Bool {
+        content.confirmCloseDiscardingUnsavedChanges()
     }
 
     func checkForUpdatesFromMenuBar() {
@@ -10049,6 +10079,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
+    }
+
+    /// Cmd-Q, the Dock and the menu bar all reach `NSApp.terminate` directly, bypassing
+    /// the window's Close button. Guarding only that button still lost staged edits —
+    /// which is most of them, since mouse-mapping changes stage until Save.
+    func applicationShouldTerminate(
+        _ sender: NSApplication
+    ) -> NSApplication.TerminateReply {
+        guard controller?.confirmCloseDiscardingUnsavedChanges() ?? true else {
+            return .terminateCancel
+        }
+        return .terminateNow
     }
 
     deinit {

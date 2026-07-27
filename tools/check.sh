@@ -1250,6 +1250,20 @@ if [[ "$access_calls" != "1" ]]; then
   exit 1
 fi
 
+# The mouse artwork and its leader lines are drawn by the slide container, so the browse
+# CATransition carries them with the controls. Painted by the superview they sat outside
+# the animated layer and stayed put while the controls slid across.
+grep -q 'var drawArtwork: ((NSRect) -> Void)?' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'private func drawMouseArtwork(in card: NSRect)' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'self?.drawMouseArtwork(in: card)' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'mouseSlideContainer.needsDisplay = true' "$ROOT/Sources/KlikProApp.swift"
+settings_draw="$(sed -n '/^    override func draw(_ dirtyRect: NSRect) {$/,/^    }$/p' \
+  "$ROOT/Sources/KlikProApp.swift")"
+if grep -q 'drawDeviceCallouts(in: rect)' <<<"$settings_draw"; then
+  echo "The mouse artwork must be drawn by the slide container, not its superview" >&2
+  exit 1
+fi
+
 # Closing must not silently discard staged edits. Nearly every mouse-mapping change only
 # stages, so quitting threw them away while the footer said "Unsaved changes" and nothing
 # acted on it.
@@ -1257,6 +1271,12 @@ grep -q 'func confirmCloseDiscardingUnsavedChanges() -> Bool' "$ROOT/Sources/Kli
 grep -q 'guard let self, self.content.confirmCloseDiscardingUnsavedChanges() else { return }' \
   "$ROOT/Sources/KlikProApp.swift"
 grep -q 'alert.addButton(withTitle: "Discard and Close")' "$ROOT/Sources/KlikProApp.swift"
+# Cmd-Q, the Dock and the menu bar reach NSApp.terminate directly, so guarding only the
+# window's Close button still lost staged edits.
+grep -q 'func applicationShouldTerminate(' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'guard controller?.confirmCloseDiscardingUnsavedChanges() ?? true else {' \
+  "$ROOT/Sources/KlikProApp.swift"
+grep -q 'return .terminateCancel' "$ROOT/Sources/KlikProApp.swift"
 
 # Assign/Unassign Mouse commits, like Activate beside it in the same gear menu. Staging it
 # was invisible, because the five toggles enable the moment a device is set.
