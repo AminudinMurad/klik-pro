@@ -45,39 +45,39 @@ Step 2 offers a durable data folder up front, so profile logins are stored where
 survive an uninstall from the very first profile:
 
 <p align="center">
-  <img src="assets/onboarding-flow.gif?v=1.4.5-b22" width="462" alt="Klik PRO first-launch onboarding animation cycling through its four steps: Welcome, the data folder for profile logins, Preferences, and an opt-in Accessibility step">
+  <img src="assets/onboarding-flow.gif?v=1.5.0-b23" width="462" alt="Klik PRO first-launch onboarding animation cycling through its four steps: Welcome, the data folder for profile logins, Preferences, and an opt-in Accessibility step">
 </p>
 
 **Supported controls** — configure compatible mouse controls and see live conflict
 checks:
 
-<img src="assets/screenshot-mappings.png?v=1.4.5-b22" width="940" alt="Klik PRO Mappings tab with supported mouse controls, shortcut settings, and native apps plus App Profiles as launch targets">
+<img src="assets/screenshot-mappings.png?v=1.5.0-b23" width="940" alt="Klik PRO v1.5.0 Mappings tab with three saved mouse mapping slides, browser checkboxes, shortcut settings, and native apps plus App Profiles as launch targets">
 
 **App Profiles** — generate isolated extra instances of ChatGPT or Claude, each with
 its own login; open or assign each profile, and give it a custom PNG/ICO, colour tint,
 or one-character badge so every account is recognisable at a glance:
 
-<img src="assets/screenshot-app-profiles.png?v=1.4.5-b22" width="940" alt="Klik PRO App Profiles tab showing native-app Open, New Profile, and Assign Button actions plus individually styled generated profiles">
+<img src="assets/screenshot-app-profiles.png?v=1.5.0-b23" width="940" alt="Klik PRO App Profiles tab showing native-app Open, New Profile, and Assign Button actions plus individually styled generated profiles">
 
 **Icon customisation** — distinguish profiles with colour tints or custom badges,
 manage them from the per-profile gear menu, and see the same identity immediately in
 Mappings:
 
 <p align="center">
-  <img src="assets/app-profiles-icon-showcase.gif?v=1.4.5-b22" width="600" alt="Klik PRO animation showing full-size tinted and initial-badged App Profile icons, profile management controls, and matching icons in the Mappings tab">
+  <img src="assets/app-profiles-icon-showcase.gif?v=1.5.0-b23" width="600" alt="Klik PRO animation showing full-size tinted and initial-badged App Profile icons, profile management controls, and matching icons in the Mappings tab">
 </p>
 
 **Settings** — launch-at-login, menu-icon visibility, update-check, and guided Accessibility setup/reset controls:
 
-<img src="assets/screenshot-settings.png?v=1.4.5-b22" width="940" alt="Klik PRO Settings tab with separated Recheck control and outlined Granted permission status">
+<img src="assets/screenshot-settings.png?v=1.5.0-b23" width="940" alt="Klik PRO Settings tab with separated Recheck control and outlined Granted permission status">
 
 **Advanced — durable data folder (lock-gated).** The Advanced tab is locked by default. Its options change where App Profile data is stored on disk, so clicking the padlock shows a risk confirmation before anything unlocks:
 
-<img src="assets/screenshot-advanced-locked.png?v=1.4.5-b22" width="940" alt="Klik PRO Advanced tab locked: a padlock, a warning that these options change where App Profile data is stored on disk and can leave profiles unfindable, and a Click the lock to unlock hint">
+<img src="assets/screenshot-advanced-locked.png?v=1.5.0-b23" width="940" alt="Klik PRO Advanced tab locked: a padlock, a warning that these options change where App Profile data is stored on disk and can leave profiles unfindable, and a Click the lock to unlock hint">
 
 Once unlocked, point new App Profiles at a durable data folder so their logins survive uninstalling Klik PRO, scan an existing folder to recover profiles after a reinstall, and review profile health. Missing launchers can be repaired; active profiles can be archived without deleting their login data or custom icon, then restored later with the same identity:
 
-<img src="assets/screenshot-advanced.png?v=1.4.5-b22" width="940" alt="Klik PRO Advanced tab unlocked, showing durable data-folder controls with Scan and Import, App Profile Maintenance rows for healthy, repairable, archived, stale, and orphaned profiles, and a Profile Cleanup section">
+<img src="assets/screenshot-advanced.png?v=1.5.0-b23" width="940" alt="Klik PRO Advanced tab unlocked, showing durable data-folder controls with Scan and Import, App Profile Maintenance rows for healthy, repairable, archived, stale, and orphaned profiles, and a Profile Cleanup section">
 
 ## Features
 
@@ -90,6 +90,11 @@ Once unlocked, point new App Profiles at a durable data folder so their logins s
   system-wide as you record them.
 - **Thumb-wheel tab switching** — the horizontal wheel flips browser tabs, with
   per-browser combinations and a sensible fallback elsewhere.
+- **Saved mouse mapping profiles** — keep up to three independent mapping presets,
+  each with its own button toggles, shortcuts, app assignments, browser selections,
+  and visual colour. Browsing a slide only loads it for editing; **Save** persists
+  that preset and **Activate** makes exactly one preset live in the helper. The
+  default slides are Pearl White, Mist Blue, and Rose, and can be renamed or deleted.
 - **Save applies instantly** — no manual restart; the background helper restarts
   automatically on save.
 - **Configurable Klik PRO menu-bar icon** — left-click opens Settings; right-click
@@ -133,10 +138,10 @@ Once unlocked, point new App Profiles at a durable data folder so their logins s
 
 ## Install (pre-built release)
 
-The current release is **Klik PRO v1.4.5 (build 22)**, provided as one universal
+The current release is **Klik PRO v1.5.0 (build 23)**, provided as one universal
 macOS app for Apple Silicon and Intel Macs. The DMG is the recommended download;
 the ZIP contains the same app as an alternative.
-**[Download Klik PRO v1.4.5](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.4.5).**
+**[Download Klik PRO v1.5.0](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.5.0).**
 
 > [!IMPORTANT]
 > **Update if you use a durable Data Folder.** Version 1.2.9 remembers previously
@@ -561,7 +566,7 @@ setups Klik PRO has been tested against:
 | | |
 |---|---|
 | macOS | 26.5.2 (build 25F84) |
-| Klik PRO | v1.4.5 (build 22), universal Apple Silicon + Intel build |
+| Klik PRO | v1.5.0 (build 23), universal Apple Silicon + Intel build |
 | Primary mouse | Logitech MX Master 3 (Mac edition), firmware `MPM19.01_0015`, connected over Bluetooth (BLE) |
 | Additional tested mouse | Logi M650, firmware `RBM16.10_0014` |
 | Vendor software / driver | None — no mouse driver or manufacturer software installed |
