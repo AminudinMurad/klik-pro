@@ -2020,15 +2020,15 @@ final class MouseProfileHeaderView: NSView {
     private let previousButton = MouseSlideNavigationButton(
         symbolName: "chevron.left",
         accessibility: "Previous mouse mapping",
-        frame: NSRect(x: 8, y: 146, width: 46, height: 52)
+        frame: NSRect(x: 8, y: 0, width: 46, height: 52)
     )
     private let nextButton = MouseSlideNavigationButton(
         symbolName: "chevron.right",
         accessibility: "Next mouse mapping",
-        frame: NSRect(x: 818, y: 146, width: 46, height: 52)
+        frame: NSRect(x: 0, y: 0, width: 46, height: 52)
     )
     private let menuButton = AppProfileGearButton(
-        frame: NSRect(x: 826, y: 12, width: 30, height: 28)
+        frame: NSRect(x: 0, y: 12, width: 30, height: 28)
     )
 
     private var profiles: [MouseProfile] = []
@@ -2062,6 +2062,13 @@ final class MouseProfileHeaderView: NSView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        let navigationY = floor((frameRect.height - previousButton.frame.height) / 2)
+        previousButton.frame.origin.y = navigationY
+        nextButton.frame.origin = NSPoint(
+            x: frameRect.width - nextButton.frame.width - 8,
+            y: navigationY
+        )
+        menuButton.frame.origin.x = frameRect.width - menuButton.frame.width - 16
         previousButton.target = self
         previousButton.action = #selector(browsePrevious)
         nextButton.target = self
@@ -2471,7 +2478,7 @@ final class MouseProfileHeaderView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         ("Horizontal Thumb Wheel" as NSString).draw(
-            at: NSPoint(x: 380, y: 49),
+            at: NSPoint(x: 380, y: 44),
             withAttributes: [
                 .font: NSFont.systemFont(ofSize: 12, weight: .medium),
                 .foregroundColor: NSColor.appTextPrimary,
@@ -2600,7 +2607,7 @@ final class SettingsContentView: NSView {
     let thumbWheelToggle: ToggleSwitchView
     let thumbWheelBrowsers: ThumbWheelBrowsersButton
     let mouseProfileHeader = MouseProfileHeaderView(
-        frame: NSRect(x: 0, y: 0, width: 872, height: 368)
+        frame: NSRect(x: 0, y: 0, width: 872, height: 326)
     )
     private let mouseSlideContainer: MouseSlideContainerView
     var onThumbWheelToggle: ((Bool) -> Void)?
@@ -2638,9 +2645,9 @@ final class SettingsContentView: NSView {
     // The mouse-guide + callouts row is prioritised (it's the point of this tab); the
     // bottom two columns are a quick-access companion — full management lives on the
     // App Profiles tab — so the guide gets the larger share of the height.
-    static let deviceCard         = NSRect(x: 0, y: 0, width: rightCardX + rightCardW, height: 368)
+    static let deviceCard         = NSRect(x: 0, y: 0, width: rightCardX + rightCardW, height: 326)
     // Native apps + App Profiles, side by side across the full width, below the guide.
-    static let mappingBottomCard  = NSRect(x: 0, y: 384, width: rightCardX + rightCardW, height: 344)
+    static let mappingBottomCard  = NSRect(x: 0, y: 340, width: rightCardX + rightCardW, height: 308)
 
     private static func previewAppIcon(for target: QuickLaunchTarget) -> NSImage {
         let label = target == .chatGPT ? "G" : "C"
@@ -2709,8 +2716,8 @@ final class SettingsContentView: NSView {
         // doesn't sit too low against the app lists below.
         let shortcutBottomLeftX: CGFloat = 110   // bottom-left (Forward); inner edge ≈ x 300
         let shortcutBottomRightX: CGFloat = 574  // bottom-right (Gesture); symmetric
-        let shortcutTopY: CGFloat = 52    // leaves a header strip for the "Mouse Mappings" title
-        let shortcutBottomY: CGFloat = 216
+        let shortcutTopY: CGFloat = 48    // leaves a header strip for the "Mouse Mappings" title
+        let shortcutBottomY: CGFloat = 182
         middleButtonRow = RecordableShortcutRowView(
             title: "Middle Button",
             mapping: config.middleButton,
@@ -2852,13 +2859,13 @@ final class SettingsContentView: NSView {
         // is drawn as its title in draw(); the leader anchors just below it (see deviceCallouts).
         thumbWheelToggle = ToggleSwitchView(
             isOn: config.thumbWheel.enabled,
-            frame: NSRect(x: 332, y: 43, width: 40, height: 22)
+            frame: NSRect(x: 332, y: 39, width: 40, height: 22)
         )
         thumbWheelBrowsers = ThumbWheelBrowsersButton(
-            frame: NSRect(x: 380, y: 74, width: 150, height: 26)
+            frame: NSRect(x: 380, y: 68, width: 150, height: 26)
         )
 
-        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 728))
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 648))
 
         mouseSlideContainer.wantsLayer = true
         mouseSlideContainer.drawArtwork = { [weak self] card in
@@ -3158,19 +3165,19 @@ final class SettingsContentView: NSView {
 
     // fx/fy are fractions of the drawn mouse rect (top-left origin), measured on the
     // 1000x742 device artwork. controlAnchor points match the narrow corner controls set in
-    // init: the top row's inner edges are x 282 (left) / x 590 (right) with centre y 100 (the
+    // init: the top row's inner edges are x 282 (left) / x 590 (right) with centre y 96 (the
     // top row sits below the "Mouse Mappings" header strip); the bottom row is pulled in a
     // little further — the forward leader starts at x 342 (just beyond its popup) and the
-    // gesture edge is x 574, both with centre y 264. Each anchor
+    // gesture edge is x 574, both with centre y 230. Each anchor
     // is the control edge nearest the mouse, so the leader runs from there to the button.
     private static let deviceCallouts: [DeviceCallout] = [
-        DeviceCallout(title: "Middle Button (Scroll Wheel)", fx: 0.245, fy: 0.413, controlAnchor: NSPoint(x: 282, y: 100)),
+        DeviceCallout(title: "Middle Button (Scroll Wheel)", fx: 0.245, fy: 0.413, controlAnchor: NSPoint(x: 282, y: 96)),
         // The compact action popup extends past the row's nominal frame, so start the
         // leader just beyond its real right edge instead of drawing through its arrow.
-        DeviceCallout(title: "Forward Button",               fx: 0.584, fy: 0.546, controlAnchor: NSPoint(x: 342, y: 264)),
-        DeviceCallout(title: "Horizontal Thumb Wheel",       fx: 0.594, fy: 0.422, controlAnchor: NSPoint(x: 436, y: 100)),
-        DeviceCallout(title: "Back Button",                  fx: 0.692, fy: 0.447, controlAnchor: NSPoint(x: 590, y: 100)),
-        DeviceCallout(title: "Gesture Button",               fx: 0.755, fy: 0.745, controlAnchor: NSPoint(x: 574, y: 264)),
+        DeviceCallout(title: "Forward Button",               fx: 0.584, fy: 0.546, controlAnchor: NSPoint(x: 342, y: 230)),
+        DeviceCallout(title: "Horizontal Thumb Wheel",       fx: 0.594, fy: 0.422, controlAnchor: NSPoint(x: 436, y: 96)),
+        DeviceCallout(title: "Back Button",                  fx: 0.692, fy: 0.447, controlAnchor: NSPoint(x: 590, y: 96)),
+        DeviceCallout(title: "Gesture Button",               fx: 0.755, fy: 0.745, controlAnchor: NSPoint(x: 574, y: 230)),
     ]
 
     private func drawDeviceCallouts(in mouseRect: NSRect) {
@@ -4075,7 +4082,7 @@ final class ToggleWindowController: NSWindowController {
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 940, height: 934),
+            contentRect: NSRect(x: 0, y: 0, width: 940, height: 820),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -4192,14 +4199,14 @@ final class ToggleView: NSView {
     private var mouseAccessRequired = false
     private let saveButton = PrimaryHoverButton(
         title: "Save",
-        frame: NSRect(x: 48, y: 854, width: 120, height: 42)
+        frame: NSRect(x: 48, y: 752, width: 120, height: 42)
     )
     // Check-for-updates button, top-right of the header (where the status pill used to be).
     // Right edge stays at x=888; the compact "⟳ Updates…" label lets it be narrower.
     private let updateButtonRect = NSRect(x: 768, y: 30, width: 120, height: 30)
     private var updateButtonTrackingArea: NSTrackingArea?
     private var updateButtonHovered = false
-    private let closeButtonRect = NSRect(x: 808, y: 854, width: 90, height: 42)
+    private let closeButtonRect = NSRect(x: 808, y: 752, width: 90, height: 42)
     private var closeButtonTrackingArea: NSTrackingArea?
     private var closeButtonHovered = false
     // Set by a successful check when a newer release exists; lights up the header button.
@@ -4294,8 +4301,16 @@ final class ToggleView: NSView {
             caffeinateMenu: loadedConfig.caffeinateMenuEnabled,
             thumbWheel: loadedConfig.thumbWheel,
             width: 872)
-        appProfilesView = AppProfilesContentView(instances: loadedConfig.instances, width: 872)
-        advancedView = AdvancedSettingsContentView(dataRoot: loadedConfig.dataRoot, width: 872)
+        appProfilesView = AppProfilesContentView(
+            instances: loadedConfig.instances,
+            width: 872,
+            height: 648
+        )
+        advancedView = AdvancedSettingsContentView(
+            dataRoot: loadedConfig.dataRoot,
+            width: 872,
+            height: 648
+        )
 
         super.init(frame: frameRect)
         launchableInstanceIDsCache = initialLaunchableInstanceIDs
@@ -4303,7 +4318,7 @@ final class ToggleView: NSView {
         layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
 
         addSubview(headerWordmark)
-        scrollView.frame = NSRect(x: 34, y: 96, width: 872, height: 728)
+        scrollView.frame = NSRect(x: 34, y: 82, width: 872, height: 648)
         scrollView.hasVerticalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
@@ -10200,7 +10215,7 @@ final class ToggleView: NSView {
                 .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
                 .foregroundColor: NSColor.systemRed
             ]
-            "Unsaved changes".draw(at: NSPoint(x: 184, y: 866), withAttributes: attrs)
+            "Unsaved changes".draw(at: NSPoint(x: 184, y: 764), withAttributes: attrs)
         }
 
         if let message = saveStatusMessage {
@@ -10208,7 +10223,7 @@ final class ToggleView: NSView {
                 .font: NSFont.systemFont(ofSize: 12),
                 .foregroundColor: NSColor.appTextSecondary
             ]
-            message.draw(at: NSPoint(x: 356, y: 866), withAttributes: attrs)
+            message.draw(at: NSPoint(x: 356, y: 764), withAttributes: attrs)
         }
     }
 

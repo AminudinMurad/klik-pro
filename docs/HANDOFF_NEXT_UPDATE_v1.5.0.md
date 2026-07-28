@@ -45,22 +45,33 @@ dominant idle cost. The stable poll now compares cheap profile-file fingerprints
 and performs full health validation only after a relevant change; managed launch
 actions continue to revalidate independently and fail closed.
 
-Last full verification after the performance change:
+The dashboard is now sized for a 13-inch MacBook:
+
+- fixed content size: `940 × 820` points (previously `940 × 934`);
+- fixed dashboard viewport: `872 × 648` points, with no outer vertical scroller;
+- the Mappings mouse guide and its callouts use a compact 326-point card;
+- Native Apps, App Profiles, and Advanced maintenance are the only vertically
+  scrolling areas; and
+- all tracked dashboard screenshots and the App Profiles showcase were
+  re-rendered at the compact geometry.
+
+Last full verification after the compact-dashboard change:
 
 ```text
 ./tools/xcode-dev.sh check
 All checks passed
-build/check-20260728-194134
+build/check-20260728-200050
 ```
 
 ## Private owner-test package
 
-A private universal v1.5.1 build was created locally after the optimization:
+A private universal v1.5.1 build was recreated locally after the compact
+dashboard change:
 
 - DMG: `releases/Klik-PRO-v1.5.1-macos-universal.dmg`
-  - SHA-256: `948a426ee0dbdf58caaf9faa1c7c80bdc7293decb1ea63a74bdcad30dab9ff42`
+  - SHA-256: `d3c3962e34a5756b1cb9eaf86ce8cc1a686781fc61bff18c8f2a2df2cdcb7c69`
 - ZIP: `releases/Klik-PRO-v1.5.1-macos-universal.zip`
-  - SHA-256: `54849e012cf7d89c19de79c7967e4e9d22415dca6ad44e73e5b9329d65cc4176`
+  - SHA-256: `7f68705f7000777f9ca2abe4fce521a8b4ce2bce2e6e65a01966540a5df99c0f`
 - Both checksum manifests and the local installer manifest have valid signatures
   from the checked-in Klik PRO release key.
 - `install-klik-pro.sh --verify-only` passed every authenticity and integrity

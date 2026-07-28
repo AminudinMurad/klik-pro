@@ -1923,11 +1923,14 @@ private final class MappingSectionCardView: NSView {
         // Pin capacity and viewport size are separate product choices: only one card
         // may be sticky, while three cards remain visible without scrolling.
         let visibleRows: CGFloat = 3
-        let listHeight = visibleRows * AppCardMetrics.height
+        let threeRowsHeight = visibleRows * AppCardMetrics.height
             + (visibleRows - 1) * innerCardSpacing
         // Keep the first card close to its section title. Extra column height belongs
         // below the visible rows, not as a large dead band above them.
         let listY: CGFloat = 50
+        // On a 13-inch display the dashboard is intentionally shorter. Keep the
+        // card inside that fixed viewport and let only its app list scroll.
+        let listHeight = min(threeRowsHeight, max(0, frame.height - listY - 12))
         listView.frame = NSRect(x: 12, y: listY, width: frame.width - 24, height: listHeight)
         listView.setAccessibilityLabel("\(title) list")
 
@@ -2210,7 +2213,7 @@ final class AppProfilesContentView: NSView {
 
     override var isFlipped: Bool { true }
 
-    init(instances: [AppProfileInstance], width: CGFloat) {
+    init(instances: [AppProfileInstance], width: CGFloat, height: CGFloat = 648) {
         let generatorColumnWidth = floor(width * Self.generatorColumnRatio)
         let generatorListWidth = generatorColumnWidth - 36
         let generatorWidth = AppCardListView.contentWidth(for: generatorListWidth)
@@ -2224,7 +2227,7 @@ final class AppProfilesContentView: NSView {
         }
         // Match the outer scroll viewport so the profiles column fills the window rather
         // than leaving empty space below a fixed-height card.
-        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 702))
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: height))
 
         explanationField.frame = NSRect(
             x: 18, y: Self.headerTopY + 26, width: generatorListWidth, height: 64
@@ -2600,8 +2603,8 @@ final class AdvancedSettingsContentView: NSView {
 
     override var isFlipped: Bool { true }
 
-    init(dataRoot: String?, width: CGFloat) {
-        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 702))
+    init(dataRoot: String?, width: CGFloat, height: CGFloat = 648) {
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: height))
 
         // Locked state, centred. The lock icon is a pressable button.
         let iconConfig = NSImage.SymbolConfiguration(pointSize: 40, weight: .regular)
@@ -2646,24 +2649,24 @@ final class AdvancedSettingsContentView: NSView {
         scanButton.onPress = { [weak self] in self?.onScanAndImport?() }
 
         // Section 2 — Maintenance rows for the profiles Klik PRO still tracks.
-        styleSectionLabel(maintenanceLabel, frame: NSRect(x: 28, y: 210, width: width - 56, height: 16))
-        styleBody(maintenanceBody, frame: NSRect(x: 28, y: 234, width: width - 56, height: 36))
-        maintenanceScroll.frame = NSRect(x: 28, y: 280, width: width - 56, height: 204)
+        styleSectionLabel(maintenanceLabel, frame: NSRect(x: 28, y: 194, width: width - 56, height: 16))
+        styleBody(maintenanceBody, frame: NSRect(x: 28, y: 218, width: width - 56, height: 36))
+        maintenanceScroll.frame = NSRect(x: 28, y: 260, width: width - 56, height: 178)
         maintenanceScroll.drawsBackground = false
         maintenanceScroll.hasVerticalScroller = true
         maintenanceScroll.autohidesScrollers = true
         maintenanceScroll.documentView = maintenanceDocument
 
         // Section 3 — Profile cleanup for what removed profiles left behind.
-        styleSectionLabel(cleanupLabel, frame: NSRect(x: 28, y: 518, width: width - 56, height: 16))
-        styleBody(cleanupBody, frame: NSRect(x: 28, y: 542, width: width - 56, height: 36))
-        deepScanButton.frame = NSRect(x: 28, y: 588, width: 226, height: 28)
+        styleSectionLabel(cleanupLabel, frame: NSRect(x: 28, y: 466, width: width - 56, height: 16))
+        styleBody(cleanupBody, frame: NSRect(x: 28, y: 490, width: width - 56, height: 36))
+        deepScanButton.frame = NSRect(x: 28, y: 536, width: 226, height: 28)
         deepScanButton.toolTip =
             "Find and remove leftover Dock, Launchpad, and menu-bar icons, custom-icon "
             + "copies, lock files, and data folders from profiles you've removed."
         deepScanButton.onPress = { [weak self] in self?.onDeepScan?() }
 
-        statusField.frame = NSRect(x: 28, y: 634, width: width - 56, height: 40)
+        statusField.frame = NSRect(x: 28, y: 578, width: width - 56, height: 40)
         statusField.font = .systemFont(ofSize: 12)
         statusField.textColor = .appTextSecondary
 
@@ -2914,8 +2917,8 @@ final class AdvancedSettingsContentView: NSView {
         // A hairline divider between each of the three sections, only while unlocked.
         if !isLocked {
             NSColor.separatorColor.setFill()
-            NSBezierPath(rect: NSRect(x: 28, y: 196, width: bounds.width - 56, height: 1)).fill()
-            NSBezierPath(rect: NSRect(x: 28, y: 504, width: bounds.width - 56, height: 1)).fill()
+            NSBezierPath(rect: NSRect(x: 28, y: 184, width: bounds.width - 56, height: 1)).fill()
+            NSBezierPath(rect: NSRect(x: 28, y: 452, width: bounds.width - 56, height: 1)).fill()
         }
     }
 }

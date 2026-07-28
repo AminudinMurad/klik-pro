@@ -66,7 +66,7 @@ private struct MouseSlideHitTestMain {
             frame: NSRect(x: 0, y: 0, width: card.width, height: 640)
         )
         let document = HostView(
-            frame: NSRect(x: 0, y: 0, width: card.width, height: 728)
+            frame: NSRect(x: 0, y: 0, width: card.width, height: 648)
         )
         let container = MouseSlideContainerView(frame: card)
 
