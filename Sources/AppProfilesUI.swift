@@ -344,14 +344,20 @@ private final class FixedAppCardScrollbarView: NSView {
     static let gap: CGFloat = 8
 
     private weak var scrollView: NSScrollView?
+    private let thumbHeight: CGFloat
     private var boundsObserver: NSObjectProtocol?
     private var dragOffset: CGFloat?
     private var interactionEnabled = true
 
     override var isFlipped: Bool { true }
 
-    init(scrollView: NSScrollView) {
+    init(
+        scrollView: NSScrollView,
+        thumbHeight: CGFloat = AppCardMetrics.height,
+        accessibilityLabel: String = "App list scroll bar"
+    ) {
         self.scrollView = scrollView
+        self.thumbHeight = thumbHeight
         super.init(frame: .zero)
         wantsLayer = true
         scrollView.contentView.postsBoundsChangedNotifications = true
@@ -364,7 +370,7 @@ private final class FixedAppCardScrollbarView: NSView {
         }
         setAccessibilityElement(true)
         setAccessibilityRole(.scrollBar)
-        setAccessibilityLabel("App list scroll bar")
+        setAccessibilityLabel(accessibilityLabel)
         setAccessibilityOrientation(.vertical)
         synchronize()
     }
@@ -410,7 +416,7 @@ private final class FixedAppCardScrollbarView: NSView {
 
     private var thumbRect: NSRect {
         let track = bounds.insetBy(dx: 2, dy: 0)
-        let thumbHeight = min(AppCardMetrics.height, track.height)
+        let thumbHeight = min(self.thumbHeight, track.height)
         let travel = max(0, track.height - thumbHeight)
         let fraction = maximumOffset > 0
             ? min(1, max(0, currentOffset / maximumOffset))
@@ -2568,6 +2574,7 @@ final class AdvancedSettingsContentView: NSView {
     )
     private let maintenanceScroll = NSScrollView()
     private let maintenanceDocument = FlippedMaintenanceView()
+    private let maintenanceScrollbar: FixedAppCardScrollbarView
 
     private let statusField = NSTextField(wrappingLabelWithString: "")
 
@@ -2598,12 +2605,17 @@ final class AdvancedSettingsContentView: NSView {
     private var unlockedViews: [NSView] {
         [dataRootLabel, dataRootBody, dataRootValueField, chooseButton, clearButton,
          scanButton, maintenanceLabel, maintenanceBody, maintenanceScroll,
-         cleanupLabel, cleanupBody, deepScanButton, statusField]
+         maintenanceScrollbar, cleanupLabel, cleanupBody, deepScanButton, statusField]
     }
 
     override var isFlipped: Bool { true }
 
     init(dataRoot: String?, width: CGFloat, height: CGFloat = 566) {
+        maintenanceScrollbar = FixedAppCardScrollbarView(
+            scrollView: maintenanceScroll,
+            thumbHeight: AppCardMetrics.height * 0.4,
+            accessibilityLabel: "App profile maintenance scroll bar"
+        )
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: height))
 
         // Locked state, centred. The lock icon is a pressable button.
@@ -2631,42 +2643,50 @@ final class AdvancedSettingsContentView: NSView {
         lockHint.textColor = .controlAccentColor
         lockHint.alignment = .center
 
-        // Section 1 — Data folder, including Scan & Import for an existing one.
-        styleSectionLabel(dataRootLabel, frame: NSRect(x: 28, y: 34, width: width - 56, height: 16))
-        styleBody(dataRootBody, frame: NSRect(x: 28, y: 58, width: width - 56, height: 54))
-        dataRootValueField.frame = NSRect(x: 28, y: 118, width: width - 56, height: 20)
+        // Sections 1 and 3 share the top row. Keeping these compact side by side
+        // gives the maintenance list the vertical space it needs below.
+        let columnGap: CGFloat = 24
+        let columnWidth = floor((width - 56 - columnGap) / 2)
+        let rightColumnX = 28 + columnWidth + columnGap
+        styleSectionLabel(dataRootLabel, frame: NSRect(x: 28, y: 24, width: columnWidth, height: 16))
+        styleBody(dataRootBody, frame: NSRect(x: 28, y: 48, width: columnWidth, height: 64))
+        dataRootValueField.frame = NSRect(x: 28, y: 116, width: columnWidth, height: 20)
         dataRootValueField.font = .systemFont(ofSize: 12, weight: .medium)
         dataRootValueField.textColor = .appTextPrimary
         dataRootValueField.lineBreakMode = .byTruncatingMiddle
-        chooseButton.frame = NSRect(x: 28, y: 148, width: 150, height: 28)
+        chooseButton.frame = NSRect(x: 28, y: 140, width: 132, height: 28)
         chooseButton.onPress = { [weak self] in self?.onChooseFolder?() }
-        clearButton.frame = NSRect(x: 186, y: 148, width: 90, height: 28)
+        clearButton.frame = NSRect(x: 168, y: 140, width: 78, height: 28)
         clearButton.onPress = { [weak self] in self?.onClearFolder?() }
-        scanButton.frame = NSRect(x: 284, y: 148, width: 170, height: 28)
+        scanButton.frame = NSRect(x: 252, y: 140, width: min(170, columnWidth - 224), height: 28)
         scanButton.toolTip =
             "Point Klik PRO at an existing data folder and bring back the App Profiles "
             + "its \"vault.json\" describes. Existing profiles are left untouched."
         scanButton.onPress = { [weak self] in self?.onScanAndImport?() }
 
         // Section 2 — Maintenance rows for the profiles Klik PRO still tracks.
-        styleSectionLabel(maintenanceLabel, frame: NSRect(x: 28, y: 194, width: width - 56, height: 16))
-        styleBody(maintenanceBody, frame: NSRect(x: 28, y: 218, width: width - 56, height: 36))
-        maintenanceScroll.frame = NSRect(x: 28, y: 260, width: width - 56, height: 126)
+        styleSectionLabel(maintenanceLabel, frame: NSRect(x: 28, y: 204, width: width - 56, height: 16))
+        styleBody(maintenanceBody, frame: NSRect(x: 28, y: 228, width: width - 56, height: 36))
+        maintenanceScroll.frame = NSRect(x: 28, y: 270, width: width - 56, height: 242)
         maintenanceScroll.drawsBackground = false
-        maintenanceScroll.hasVerticalScroller = true
-        maintenanceScroll.autohidesScrollers = true
+        maintenanceScroll.hasVerticalScroller = false
+        maintenanceScroll.autohidesScrollers = false
         maintenanceScroll.documentView = maintenanceDocument
+        maintenanceScrollbar.frame = NSRect(x: width - 42, y: 270, width: FixedAppCardScrollbarView.width + 4, height: 242)
 
         // Section 3 — Profile cleanup for what removed profiles left behind.
-        styleSectionLabel(cleanupLabel, frame: NSRect(x: 28, y: 414, width: width - 56, height: 16))
-        styleBody(cleanupBody, frame: NSRect(x: 28, y: 438, width: width - 56, height: 36))
-        deepScanButton.frame = NSRect(x: 28, y: 484, width: 226, height: 28)
+        styleSectionLabel(cleanupLabel, frame: NSRect(x: rightColumnX, y: 24, width: columnWidth, height: 16))
+        styleBody(cleanupBody, frame: NSRect(x: rightColumnX, y: 48, width: columnWidth, height: 64))
+        deepScanButton.frame = NSRect(x: rightColumnX, y: 132, width: min(226, columnWidth), height: 28)
         deepScanButton.toolTip =
             "Find and remove leftover Dock, Launchpad, and menu-bar icons, custom-icon "
             + "copies, lock files, and data folders from profiles you've removed."
         deepScanButton.onPress = { [weak self] in self?.onDeepScan?() }
 
-        statusField.frame = NSRect(x: 28, y: 526, width: width - 56, height: 40)
+        // Keep transient feedback inside the maintenance card. The card reaches
+        // almost to the bottom of this tab, avoiding a detached blank band above
+        // the window's fixed Save / Close footer.
+        statusField.frame = NSRect(x: 28, y: 520, width: width - 56, height: 30)
         statusField.font = .systemFont(ofSize: 12)
         statusField.textColor = .appTextSecondary
 
@@ -2908,17 +2928,35 @@ final class AdvancedSettingsContentView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let card = bounds.insetBy(dx: 0.5, dy: 0.5)
-        NSColor.controlBackgroundColor.setFill()
-        NSBezierPath(roundedRect: card, xRadius: 12, yRadius: 12).fill()
-        NSColor.separatorColor.setStroke()
-        let border = NSBezierPath(roundedRect: card, xRadius: 12, yRadius: 12)
-        border.lineWidth = 1; border.stroke()
-        // A hairline divider between each of the three sections, only while unlocked.
+        // Three distinct cards while unlocked: two compact top cards and the
+        // full-width maintenance card below. Their geometry mirrors the content
+        // columns and leaves a consistent 12-point gap between cards.
         if !isLocked {
             NSColor.separatorColor.setFill()
-            NSBezierPath(rect: NSRect(x: 28, y: 184, width: bounds.width - 56, height: 1)).fill()
-            NSBezierPath(rect: NSRect(x: 28, y: 400, width: bounds.width - 56, height: 1)).fill()
+            let cardStroke = NSColor.separatorColor
+            let cardFill = NSColor.controlBackgroundColor
+            let topY: CGFloat = 8
+            let topHeight: CGFloat = 168
+            let bottomCardHeight = bounds.height - 196
+            let leftWidth = floor((bounds.width - 56 - 24) / 2) + 16
+            let rightX = 16 + leftWidth + 12
+            let rightWidth = bounds.width - rightX - 16
+            let cards = [
+                NSRect(x: 16, y: topY, width: leftWidth, height: topHeight),
+                NSRect(x: rightX, y: topY, width: rightWidth, height: topHeight),
+                NSRect(
+                    x: 16, y: 188, width: bounds.width - 32,
+                    height: bottomCardHeight
+                )
+            ]
+            for rect in cards {
+                cardFill.setFill()
+                NSBezierPath(roundedRect: rect, xRadius: 12, yRadius: 12).fill()
+                cardStroke.setStroke()
+                let border = NSBezierPath(roundedRect: rect, xRadius: 12, yRadius: 12)
+                border.lineWidth = 1
+                border.stroke()
+            }
         }
     }
 }

@@ -2,18 +2,24 @@
 
 All notable changes to Klik PRO are documented here.
 
-## 1.5.1 (unreleased)
+## 1.5.1
 
-- Added an Xcode development bridge for selecting the full Xcode toolchain,
-  opening the source, and recording repeatable Instruments traces without
+Klik PRO now fits comfortably on a 13-inch MacBook and uses substantially less
+CPU while idle.
+
+- **A complete 13-inch dashboard.** The window is now a fixed 940×770 points,
+  fitting the default 1440×900 workspace without an outer scrollbar. Native Apps,
+  App Profiles, and Advanced maintenance keep independent scrolling where needed.
+- **Lower idle CPU use.** The helper no longer repeats full code-signature scans
+  every five seconds when profile files have not changed. Full validation still
+  runs at startup, after relevant changes, and before every managed launch.
+- **Advanced layout rebuilt.** Data-folder and cleanup controls now sit in aligned
+  cards above a full-width maintenance panel. Buttons remain inside their cards,
+  margins are consistent, maintenance scrolling is contained, and the previous
+  oversized blank footer band is gone.
+- **Better development diagnostics.** A new Xcode bridge selects the full
+  toolchain, opens the source, and records repeatable Instruments traces without
   replacing the checked-in release build.
-- Removed unchanged-state full code-signature rescans from the helper's
-  five-second availability poll. Full validation still runs at startup, after
-  relevant profile files change, and before every managed launch.
-- Reduced the dashboard to a 940×770-point complete window that fits 13-inch
-  MacBook displays without an outer vertical scrollbar. Native Apps, App
-  Profiles, and Advanced maintenance retain independent scrolling inside their
-  list panels.
 
 ## 1.5.0
 

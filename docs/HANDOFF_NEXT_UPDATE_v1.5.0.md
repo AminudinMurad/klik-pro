@@ -1,8 +1,7 @@
 # Klik PRO next-update handoff
 
-Updated 2026-07-28 after the owner selected v1.5.1 (build 24) as the next
-development line. This is the starting point for the next engineering update.
-Read this before changing profile or input behavior.
+Updated 2026-07-29 for the approved v1.5.1 (build 24) release. Read this before
+changing profile or input behavior.
 
 ## Released baseline
 
@@ -13,14 +12,13 @@ Read this before changing profile or input behavior.
 - Published app version/build: `1.5.0` / `23`.
 - Current local branch after the README follow-up: `release/v1.5.0`.
 
-## Active development baseline
+## v1.5.1 release baseline
 
-- Next version/build: `1.5.1` / `24` in both app plists.
-- Owner decision recorded: 2026-07-28.
-- Active development branch: `codex/v1.5.1-development`.
-- Keep the published v1.5.0 documentation and release assets unchanged while
-  v1.5.1 remains unreleased.
-- Add ongoing work beneath `1.5.1 (unreleased)` in `CHANGELOG.md`.
+- Version/build: `1.5.1` / `24` in both app plists.
+- Release authorization recorded: 2026-07-29.
+- Release source branch: `codex/v1.5.1-development`.
+- Release notes: `docs/RELEASE_NOTES_v1.5.1.md`.
+- The changelog and README now describe v1.5.1 as the current release.
 
 Do not change the app build number without an explicit owner decision. The
 configuration schema version is independent from the app build number and may
@@ -31,8 +29,8 @@ advance when persisted data changes.
 The v1.5.1 baseline contains:
 
 - the synchronized `1.5.1` / `24` main-app and helper metadata;
-- the final v1.5.0 README refresh and standalone release notes;
-- an unreleased v1.5.1 changelog section;
+- refreshed v1.5.1 README previews and standalone release notes;
+- the finalized v1.5.1 changelog section;
 - `tools/xcode-dev.sh` plus `docs/XCODE_DEVELOPMENT.md` for selecting the full
   Xcode toolchain and recording repeatable Instruments traces; and
 - a full-check invariant that prevents either bundle from drifting away from
@@ -54,43 +52,34 @@ The dashboard is now sized around the MacBook Air M1 13-inch default
 - fixed dashboard viewport: `872 × 566` points, with no outer vertical scroller;
 - the Mappings mouse guide and its callouts use a compact 304-point card;
 - Native Apps, App Profiles, and Advanced maintenance are the only vertically
-  scrolling areas; and
+  scrolling areas;
 - list-order pins remain available from cards on both Mappings and App Profiles;
-  and
 - all tracked dashboard screenshots and the App Profiles showcase were
   re-rendered at `1880 × 1476` Retina content pixels.
 
-Last full verification after restoring the Mappings card pins:
+Final full release verification:
 
 ```text
 ./tools/xcode-dev.sh check
 All checks passed
-build/check-20260728-225247
+build/check-20260729-012636
 ```
 
-## Private owner-test package
+## Final release package
 
-A private universal v1.5.1 build was recreated locally after setting the exact
-770-point complete-window height:
+The final universal v1.5.1 artifacts were rebuilt from the approved source and
+verified locally:
 
 - DMG: `releases/Klik-PRO-v1.5.1-macos-universal.dmg`
-  - SHA-256: `cd8878c3ad4cff4a9ea71f58c28087c24beebdda5af7ee0474e571285c11817a`
+  - SHA-256: `91f6abaef64022d920aefe9e335ca4087213ddb513e14745e89702c5c5944f48`
 - ZIP: `releases/Klik-PRO-v1.5.1-macos-universal.zip`
-  - SHA-256: `448de13f5a2163e82c056924ec1a91bfc3dcaa24f3970df9a04e19410b2a7590`
+  - SHA-256: `4ac2922313ac87456454eb50a5da44ac4fe4db793fa0d572275f086de638d45b`
 - Both checksum manifests and the local installer manifest have valid signatures
   from the checked-in Klik PRO release key.
 - `install-klik-pro.sh --verify-only` passed every authenticity and integrity
   check for the local DMG.
-
-The private package is ignored by Git and has not been installed, notarized,
-uploaded, pushed, tagged, or published. `/Applications/Klik PRO.app` remains
-v1.5.0 build 23. Do not publish a GitHub release or distribute these artifacts
-until the owner finishes functional and after-change performance testing and
-gives explicit approval.
-
-The next engineering action is the private owner test. If it passes, record an
-after-change Activity Monitor and Time Profiler comparison before selecting the
-next bounded v1.5.1 roadmap item.
+- The owner explicitly approved committing, tagging, and publishing v1.5.1
+  build 24 on 2026-07-29.
 
 ## What v1.5.0 delivers
 

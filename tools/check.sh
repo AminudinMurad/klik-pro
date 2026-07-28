@@ -425,6 +425,13 @@ grep -q 'func recoverVaultOnLaunchIfNeeded()' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'defaultCandidatePaths: \[\]' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'advancedTabRect' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'final class AdvancedSettingsContentView' "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'let bottomCardHeight = bounds.height - 196' "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'statusField.frame = NSRect(x: 28, y: 520, width: width - 56, height: 30)' \
+  "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'chooseButton.frame = NSRect(x: 28, y: 140, width: 132, height: 28)' \
+  "$ROOT/Sources/AppProfilesUI.swift"
+grep -q 'deepScanButton.frame = NSRect(x: rightColumnX, y: 132' \
+  "$ROOT/Sources/AppProfilesUI.swift"
 # Advanced tab: the lock icon is the pressable control, gated by a risk confirmation.
 grep -q '@objc private func lockPressed()' "$ROOT/Sources/AppProfilesUI.swift"
 grep -q 'var locked: Bool { isLocked }' "$ROOT/Sources/AppProfilesUI.swift"
@@ -985,9 +992,13 @@ require_source_literal \
   "$ROOT/Sources/AppProfilesUI.swift" \
   "The shared AppCardListView must own its fixed scrollbar"
 require_source_literal \
-  'let thumbHeight = min(AppCardMetrics.height, track.height)' \
+  'thumbHeight: CGFloat = AppCardMetrics.height,' \
   "$ROOT/Sources/AppProfilesUI.swift" \
-  "The app-list scrollbar handle must stay one 86-point app card high"
+  "The app-list scrollbar handle must default to one 86-point app card"
+require_source_literal \
+  'let thumbHeight = min(self.thumbHeight, track.height)' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "The shared scrollbar must use its configured handle height"
 require_source_literal \
   'x: bounds.width - FixedAppCardScrollbarView.width,' \
   "$ROOT/Sources/AppProfilesUI.swift" \
