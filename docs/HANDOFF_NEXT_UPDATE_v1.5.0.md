@@ -53,9 +53,28 @@ All checks passed
 build/check-20260728-194134
 ```
 
-No v1.5.1 DMG/ZIP was built, installed, notarized, uploaded, or published. No
-remote branch was pushed. The next engineering action is to choose one bounded
-v1.5.1 roadmap item after validating the optimized helper in a private owner test.
+## Private owner-test package
+
+A private universal v1.5.1 build was created locally after the optimization:
+
+- DMG: `releases/Klik-PRO-v1.5.1-macos-universal.dmg`
+  - SHA-256: `948a426ee0dbdf58caaf9faa1c7c80bdc7293decb1ea63a74bdcad30dab9ff42`
+- ZIP: `releases/Klik-PRO-v1.5.1-macos-universal.zip`
+  - SHA-256: `54849e012cf7d89c19de79c7967e4e9d22415dca6ad44e73e5b9329d65cc4176`
+- Both checksum manifests and the local installer manifest have valid signatures
+  from the checked-in Klik PRO release key.
+- `install-klik-pro.sh --verify-only` passed every authenticity and integrity
+  check for the local DMG.
+
+The private package is ignored by Git and has not been installed, notarized,
+uploaded, pushed, tagged, or published. `/Applications/Klik PRO.app` remains
+v1.5.0 build 23. Do not publish a GitHub release or distribute these artifacts
+until the owner finishes functional and after-change performance testing and
+gives explicit approval.
+
+The next engineering action is the private owner test. If it passes, record an
+after-change Activity Monitor and Time Profiler comparison before selecting the
+next bounded v1.5.1 roadmap item.
 
 ## What v1.5.0 delivers
 
