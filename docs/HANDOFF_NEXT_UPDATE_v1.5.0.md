@@ -38,18 +38,24 @@ The v1.5.1 baseline contains:
 - a full-check invariant that prevents either bundle from drifting away from
   version 1.5.1 build 24.
 
-Last full verification:
+The first v1.5.1 performance pass is documented in
+`docs/PERFORMANCE_BASELINE_v1.5.1.md`. Instruments measured repeated strict
+code-signature validation from the helper's five-second availability timer as the
+dominant idle cost. The stable poll now compares cheap profile-file fingerprints
+and performs full health validation only after a relevant change; managed launch
+actions continue to revalidate independently and fail closed.
+
+Last full verification after the performance change:
 
 ```text
 ./tools/xcode-dev.sh check
 All checks passed
-build/check-20260728-192120
+build/check-20260728-194134
 ```
 
 No v1.5.1 DMG/ZIP was built, installed, notarized, uploaded, or published. No
 remote branch was pushed. The next engineering action is to choose one bounded
-v1.5.1 roadmap item, measure the relevant baseline where performance is involved,
-and add focused tests before changing behavior.
+v1.5.1 roadmap item after validating the optimized helper in a private owner test.
 
 ## What v1.5.0 delivers
 

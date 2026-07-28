@@ -36,7 +36,7 @@ Commands:
 Examples:
   ./tools/xcode-dev.sh doctor
   ./tools/xcode-dev.sh profile "Klik PRO" "Time Profiler" 30s
-  ./tools/xcode-dev.sh profile "klik-pro-input" "Power Profiler" 2m
+  ./tools/xcode-dev.sh profile "klik-pro-input" "Activity Monitor" 30s
   ./tools/xcode-dev.sh profile-launch
 EOF
 }
@@ -77,20 +77,35 @@ record_attached_process() {
   local template="${2:-Time Profiler}"
   local duration="${3:-30s}"
   local output
+  local pid
 
-  if ! pgrep -x "$process" >/dev/null; then
+  if [[ "$template" == "Power Profiler" ]]; then
+    echo "Power Profiler is exposed by xctrace but is not supported on macOS." >&2
+    echo "Use Activity Monitor plus Time Profiler for a macOS process." >&2
+    exit 64
+  fi
+
+  # Instruments can make a launchd-managed helper exit cleanly when an attached
+  # recording ends. Give KeepAlive time to restart it, then attach to the resolved
+  # PID so a name-resolution race cannot target the disappearing process.
+  for _ in {1..15}; do
+    pid="$(pgrep -x "$process" | head -1 || true)"
+    [[ -n "$pid" ]] && break
+    sleep 1
+  done
+  if [[ -z "$pid" ]]; then
     echo "Process is not running: $process" >&2
     echo "Open it first, then rerun this command." >&2
     exit 1
   fi
 
   output="$(trace_output_path "$template")"
-  echo "Recording $template for $process ($duration)"
+  echo "Recording $template for $process (pid $pid, $duration)"
   xcrun xctrace record \
     --template "$template" \
     --time-limit "$duration" \
     --output "$output" \
-    --attach "$process"
+    --attach "$pid"
   echo "Trace saved to: $output"
   echo "Open it with: open \"$output\""
 }

@@ -53,16 +53,23 @@ before/after comparisons.
 ## Profile the always-on helper
 
 The helper process is named `klik-pro-input`. It is the important target for
-steady-state CPU and energy work:
+steady-state CPU, wakeup, and I/O work:
 
 ```zsh
 ./tools/xcode-dev.sh profile "klik-pro-input" "Time Profiler" 1m
-./tools/xcode-dev.sh profile "klik-pro-input" "Power Profiler" 2m
+./tools/xcode-dev.sh profile "klik-pro-input" "Activity Monitor" 1m
 ```
 
 Record an idle baseline first, then a second trace while generating the same mouse
 input repeatedly. Optimize only a measured hot path, and confirm the improvement
 with the same template, duration, and interaction.
+
+Although Xcode 26.6 lists a **Power Profiler** template, `xctrace` reports that it
+is supported only for iOS and iPadOS—not macOS. Use Activity Monitor for CPU time,
+idle wakeups, and disk I/O, with Time Profiler for call stacks. An Instruments
+attachment can make the launchd-managed helper exit cleanly when recording ends;
+the helper's KeepAlive job restarts it, and the script waits for that restart
+before the next attachment.
 
 ## Debugging notes
 

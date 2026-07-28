@@ -1554,6 +1554,18 @@ grep -A4 'preferencesView.autoUpdateRow.onToggleChange' "$ROOT/Sources/KlikProAp
 grep -A24 'contentView.specialFeatureToggleRow.onToggleChange' "$ROOT/Sources/KlikProApp.swift" | grep -q 'configurationDidChange()'
 grep -q 'func ensureInputHelperRunning(launchAtLoginEnabled: Bool? = nil)' "$ROOT/Sources/KlikProConfig.swift"
 grep -q 'func applySavedConfig(launchAtLoginEnabled: Bool? = nil)' "$ROOT/Sources/KlikProConfig.swift"
+# The five-second helper monitor must not repeat full source code-signature
+# validation while every managed profile path is unchanged. Runtime actions still
+# call AppProfileRuntime and revalidate independently before launching.
+grep -q 'private func currentAppProfilePollFingerprint()' "$ROOT/Sources/KlikProInput.swift"
+grep -q 'let profileFilesChanged = currentFingerprint != appProfilePollFingerprint' \
+  "$ROOT/Sources/KlikProInput.swift"
+grep -q 'if profileFilesChanged || legacyAvailabilityChanged' \
+  "$ROOT/Sources/KlikProInput.swift"
+if [[ "$(grep -Fc 'appProfileRuntime.health(for: instance)' "$ROOT/Sources/KlikProInput.swift")" != "1" ]]; then
+  echo "The stable availability poll must not repeat full managed-profile health checks" >&2
+  exit 1
+fi
 grep -A4 'persistedConfig = configToSave' "$ROOT/Sources/KlikProApp.swift" | grep -q 'persistedControlState = controlStateToSave'
 grep -q '"Unsaved changes"' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'NSColor.systemRed' "$ROOT/Sources/KlikProApp.swift"

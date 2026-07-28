@@ -43,20 +43,73 @@ private func setKlikProInputActive(_ active: Bool) {
 // Track both the real desktop apps and their launcher wrappers. A target is runnable
 // only when both exist, but the master feature remains a user choice as long as at
 // least one real app is installed.
+private let appProfileAssignmentStateIsValid = appProfileAssignmentsAreValid(config)
 private var chatGPTInstalled = quickLaunchTargetIsInstalled(.chatGPT)
 private var claudeInstalled = quickLaunchTargetIsInstalled(.claude)
 private var chatGPTAvailable = quickLaunchTargetIsAvailable(.chatGPT)
 private var claudeAvailable = quickLaunchTargetIsAvailable(.claude)
-private let appProfileAssignmentStateIsValid = appProfileAssignmentsAreValid(config)
-private var activeAppProfileInstanceIDs: Set<UUID> = appProfileAssignmentStateIsValid
-    ? Set(config.instances.compactMap { instance -> UUID? in
+
+private struct AppProfilePollFileIdentity: Equatable {
+    let device: UInt64?
+    let inode: UInt64?
+    let type: String?
+
+    static let missing = AppProfilePollFileIdentity(
+        device: nil,
+        inode: nil,
+        type: nil
+    )
+}
+
+private struct AppProfilePollFingerprint: Equatable {
+    let id: UUID
+    let source: AppProfilePollFileIdentity
+    let launcher: AppProfilePollFileIdentity
+    let profile: AppProfilePollFileIdentity
+}
+
+private func appProfilePollFileIdentity(atPath path: String?) -> AppProfilePollFileIdentity {
+    guard let path, !path.isEmpty,
+          let attributes = try? FileManager.default.attributesOfItem(atPath: path) else {
+        return .missing
+    }
+    return AppProfilePollFileIdentity(
+        device: (attributes[.systemNumber] as? NSNumber)?.uint64Value,
+        inode: (attributes[.systemFileNumber] as? NSNumber)?.uint64Value,
+        type: (attributes[.type] as? FileAttributeType)?.rawValue
+    )
+}
+
+/// Cheaply detects the filesystem changes that can alter runtime availability.
+/// This deliberately does not prove code identity: full AppProfileRuntime validation
+/// remains the startup/action boundary. The fingerprint only decides whether the
+/// five-second availability poll has any reason to repeat that expensive proof.
+private func currentAppProfilePollFingerprint() -> [AppProfilePollFingerprint] {
+    config.instances
+        .filter { $0.state == .active }
+        .map {
+            AppProfilePollFingerprint(
+                id: $0.id,
+                source: appProfilePollFileIdentity(atPath: $0.source.bundleURL),
+                launcher: appProfilePollFileIdentity(atPath: $0.launcherPath),
+                profile: appProfilePollFileIdentity(atPath: $0.profileDirectory)
+            )
+        }
+}
+
+private func resolvedActiveAppProfileInstanceIDs() -> Set<UUID> {
+    guard appProfileAssignmentStateIsValid else { return [] }
+    return Set(config.instances.compactMap { instance -> UUID? in
         guard instance.state == .active else { return nil }
         if let target = instance.legacyQuickLaunchTarget {
             return quickLaunchTargetIsAvailable(target) ? instance.id : nil
         }
         return appProfileRuntime.health(for: instance) == .ready ? instance.id : nil
     })
-    : []
+}
+
+private var activeAppProfileInstanceIDs = resolvedActiveAppProfileInstanceIDs()
+private var appProfilePollFingerprint = currentAppProfilePollFingerprint()
 
 private struct QuickLaunchTargetStateChange {
     let installedChanged: Bool
@@ -83,15 +136,18 @@ private func refreshQuickLaunchAvailability() -> QuickLaunchTargetStateChange {
         installed: claudeInstalled,
         wrapperPresent: quickLaunchLauncherIsRunnable(.claude)
     )
-    activeAppProfileInstanceIDs = appProfileAssignmentStateIsValid
-        ? Set(config.instances.compactMap { instance -> UUID? in
-            guard instance.state == .active else { return nil }
-            if let target = instance.legacyQuickLaunchTarget {
-                return quickLaunchTargetIsAvailable(target) ? instance.id : nil
-            }
-            return appProfileRuntime.health(for: instance) == .ready ? instance.id : nil
-        })
-        : []
+
+    let currentFingerprint = currentAppProfilePollFingerprint()
+    let profileFilesChanged = currentFingerprint != appProfilePollFingerprint
+    appProfilePollFingerprint = currentFingerprint
+    let legacyAvailabilityChanged = oldChatGPT != chatGPTAvailable
+        || oldClaude != claudeAvailable
+    if profileFilesChanged || legacyAvailabilityChanged {
+        // Re-run the fail-closed source/signature/launcher proof only after the cheap
+        // poll observes a relevant change. launchOrFocus independently revalidates
+        // every action, so a missed metadata edge cannot authorize an invalid app.
+        activeAppProfileInstanceIDs = resolvedActiveAppProfileInstanceIDs()
+    }
 
     return QuickLaunchTargetStateChange(
         installedChanged: oldChatGPTInstalled != chatGPTInstalled

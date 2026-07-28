@@ -7,6 +7,9 @@ All notable changes to Klik PRO are documented here.
 - Added an Xcode development bridge for selecting the full Xcode toolchain,
   opening the source, and recording repeatable Instruments traces without
   replacing the checked-in release build.
+- Removed unchanged-state full code-signature rescans from the helper's
+  five-second availability poll. Full validation still runs at startup, after
+  relevant profile files change, and before every managed launch.
 
 ## 1.5.0
 
