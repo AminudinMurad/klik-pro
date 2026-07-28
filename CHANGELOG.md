@@ -14,6 +14,8 @@ All notable changes to Klik PRO are documented here.
   MacBook displays without an outer vertical scrollbar. Native Apps, App
   Profiles, and Advanced maintenance retain independent scrolling inside their
   list panels.
+- Removed list-order pin controls from Mappings cards. Pin management remains
+  on App Profiles, while Mappings continues to reflect the saved pinned order.
 
 ## 1.5.0
 

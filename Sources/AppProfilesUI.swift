@@ -28,7 +28,7 @@ let innerCardSpacing: CGFloat = 10
 /// Geometry shared by every two-row app card — the App Profiles generator, the
 /// App Profiles list, and both Mappings lists. Row 1 carries the name, the
 /// optional compatibility badge and the gear; row 2 carries the action buttons,
-/// right-flushed; the icon spans both rows on the left. All four lists pin to
+/// right-flushed; the icon spans both rows on the left. All four lists use
 /// these numbers so the cards line up across the two tabs, which is the whole
 /// point of the shared layout — keep them here rather than per class.
 enum AppCardMetrics {
@@ -69,8 +69,8 @@ enum AppCardMetrics {
         NSRect(x: cardWidth - rightInset - pinSize, y: gearY, width: pinSize, height: pinSize)
     }
 
-    /// Sits immediately left of the pin. Every card that uses this also carries a pin,
-    /// so the shift is unconditional and the three lists stay aligned with each other.
+    /// Sits immediately left of the pin on App Profiles cards. Mappings cards do not
+    /// expose list-order pins and place their gear in `pinFrame` instead.
     static func gearFrame(cardWidth: CGFloat) -> NSRect {
         NSRect(
             x: pinFrame(cardWidth: cardWidth).minX - gearPinGap - gearSize,
@@ -257,9 +257,8 @@ func topPinnedFirst<Element, Key: Hashable>(
     }.map(\.element)
 }
 
-/// The icon-only list-order pin that sits right of each card's gear. Both tabs carry
-/// it, because the pin the user sets on either one decides which cards lead the list
-/// everywhere — one preference, two places to set it.
+/// The icon-only list-order pin that sits right of each App Profiles card's gear.
+/// Mappings reflects the resulting order but does not expose pin controls.
 final class AppProfilePinButton: NSButton {
     var onPress: (() -> Void)?
 
@@ -1618,21 +1617,17 @@ private final class MappingAppProfileOpenRowView: NSView {
     private let assignButton = AppProfileButton(title: "Assign Button", frame: .zero)
     private let openButton = AppProfileButton(title: "Open", frame: .zero)
     private let gearButton = AppProfileGearButton(frame: .zero)
-    private let pinButton = makePinIconButton()
     private let instance: AppProfileInstance
     var onOpen: ((AppProfileInstance) -> Void)?
     var onAssign: ((AppProfileInstance) -> Void)?
     var onToggleMenuBar: ((AppProfileInstance) -> Void)?
-    var onTogglePin: ((AppProfileInstance) -> Void)?
 
     override var isFlipped: Bool { true }
 
     init(
         instance: AppProfileInstance,
         health: AppProfileRuntimeHealth?,
-        width: CGFloat,
-        topPinned: Bool,
-        topPinAtLimit: Bool
+        width: CGFloat
     ) {
         self.instance = instance
         // The icon spans both rows; row 1 carries the name and the gear, row 2 the
@@ -1652,23 +1647,16 @@ private final class MappingAppProfileOpenRowView: NSView {
 
         let managed = instance.launcherKind == .managed
         gearButton.isHidden = !managed
-        gearButton.frame = AppCardMetrics.gearFrame(cardWidth: width)
+        gearButton.frame = AppCardMetrics.pinFrame(cardWidth: width)
         gearButton.toolTip = "Manage this profile's menu-bar icon"
         gearButton.setAccessibilityLabel("Manage \(instance.label)")
         gearButton.onPress = { [weak self] in self?.presentManageMenu() }
 
-        // Every profile can be pinned, including an external launcher, so unlike the
-        // gear this control is never hidden.
-        pinButton.frame = AppCardMetrics.pinFrame(cardWidth: width)
-        applyPinIconState(pinButton, pinned: topPinned, atLimit: topPinAtLimit)
-        pinButton.onPress = { [weak self] in
-            guard let self else { return }
-            self.onTogglePin?(self.instance)
-        }
-
-        // An external launcher shows no gear, so the name runs on to the pin instead —
-        // not to the card edge, which would slide the title under the pin.
-        let nameRightLimit = managed ? gearButton.frame.minX : pinButton.frame.minX
+        // Mappings deliberately has no list-order pin. A managed profile keeps its
+        // menu-bar gear at the trailing edge; an external launcher can use that space.
+        let nameRightLimit = managed
+            ? gearButton.frame.minX
+            : width - AppCardMetrics.rightInset
         titleField.frame = NSRect(
             x: AppCardMetrics.nameX,
             y: AppCardMetrics.nameY,
@@ -1708,7 +1696,7 @@ private final class MappingAppProfileOpenRowView: NSView {
             guard let self else { return }
             self.onOpen?(self.instance)
         }
-        [iconView, titleField, assignButton, openButton, gearButton, pinButton]
+        [iconView, titleField, assignButton, openButton, gearButton]
             .forEach(addSubview)
         layoutOpenAndAssign(
             openButton: openButton, assignButton: assignButton, cardWidth: width
@@ -1750,12 +1738,9 @@ struct MappingNativeApp {
     /// False for a target with no persisted mouse-button slot, whose Assign
     /// control would otherwise look live and silently do nothing.
     let assignable: Bool
-    /// Whether this app is pinned to the top of the app lists. Distinct from
-    /// `menuBarPinned`, which is menu-bar visibility.
+    /// Whether this app is pinned to the top from App Profiles. Mappings reflects
+    /// that ordering but does not expose a pin control.
     let topPinned: Bool
-    /// True when the list already holds `KlikProConfig.topPinLimit` pins and this app
-    /// is not one of them, so its pin renders disabled with the reason.
-    let topPinAtLimit: Bool
 }
 
 /// An installed vendor app shown as an assignment target, using the same two-row
@@ -1771,12 +1756,10 @@ private final class MappingOriginalAppRowView: NSView {
     private let openButton = AppProfileButton(title: "Open", frame: .zero)
     private let assignButton = AppProfileButton(title: "Assign Button", frame: .zero)
     private let gearButton = AppProfileGearButton(frame: .zero)
-    private let pinButton = makePinIconButton()
     private let menuBarPinned: Bool
     var onOpen: ((QuickLaunchTarget) -> Void)?
     var onAssign: ((QuickLaunchTarget) -> Void)?
     var onToggleMenuBar: ((QuickLaunchTarget) -> Void)?
-    var onTogglePin: ((QuickLaunchTarget) -> Void)?
 
     override var isFlipped: Bool { true }
 
@@ -1796,16 +1779,11 @@ private final class MappingOriginalAppRowView: NSView {
         icon.imageScaling = .scaleProportionallyUpOrDown
         icon.image = VendorAppIconCache.icon(forFile: app.path)
 
-        gearButton.frame = AppCardMetrics.gearFrame(cardWidth: width)
+        // Mappings has no list-order pin, so the menu-bar gear owns the trailing slot.
+        gearButton.frame = AppCardMetrics.pinFrame(cardWidth: width)
         gearButton.toolTip = "Manage this app's menu-bar icon"
         gearButton.setAccessibilityLabel("Manage \(app.name)")
         gearButton.onPress = { [weak self] in self?.presentManageMenu() }
-
-        pinButton.frame = AppCardMetrics.pinFrame(cardWidth: width)
-        applyPinIconState(pinButton, pinned: app.topPinned, atLimit: app.topPinAtLimit)
-        pinButton.onPress = { [weak self] in
-            guard let self else { return }; self.onTogglePin?(self.target)
-        }
 
         nameField.font = .systemFont(ofSize: 15, weight: .semibold)
         nameField.textColor = .appTextPrimary
@@ -1846,7 +1824,7 @@ private final class MappingOriginalAppRowView: NSView {
         openButton.onPress = { [weak self] in
             guard let self else { return }; self.onOpen?(self.target)
         }
-        [icon, nameField, badgeField, openButton, assignButton, gearButton, pinButton]
+        [icon, nameField, badgeField, openButton, assignButton, gearButton]
             .forEach(addSubview)
         layoutNameAndBadge(
             nameField: nameField, badgeField: badgeField, gearMinX: gearButton.frame.minX
@@ -1997,8 +1975,6 @@ final class MappingAppProfilesView: NSView {
     var onAssignOriginal: ((QuickLaunchTarget) -> Void)?
     var onToggleMenuBar: ((AppProfileInstance) -> Void)?
     var onToggleOriginalMenuBar: ((QuickLaunchTarget) -> Void)?
-    var onTogglePinOriginal: ((QuickLaunchTarget) -> Void)?
-    var onTogglePinProfile: ((AppProfileInstance) -> Void)?
     // Re-scans installed native apps and reloads the profiles list for both columns.
     // Each column header carries its own icon; both call this.
     var onRefreshApps: (() -> Void)?
@@ -2100,7 +2076,6 @@ final class MappingAppProfilesView: NSView {
                 row.onOpen = { [weak self] in self?.onOpenOriginal?($0) }
                 row.onAssign = { [weak self] in self?.onAssignOriginal?($0) }
                 row.onToggleMenuBar = { [weak self] in self?.onToggleOriginalMenuBar?($0) }
-                row.onTogglePin = { [weak self] in self?.onTogglePinOriginal?($0) }
                 return row
             }
             nativeCard.setRows(
@@ -2123,24 +2098,15 @@ final class MappingAppProfilesView: NSView {
         }.sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
         // Pinned profiles lead; the rest stay alphabetical behind them.
         let ordered = topPinnedFirst(visible, pins: topPinnedProfileIDs) { $0.id }
-        // Only pins for profiles actually in this list consume a slot: a pin left behind by
-        // a deleted profile has no card to unpin from, so counting it would lock the user
-        // out. Set membership is fine here — nothing iterates it.
-        let liveIDs = Set(visible.map(\.id))
-        let atLimit = topPinnedProfileIDs.filter(liveIDs.contains).count
-            >= KlikProConfig.topPinLimit
         let profileRows: [NSView] = ordered.map { instance in
             let row = MappingAppProfileOpenRowView(
                 instance: instance,
                 health: runtimeHealth[instance.id],
-                width: profilesWidth,
-                topPinned: topPinnedProfileIDs.contains(instance.id),
-                topPinAtLimit: atLimit
+                width: profilesWidth
             )
             row.onOpen = { [weak self] in self?.onOpen?($0) }
             row.onAssign = { [weak self] in self?.onAssign?($0) }
             row.onToggleMenuBar = { [weak self] in self?.onToggleMenuBar?($0) }
-            row.onTogglePin = { [weak self] in self?.onTogglePinProfile?($0) }
             return row
         }
         profilesCard.setRows(

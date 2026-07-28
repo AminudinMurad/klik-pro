@@ -5045,7 +5045,8 @@ final class ToggleView: NSView {
         appProfilesView.onToggleOriginalMenuBar = { [weak self] target in
             self?.toggleOriginalMenuBarPin(for: target)
         }
-        // Both tabs write the same two pin fields, so either card can set the order.
+        // Pin ordering is managed only from the App Profiles tab. Mappings reflects
+        // the saved order without exposing duplicate pin controls.
         appProfilesView.onTogglePinOriginal = { [weak self] target in
             self?.toggleTopPin(for: target)
         }
@@ -5169,13 +5170,6 @@ final class ToggleView: NSView {
         }
         contentView.mappingProfilesView.onToggleOriginalMenuBar = { [weak self] target in
             self?.toggleOriginalMenuBarPin(for: target)
-        }
-        // Same for the list-order pin: one preference, reachable from either tab.
-        contentView.mappingProfilesView.onTogglePinOriginal = { [weak self] target in
-            self?.toggleTopPin(for: target)
-        }
-        contentView.mappingProfilesView.onTogglePinProfile = { [weak self] instance in
-            self?.toggleTopPin(for: instance)
         }
         contentView.mappingProfilesView.onRefreshApps = { [weak self] in
             guard let self else { return }
@@ -9693,8 +9687,6 @@ final class ToggleView: NSView {
         // Read from persistedConfig, matching menuBarPinned above: `config` can hold an
         // in-flight edit that was never written, and the list must show what is saved.
         let topPinned = clampedTopPins(persistedConfig.topPinnedOriginals)
-        // Only pins with a card on screen count toward the cap — see `topPinsAdding`.
-        let topPinAtLimit = installedTopPinCount() >= KlikProConfig.topPinLimit
         let originals: [MappingNativeApp] = QuickLaunchTarget.allCases.compactMap { target in
             guard let url = quickLaunchTargetApplicationURL(target) else { return nil }
             return MappingNativeApp(
@@ -9705,8 +9697,7 @@ final class ToggleView: NSView {
                 verified: nativeAppCompatibilityVerified(target),
                 menuBarPinned: menuBarPinned.contains(target),
                 assignable: true,
-                topPinned: topPinned.contains(target),
-                topPinAtLimit: topPinAtLimit
+                topPinned: topPinned.contains(target)
             )
         }
         // Ordered here rather than in the view, because this method already owns the pin
