@@ -55,29 +55,28 @@ The dashboard is now sized around the MacBook Air M1 13-inch default
 - the Mappings mouse guide and its callouts use a compact 304-point card;
 - Native Apps, App Profiles, and Advanced maintenance are the only vertically
   scrolling areas; and
-- list-order pins are managed only from App Profiles; Mappings reflects the
-  saved pinned order without exposing duplicate pin controls; and
+- list-order pins remain available from cards on both Mappings and App Profiles;
+  and
 - all tracked dashboard screenshots and the App Profiles showcase were
   re-rendered at `1880 × 1476` Retina content pixels.
 
-Last full verification after setting the exact height and removing Mappings pin
-controls:
+Last full verification after restoring the Mappings card pins:
 
 ```text
 ./tools/xcode-dev.sh check
 All checks passed
-build/check-20260728-223841
+build/check-20260728-225247
 ```
 
 ## Private owner-test package
 
 A private universal v1.5.1 build was recreated locally after setting the exact
-770-point complete-window height and removing Mappings pin controls:
+770-point complete-window height:
 
 - DMG: `releases/Klik-PRO-v1.5.1-macos-universal.dmg`
-  - SHA-256: `5b669ca38edc6de8ec2084680f181bb3c4afeadedda33f101f6d8aad1801e602`
+  - SHA-256: `cd8878c3ad4cff4a9ea71f58c28087c24beebdda5af7ee0474e571285c11817a`
 - ZIP: `releases/Klik-PRO-v1.5.1-macos-universal.zip`
-  - SHA-256: `1619319d3a4b088b901a738b57ac2a9efcc5a41cde5c27d0076442f3070e1e75`
+  - SHA-256: `448de13f5a2163e82c056924ec1a91bfc3dcaa24f3970df9a04e19410b2a7590`
 - Both checksum manifests and the local installer manifest have valid signatures
   from the checked-in Klik PRO release key.
 - `install-klik-pro.sh --verify-only` passed every authenticity and integrity

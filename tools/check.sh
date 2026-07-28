@@ -1149,19 +1149,11 @@ grep -q 'static let topPinLimit = 1' "$ROOT/Sources/KlikProConfig.swift"
 grep -q 'static func pinFrame(cardWidth: CGFloat)' "$ROOT/Sources/AppProfilesUI.swift"
 grep -q -- '-20 \* .pi / 180' "$ROOT/Sources/AppProfilesUI.swift"
 grep -q 'button.contentTintColor = .black' "$ROOT/Sources/AppProfilesUI.swift"
-# Pins are managed only from App Profiles: its generator and profile rows carry one
-# each. Three hits = the factory declaration plus those two construction sites.
-if [[ "$(grep -c 'makePinIconButton()' "$ROOT/Sources/AppProfilesUI.swift")" -ne 3 ]]; then
-  echo "Only the two App Profiles card types may carry a list-order pin" >&2
-  exit 1
-fi
-# Mappings reflects pinned ordering but must not expose a second set of pin controls.
-mapping_rows_block="$(sed -n \
-  '/private final class MappingAppProfileOpenRowView/,/private final class MappingSectionCardView/p' \
-  "$ROOT/Sources/AppProfilesUI.swift")"
-if grep -Eq 'makePinIconButton|onTogglePin' <<<"$mapping_rows_block" \
-  || grep -q 'mappingProfilesView.onTogglePin' "$ROOT/Sources/KlikProApp.swift"; then
-  echo "Mappings cards must not expose list-order pin controls" >&2
+# All four card types carry a pin: the two Mappings rows, the generator card, and the
+# App Profiles tab's own row. Five hits = the factory's own declaration plus one
+# construction site per card.
+if [[ "$(grep -c 'makePinIconButton()' "$ROOT/Sources/AppProfilesUI.swift")" -ne 5 ]]; then
+  echo "All four card types must carry exactly one list-order pin" >&2
   exit 1
 fi
 # Ordering must filter the ordered pin array, never iterate a Set: Set iteration order
@@ -1424,10 +1416,9 @@ if ! grep -q 'if !sharedRefreshActive {' <<<"$set_originals_block"; then
   exit 1
 fi
 
-# Pinned rows remain sticky in all four lists, even though the controls are available
-# only on App Profiles. They live on the list view rather than in the scroller's
-# document, so scrolling moves everything except them and either refresh path restores
-# the ordering.
+# Pinned rows are sticky in all four lists: they live on the list view rather than in the
+# scroller's document, so scrolling moves everything except them, and a rebuild from
+# either refresh path re-establishes them.
 grep -q 'private var stickyRows: \[NSView\] = \[\]' "$ROOT/Sources/AppProfilesUI.swift"
 grep -q 'func setRows(_ newRows: \[NSView\], stickyCount: Int = 0, emptyMessage: String)' \
   "$ROOT/Sources/AppProfilesUI.swift"
