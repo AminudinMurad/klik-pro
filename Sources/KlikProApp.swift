@@ -2647,7 +2647,7 @@ final class SettingsContentView: NSView {
     // App Profiles tab — so the guide gets the larger share of the height.
     static let deviceCard         = NSRect(x: 0, y: 0, width: rightCardX + rightCardW, height: 326)
     // Native apps + App Profiles, side by side across the full width, below the guide.
-    static let mappingBottomCard  = NSRect(x: 0, y: 340, width: rightCardX + rightCardW, height: 308)
+    static let mappingBottomCard  = NSRect(x: 0, y: 340, width: rightCardX + rightCardW, height: 248)
 
     private static func previewAppIcon(for target: QuickLaunchTarget) -> NSImage {
         let label = target == .chatGPT ? "G" : "C"
@@ -2865,7 +2865,7 @@ final class SettingsContentView: NSView {
             frame: NSRect(x: 380, y: 68, width: 150, height: 26)
         )
 
-        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 648))
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 588))
 
         mouseSlideContainer.wantsLayer = true
         mouseSlideContainer.drawArtwork = { [weak self] card in
@@ -4082,7 +4082,7 @@ final class ToggleWindowController: NSWindowController {
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 940, height: 820),
+            contentRect: NSRect(x: 0, y: 0, width: 940, height: 760),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -4199,14 +4199,14 @@ final class ToggleView: NSView {
     private var mouseAccessRequired = false
     private let saveButton = PrimaryHoverButton(
         title: "Save",
-        frame: NSRect(x: 48, y: 752, width: 120, height: 42)
+        frame: NSRect(x: 48, y: 692, width: 120, height: 42)
     )
     // Check-for-updates button, top-right of the header (where the status pill used to be).
     // Right edge stays at x=888; the compact "⟳ Updates…" label lets it be narrower.
     private let updateButtonRect = NSRect(x: 768, y: 30, width: 120, height: 30)
     private var updateButtonTrackingArea: NSTrackingArea?
     private var updateButtonHovered = false
-    private let closeButtonRect = NSRect(x: 808, y: 752, width: 90, height: 42)
+    private let closeButtonRect = NSRect(x: 808, y: 692, width: 90, height: 42)
     private var closeButtonTrackingArea: NSTrackingArea?
     private var closeButtonHovered = false
     // Set by a successful check when a newer release exists; lights up the header button.
@@ -4304,12 +4304,12 @@ final class ToggleView: NSView {
         appProfilesView = AppProfilesContentView(
             instances: loadedConfig.instances,
             width: 872,
-            height: 648
+            height: 588
         )
         advancedView = AdvancedSettingsContentView(
             dataRoot: loadedConfig.dataRoot,
             width: 872,
-            height: 648
+            height: 588
         )
 
         super.init(frame: frameRect)
@@ -4318,7 +4318,7 @@ final class ToggleView: NSView {
         layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
 
         addSubview(headerWordmark)
-        scrollView.frame = NSRect(x: 34, y: 82, width: 872, height: 648)
+        scrollView.frame = NSRect(x: 34, y: 82, width: 872, height: 588)
         scrollView.hasVerticalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
@@ -10215,7 +10215,7 @@ final class ToggleView: NSView {
                 .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
                 .foregroundColor: NSColor.systemRed
             ]
-            "Unsaved changes".draw(at: NSPoint(x: 184, y: 764), withAttributes: attrs)
+            "Unsaved changes".draw(at: NSPoint(x: 184, y: 704), withAttributes: attrs)
         }
 
         if let message = saveStatusMessage {
@@ -10223,7 +10223,7 @@ final class ToggleView: NSView {
                 .font: NSFont.systemFont(ofSize: 12),
                 .foregroundColor: NSColor.appTextSecondary
             ]
-            message.draw(at: NSPoint(x: 356, y: 764), withAttributes: attrs)
+            message.draw(at: NSPoint(x: 356, y: 704), withAttributes: attrs)
         }
     }
 

@@ -1193,7 +1193,7 @@ grep -Eq 'static let deviceCard += NSRect\(x: 0, y: 0, width: .* height: 326\)' 
   "$ROOT/Sources/KlikProApp.swift"
 grep -Eq 'static let mappingBottomCard += NSRect\(x: 0, y: 340,' \
   "$ROOT/Sources/KlikProApp.swift"
-grep -q 'scrollView.frame = NSRect(x: 34, y: 82, width: 872, height: 648)' \
+grep -q 'scrollView.frame = NSRect(x: 34, y: 82, width: 872, height: 588)' \
   "$ROOT/Sources/KlikProApp.swift"
 grep -q 'scrollView.hasVerticalScroller = false' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'private let menuButton = AppProfileGearButton' "$ROOT/Sources/KlikProApp.swift"
@@ -1647,7 +1647,7 @@ do
     echo "Unexpected preview width: $fixtureName" >&2
     exit 1
   }
-  [[ "$(sips -g pixelHeight "$firstFixture" 2>/dev/null | awk '/pixelHeight/ { print $2 }')" == "1640" ]] || {
+  [[ "$(sips -g pixelHeight "$firstFixture" 2>/dev/null | awk '/pixelHeight/ { print $2 }')" == "1520" ]] || {
     echo "Unexpected preview height: $fixtureName" >&2
     exit 1
   }

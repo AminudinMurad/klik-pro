@@ -38,13 +38,13 @@ let scenes = [
         image: profiles,
         title: "Make every profile unmistakable",
         subtitle: "Use a colour tint or an initial badge — without modifying the original app.",
-        crop: NSRect(x: 700, y: 190, width: 1080, height: 1450)
+        crop: NSRect(x: 700, y: 160, width: 1080, height: 1300)
     ),
     Scene(
         image: profiles,
         title: "Manage identity from one place",
         subtitle: "Open the gear menu to rename, change the icon, or remove it from Klik PRO.",
-        crop: NSRect(x: 700, y: 430, width: 1080, height: 980)
+        crop: NSRect(x: 700, y: 360, width: 1080, height: 960)
     ),
     Scene(
         image: mappings,
@@ -52,11 +52,10 @@ let scenes = [
         subtitle: "App Profiles and Mappings refresh together, so assignments stay easy to recognise.",
         // Framed on the Mappings APP PROFILES column (y is from the TOP — see the
         // `crop` doc comment), so the scene actually shows the badged icons its caption
-        // is about. Re-tuned when the list gained its three-card viewport and the taller
-        // header gap: those moved the rows down, leaving the previous rect framing the
-        // mouse card instead. Nothing in check.sh verifies this framing — it only asserts
-        // the GIF exists — so re-check it by eye after any change to the list geometry.
-        crop: NSRect(x: 950, y: 938, width: 850, height: 700)
+        // is about. Re-tuned for the 940×760 dashboard and its two-row list viewport.
+        // Nothing in check.sh verifies this framing — it only asserts the GIF exists —
+        // so re-check it by eye after any change to the list geometry.
+        crop: NSRect(x: 950, y: 800, width: 850, height: 580)
     ),
 ]
 

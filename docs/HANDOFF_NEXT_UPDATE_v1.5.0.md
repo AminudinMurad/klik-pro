@@ -45,22 +45,23 @@ dominant idle cost. The stable poll now compares cheap profile-file fingerprints
 and performs full health validation only after a relevant change; managed launch
 actions continue to revalidate independently and fail closed.
 
-The dashboard is now sized for a 13-inch MacBook:
+The dashboard is now sized around the MacBook Air M1 13-inch default
+1440 × 900 workspace:
 
-- fixed content size: `940 × 820` points (previously `940 × 934`);
-- fixed dashboard viewport: `872 × 648` points, with no outer vertical scroller;
+- fixed content size: `940 × 760` points (previously `940 × 934`);
+- fixed dashboard viewport: `872 × 588` points, with no outer vertical scroller;
 - the Mappings mouse guide and its callouts use a compact 326-point card;
 - Native Apps, App Profiles, and Advanced maintenance are the only vertically
   scrolling areas; and
 - all tracked dashboard screenshots and the App Profiles showcase were
-  re-rendered at the compact geometry.
+  re-rendered at `1880 × 1520` Retina pixels.
 
 Last full verification after the compact-dashboard change:
 
 ```text
 ./tools/xcode-dev.sh check
 All checks passed
-build/check-20260728-200050
+build/check-20260728-202617
 ```
 
 ## Private owner-test package
@@ -69,9 +70,9 @@ A private universal v1.5.1 build was recreated locally after the compact
 dashboard change:
 
 - DMG: `releases/Klik-PRO-v1.5.1-macos-universal.dmg`
-  - SHA-256: `d3c3962e34a5756b1cb9eaf86ce8cc1a686781fc61bff18c8f2a2df2cdcb7c69`
+  - SHA-256: `9e276595e7f110eb18db9607eb606976735038012946b4c2a87b3510349f9e17`
 - ZIP: `releases/Klik-PRO-v1.5.1-macos-universal.zip`
-  - SHA-256: `7f68705f7000777f9ca2abe4fce521a8b4ce2bce2e6e65a01966540a5df99c0f`
+  - SHA-256: `953d932c64431ea793da1c046fcb1a998d870295e542e10be084c2a1146219b5`
 - Both checksum manifests and the local installer manifest have valid signatures
   from the checked-in Klik PRO release key.
 - `install-klik-pro.sh --verify-only` passed every authenticity and integrity
