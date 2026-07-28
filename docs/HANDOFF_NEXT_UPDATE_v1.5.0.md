@@ -48,31 +48,33 @@ actions continue to revalidate independently and fail closed.
 The dashboard is now sized around the MacBook Air M1 13-inch default
 1440 × 900 workspace:
 
-- fixed content size: `940 × 760` points (previously `940 × 934`);
-- fixed dashboard viewport: `872 × 588` points, with no outer vertical scroller;
-- the Mappings mouse guide and its callouts use a compact 326-point card;
+- fixed complete window size: `940 × 770` points, including the 32-point
+  macOS title bar (previously approximately `940 × 788`);
+- fixed AppKit content size: `940 × 738` points;
+- fixed dashboard viewport: `872 × 566` points, with no outer vertical scroller;
+- the Mappings mouse guide and its callouts use a compact 304-point card;
 - Native Apps, App Profiles, and Advanced maintenance are the only vertically
   scrolling areas; and
 - all tracked dashboard screenshots and the App Profiles showcase were
-  re-rendered at `1880 × 1520` Retina pixels.
+  re-rendered at `1880 × 1476` Retina content pixels.
 
-Last full verification after the compact-dashboard change:
+Last full verification after setting the exact 770-point complete-window height:
 
 ```text
 ./tools/xcode-dev.sh check
 All checks passed
-build/check-20260728-202617
+build/check-20260728-221753
 ```
 
 ## Private owner-test package
 
-A private universal v1.5.1 build was recreated locally after the compact
-dashboard change:
+A private universal v1.5.1 build was recreated locally after setting the exact
+770-point complete-window height:
 
 - DMG: `releases/Klik-PRO-v1.5.1-macos-universal.dmg`
-  - SHA-256: `9e276595e7f110eb18db9607eb606976735038012946b4c2a87b3510349f9e17`
+  - SHA-256: `eff07f8994323ca15a2011c8aba830ce8999b4d3dfa9f52d3ad102dc6346850a`
 - ZIP: `releases/Klik-PRO-v1.5.1-macos-universal.zip`
-  - SHA-256: `953d932c64431ea793da1c046fcb1a998d870295e542e10be084c2a1146219b5`
+  - SHA-256: `b5ec561754319ae5c98a1468b29154d19676947b6aed8e71080d05be9883ec5b`
 - Both checksum manifests and the local installer manifest have valid signatures
   from the checked-in Klik PRO release key.
 - `install-klik-pro.sh --verify-only` passed every authenticity and integrity

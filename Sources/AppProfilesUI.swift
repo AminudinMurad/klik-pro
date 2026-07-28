@@ -2213,7 +2213,7 @@ final class AppProfilesContentView: NSView {
 
     override var isFlipped: Bool { true }
 
-    init(instances: [AppProfileInstance], width: CGFloat, height: CGFloat = 588) {
+    init(instances: [AppProfileInstance], width: CGFloat, height: CGFloat = 566) {
         let generatorColumnWidth = floor(width * Self.generatorColumnRatio)
         let generatorListWidth = generatorColumnWidth - 36
         let generatorWidth = AppCardListView.contentWidth(for: generatorListWidth)
@@ -2603,7 +2603,7 @@ final class AdvancedSettingsContentView: NSView {
 
     override var isFlipped: Bool { true }
 
-    init(dataRoot: String?, width: CGFloat, height: CGFloat = 588) {
+    init(dataRoot: String?, width: CGFloat, height: CGFloat = 566) {
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: height))
 
         // Locked state, centred. The lock icon is a pressable button.

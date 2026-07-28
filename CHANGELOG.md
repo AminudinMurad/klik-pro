@@ -10,9 +10,10 @@ All notable changes to Klik PRO are documented here.
 - Removed unchanged-state full code-signature rescans from the helper's
   five-second availability poll. Full validation still runs at startup, after
   relevant profile files change, and before every managed launch.
-- Reduced the dashboard to a 940×760-point window that fits 13-inch MacBook
-  displays without an outer vertical scrollbar. Native Apps, App Profiles, and
-  Advanced maintenance retain independent scrolling inside their list panels.
+- Reduced the dashboard to a 940×770-point complete window that fits 13-inch
+  MacBook displays without an outer vertical scrollbar. Native Apps, App
+  Profiles, and Advanced maintenance retain independent scrolling inside their
+  list panels.
 
 ## 1.5.0
 

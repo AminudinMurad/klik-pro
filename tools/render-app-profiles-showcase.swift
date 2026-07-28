@@ -52,10 +52,10 @@ let scenes = [
         subtitle: "App Profiles and Mappings refresh together, so assignments stay easy to recognise.",
         // Framed on the Mappings APP PROFILES column (y is from the TOP — see the
         // `crop` doc comment), so the scene actually shows the badged icons its caption
-        // is about. Re-tuned for the 940×760 dashboard and its two-row list viewport.
+        // is about. Re-tuned for the 940×770 dashboard and its two-row list viewport.
         // Nothing in check.sh verifies this framing — it only asserts the GIF exists —
         // so re-check it by eye after any change to the list geometry.
-        crop: NSRect(x: 950, y: 800, width: 850, height: 580)
+        crop: NSRect(x: 950, y: 760, width: 850, height: 560)
     ),
 ]
 
@@ -75,7 +75,7 @@ func render(_ scene: Scene) -> CGImage {
     NSColor.white.setFill()
     NSRect(origin: .zero, size: canvasSize).fill()
 
-    let eyebrow = "KLIK PRO 1.2.2 · APP PROFILES"
+    let eyebrow = "KLIK PRO 1.5.1 · APP PROFILES"
     eyebrow.draw(
         at: NSPoint(x: 72, y: 1090),
         withAttributes: [

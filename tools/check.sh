@@ -1189,11 +1189,11 @@ grep -q 'recorder.setCombo(self.defaultCombo)' "$ROOT/Sources/KlikProApp.swift"
 grep -Eq 'static let deviceCard +=' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'drawDeviceCard(in: SettingsContentView.deviceCard)' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'drawSectionLabel("Mouse Mappings"' "$ROOT/Sources/KlikProApp.swift"
-grep -Eq 'static let deviceCard += NSRect\(x: 0, y: 0, width: .* height: 326\)' \
+grep -Eq 'static let deviceCard += NSRect\(x: 0, y: 0, width: .* height: 304\)' \
   "$ROOT/Sources/KlikProApp.swift"
-grep -Eq 'static let mappingBottomCard += NSRect\(x: 0, y: 340,' \
+grep -Eq 'static let mappingBottomCard += NSRect\(x: 0, y: 318,' \
   "$ROOT/Sources/KlikProApp.swift"
-grep -q 'scrollView.frame = NSRect(x: 34, y: 82, width: 872, height: 588)' \
+grep -q 'scrollView.frame = NSRect(x: 34, y: 82, width: 872, height: 566)' \
   "$ROOT/Sources/KlikProApp.swift"
 grep -q 'scrollView.hasVerticalScroller = false' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'private let menuButton = AppProfileGearButton' "$ROOT/Sources/KlikProApp.swift"
@@ -1647,7 +1647,7 @@ do
     echo "Unexpected preview width: $fixtureName" >&2
     exit 1
   }
-  [[ "$(sips -g pixelHeight "$firstFixture" 2>/dev/null | awk '/pixelHeight/ { print $2 }')" == "1520" ]] || {
+  [[ "$(sips -g pixelHeight "$firstFixture" 2>/dev/null | awk '/pixelHeight/ { print $2 }')" == "1476" ]] || {
     echo "Unexpected preview height: $fixtureName" >&2
     exit 1
   }
