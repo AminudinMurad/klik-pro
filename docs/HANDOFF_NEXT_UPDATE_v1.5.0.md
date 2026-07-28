@@ -1,8 +1,8 @@
 # Klik PRO next-update handoff
 
-Updated 2026-07-27 after publishing v1.5.0 (build 23). This is the starting
-point for the next engineering update. Read this before changing profile or
-input behavior.
+Updated 2026-07-28 after the owner selected v1.5.1 (build 24) as the next
+development line. This is the starting point for the next engineering update.
+Read this before changing profile or input behavior.
 
 ## Released baseline
 
@@ -10,12 +10,46 @@ input behavior.
 - Release tag: `v1.5.0`
 - Release commit: `66ce8ec` (the README follow-up is `acddca4`)
 - Published branch: `release/v1.5.0`; `main` includes the README follow-up.
-- App version/build: `1.5.0` / `23` in both app plists.
+- Published app version/build: `1.5.0` / `23`.
 - Current local branch after the README follow-up: `release/v1.5.0`.
+
+## Active development baseline
+
+- Next version/build: `1.5.1` / `24` in both app plists.
+- Owner decision recorded: 2026-07-28.
+- Active development branch: `codex/v1.5.1-development`.
+- Keep the published v1.5.0 documentation and release assets unchanged while
+  v1.5.1 remains unreleased.
+- Add ongoing work beneath `1.5.1 (unreleased)` in `CHANGELOG.md`.
 
 Do not change the app build number without an explicit owner decision. The
 configuration schema version is independent from the app build number and may
 advance when persisted data changes.
+
+## Current continuation state
+
+The v1.5.1 baseline contains:
+
+- the synchronized `1.5.1` / `24` main-app and helper metadata;
+- the final v1.5.0 README refresh and standalone release notes;
+- an unreleased v1.5.1 changelog section;
+- `tools/xcode-dev.sh` plus `docs/XCODE_DEVELOPMENT.md` for selecting the full
+  Xcode toolchain and recording repeatable Instruments traces; and
+- a full-check invariant that prevents either bundle from drifting away from
+  version 1.5.1 build 24.
+
+Last full verification:
+
+```text
+./tools/xcode-dev.sh check
+All checks passed
+build/check-20260728-192120
+```
+
+No v1.5.1 DMG/ZIP was built, installed, notarized, uploaded, or published. No
+remote branch was pushed. The next engineering action is to choose one bounded
+v1.5.1 roadmap item, measure the relevant baseline where performance is involved,
+and add focused tests before changing behavior.
 
 ## What v1.5.0 delivers
 
@@ -48,14 +82,15 @@ mouse routing. It provides:
 | App discovery | `Sources/Duplication/AppScanner.swift` | Installed-app catalogue and icon discovery. |
 | Routing/UI regression tests | `Tests/MouseButtonRoutingTests.swift`, `tools/MouseSlideHitTestMain.swift` | Hit testing, migrations, click routing, profile behavior. |
 | Full verification | `tools/check.sh` | Builds/tests previews, permissions, launchers, icons, and release invariants. |
+| Xcode and Instruments workflow | `tools/xcode-dev.sh`, `docs/XCODE_DEVELOPMENT.md` | Full-Xcode SDK selection, repository checks/builds, LLDB guidance, and repeatable traces. |
 | Release packaging | `tools/build-release.sh`, `releases/install-klik-pro.sh` | Universal signed DMG/ZIP, checksums, signatures, local verification. |
 
 ## Required invariants
 
 1. Keep `CFBundleShortVersionString` and `CFBundleVersion` in
    `App/Info.plist` and `App/KlikProHelper-Info.plist` identical.
-2. Never silently change build 23. A version bump requires an owner decision and
-   a release-plan update.
+2. Keep the development version at `1.5.1` / `24`. A later version bump requires
+   another owner decision and a release-plan update.
 3. Preserve existing mapping IDs and names during migrations. A deleted profile
    must stay deleted; migration should only add missing defaults once.
 4. Save is the persistence boundary. Activate may save the selected preset as a
@@ -72,10 +107,10 @@ mouse routing. It provides:
 
 ```zsh
 cd "/Users/aminudin/Documents/Business/Products/Klik PRO"
+git switch codex/v1.5.1-development
 git status --short
-git fetch origin
-git switch -c feature/<short-name> origin/main
-./tools/check.sh
+./tools/xcode-dev.sh doctor
+./tools/xcode-dev.sh check
 ```
 
 Make one bounded change at a time. For persisted config work, add migration
@@ -89,10 +124,10 @@ Before merging or releasing:
 ./tools/check.sh
 ./tools/build-release.sh
 ./releases/install-klik-pro.sh --verify-only \
-  --version v1.5.0 \
-  --dmg releases/Klik-PRO-v1.5.0-macos-universal.dmg \
-  --checksum releases/Klik-PRO-v1.5.0-macos-universal.dmg.sha256 \
-  --signature releases/Klik-PRO-v1.5.0-macos-universal.dmg.sha256.sig
+  --version v1.5.1 \
+  --dmg releases/Klik-PRO-v1.5.1-macos-universal.dmg \
+  --checksum releases/Klik-PRO-v1.5.1-macos-universal.dmg.sha256 \
+  --signature releases/Klik-PRO-v1.5.1-macos-universal.dmg.sha256.sig
 ```
 
 Do not install the release as part of a local build unless the owner explicitly

@@ -41,6 +41,9 @@ To assemble, sign, and verify the universal release DMG and ZIP:
 The full app-bundle → install → Accessibility procedure lives in
 [`docs/INSTALL.md`](docs/INSTALL.md). The optional dual-instance feature is
 documented in [`docs/SPECIAL_FEATURE.md`](docs/SPECIAL_FEATURE.md).
+For Xcode source navigation, toolchain checks, LLDB attachment, and repeatable
+Instruments recordings, see
+[`docs/XCODE_DEVELOPMENT.md`](docs/XCODE_DEVELOPMENT.md).
 
 ## Verifying a change
 

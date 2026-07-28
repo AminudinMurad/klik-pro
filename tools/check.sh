@@ -90,8 +90,8 @@ for product_plist in \
 do
   product_version="$(plutil -extract CFBundleShortVersionString raw -o - "$product_plist")"
   product_build="$(plutil -extract CFBundleVersion raw -o - "$product_plist")"
-  if [[ "$product_version" != "1.5.0" || "$product_build" != "23" ]]; then
-    echo "$(basename "$product_plist") must remain version 1.5.0 build 23; found version $product_version build $product_build" >&2
+  if [[ "$product_version" != "1.5.1" || "$product_build" != "24" ]]; then
+    echo "$(basename "$product_plist") must remain version 1.5.1 build 24; found version $product_version build $product_build" >&2
     exit 1
   fi
 done
@@ -550,7 +550,11 @@ if grep -Eiq "$unrelatedAppPattern" "$ROOT/README.md" "$ROOT/CHANGELOG.md" "$ROO
 fi
 
 # The Terminal installer must fail closed around the checked-in release trust root.
-bash -n "$ROOT/install.sh" "$ROOT/tools/sign-release-manifest.sh" "$ROOT/tools/build-release.sh"
+bash -n \
+  "$ROOT/install.sh" \
+  "$ROOT/tools/sign-release-manifest.sh" \
+  "$ROOT/tools/build-release.sh" \
+  "$ROOT/tools/xcode-dev.sh"
 bash -n "$ROOT/tools/evidence-run.sh"
 for executable_script in \
   "$ROOT/install.sh" \
