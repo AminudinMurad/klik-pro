@@ -75,7 +75,7 @@ func render(_ scene: Scene) -> CGImage {
     NSColor.white.setFill()
     NSRect(origin: .zero, size: canvasSize).fill()
 
-    let eyebrow = "KLIK PRO 1.5.1 · APP PROFILES"
+    let eyebrow = "KLIK PRO 1.5.2 · APP PROFILES"
     eyebrow.draw(
         at: NSPoint(x: 72, y: 1090),
         withAttributes: [

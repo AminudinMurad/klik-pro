@@ -2,6 +2,27 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.5.2
+
+Klik PRO's compact 13-inch dashboard is now the minimum of a responsive,
+resizable workspace instead of the only available size.
+
+- **A genuinely resizable dashboard.** The released 940×770-point frame remains
+  the minimum, while normal macOS resizing can expand the workspace up to
+  1280×960 points.
+- **Five Best Fit choices.** Settings offers 13-inch M1, 13-inch M2+, 14-inch,
+  15-inch, and 16-inch frame presets. A preset only applies a suggested frame;
+  the window stays freely resizable and reports manual sizes as Custom.
+- **Long app lists use the extra room.** Added height flows into the independent
+  Native Apps, App Profiles, generator, and Advanced-maintenance viewports.
+  The Mappings lists no longer stop growing after three rows.
+- **Readable at every size.** The proven 872-point card canvas stays centred
+  rather than stretching labels and controls across a wide display. Header,
+  footer, Save, Close, and update controls follow the resized window.
+- **Window size is remembered.** Klik PRO restores the last dashboard frame,
+  constrained to the current screen, without changing any mouse mapping or App
+  Profile data.
+
 ## 1.5.1
 
 Klik PRO now fits comfortably on a 13-inch MacBook and uses substantially less

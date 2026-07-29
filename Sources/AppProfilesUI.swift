@@ -1945,6 +1945,33 @@ private final class MappingSectionCardView: NSView {
 
     required init?(coder: NSCoder) { nil }
 
+    override func layout() {
+        super.layout()
+        let refreshSide: CGFloat = 26
+        let listY: CGFloat = 50
+        refreshButton.frame = NSRect(
+            x: bounds.width - 14 - refreshSide,
+            y: 9,
+            width: refreshSide,
+            height: refreshSide
+        )
+        titleField.frame = NSRect(
+            x: 18,
+            y: 14,
+            width: max(60, refreshButton.frame.minX - 26),
+            height: 16
+        )
+        // At the 13-inch minimum this is a compact two-row viewport. Taller
+        // dashboard sizes spend every additional point on the app list instead
+        // of leaving a dead band below an artificial three-row cap.
+        listView.frame = NSRect(
+            x: 12,
+            y: listY,
+            width: max(0, bounds.width - 24),
+            height: max(0, bounds.height - listY - 12)
+        )
+    }
+
     /// Row content width inside this card, mirroring the sizing the single Mappings
     /// list used before the column split into two cards.
     var rowContentWidth: CGFloat { max(320, listView.rowContentWidth) }
@@ -2048,6 +2075,24 @@ final class MappingAppProfilesView: NSView {
     }
 
     required init?(coder: NSCoder) { nil }
+
+    override func layout() {
+        super.layout()
+        let gap: CGFloat = 16
+        let columnWidth = max(0, (bounds.width - gap) / 2)
+        nativeCard.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: columnWidth,
+            height: bounds.height
+        )
+        profilesCard.frame = NSRect(
+            x: columnWidth + gap,
+            y: 0,
+            width: columnWidth,
+            height: bounds.height
+        )
+    }
 
     func setInstances(_ instances: [AppProfileInstance]) {
         self.instances = instances
@@ -2310,6 +2355,53 @@ final class AppProfilesContentView: NSView {
     }
 
     required init?(coder: NSCoder) { nil }
+
+    override func layout() {
+        super.layout()
+        let generatorColumnWidth = floor(bounds.width * Self.generatorColumnRatio)
+        let generatorListWidth = generatorColumnWidth - 36
+        let profilesX = generatorColumnWidth + 16
+        let refreshSide: CGFloat = 26
+        let headerRefreshY = Self.headerTopY + 7 - refreshSide / 2
+        let listHeight = max(0, bounds.height - Self.columnContentY - 14)
+
+        explanationField.frame = NSRect(
+            x: 18,
+            y: Self.headerTopY + 26,
+            width: generatorListWidth,
+            height: 64
+        )
+        statusField.frame = NSRect(
+            x: profilesX,
+            y: 108,
+            width: bounds.width - profilesX - 18,
+            height: 20
+        )
+        generatorRefreshButton.frame = NSRect(
+            x: generatorColumnWidth - 18 - refreshSide,
+            y: headerRefreshY,
+            width: refreshSide,
+            height: refreshSide
+        )
+        profilesRefreshButton.frame = NSRect(
+            x: bounds.width - 18 - refreshSide,
+            y: headerRefreshY,
+            width: refreshSide,
+            height: refreshSide
+        )
+        generatorList.frame = NSRect(
+            x: 18,
+            y: Self.columnContentY,
+            width: generatorListWidth,
+            height: listHeight
+        )
+        profilesList.frame = NSRect(
+            x: generatorColumnWidth + 12,
+            y: Self.columnContentY,
+            width: bounds.width - generatorColumnWidth - 28,
+            height: listHeight
+        )
+    }
 
     func setInstances(_ instances: [AppProfileInstance]) {
         self.instances = instances
@@ -2697,6 +2789,64 @@ final class AdvancedSettingsContentView: NSView {
 
     required init?(coder: NSCoder) { nil }
 
+    override func layout() {
+        super.layout()
+
+        // The compact top cards keep their proven geometry. Additional dashboard
+        // height belongs to the maintenance viewport, which is the only unbounded
+        // content on this tab.
+        let lockedGroupHeight: CGFloat = 206
+        let lockedTop = max(82, (bounds.height - lockedGroupHeight) / 2)
+        lockButton.frame.origin = NSPoint(
+            x: bounds.midX - lockButton.frame.width / 2,
+            y: lockedTop
+        )
+        lockTitle.frame = NSRect(
+            x: 0,
+            y: lockedTop + 70,
+            width: bounds.width,
+            height: 24
+        )
+        lockBody.frame = NSRect(
+            x: bounds.midX - 270,
+            y: lockedTop + 102,
+            width: 540,
+            height: 72
+        )
+        lockHint.frame = NSRect(
+            x: 0,
+            y: lockedTop + 188,
+            width: bounds.width,
+            height: 18
+        )
+
+        let maintenanceY: CGFloat = 270
+        let statusHeight: CGFloat = 30
+        let bottomPadding: CGFloat = 16
+        let statusY = max(maintenanceY, bounds.height - statusHeight - bottomPadding)
+        let maintenanceHeight = max(0, statusY - maintenanceY - 8)
+        maintenanceScroll.frame = NSRect(
+            x: 28,
+            y: maintenanceY,
+            width: bounds.width - 56,
+            height: maintenanceHeight
+        )
+        maintenanceScrollbar.frame = NSRect(
+            x: bounds.width - 42,
+            y: maintenanceY,
+            width: FixedAppCardScrollbarView.width + 4,
+            height: maintenanceHeight
+        )
+        statusField.frame = NSRect(
+            x: 28,
+            y: statusY,
+            width: bounds.width - 56,
+            height: statusHeight
+        )
+        maintenanceScrollbar.synchronize()
+        window?.invalidateCursorRects(for: self)
+    }
+
     @objc private func lockPressed() { onUnlock?() }
 
     override func resetCursorRects() {
@@ -2870,12 +3020,15 @@ final class AdvancedSettingsContentView: NSView {
         // Leave room on the right for whichever buttons this row shows so the
         // (truncated) detail text never runs under them.
         let buttonCount = (primary == nil ? 0 : 1) + (delete == nil ? 0 : 1)
-        let reserved: CGFloat = buttonCount == 2 ? 218 : (buttonCount == 1 ? 118 : 12)
+        let reserved: CGFloat = buttonCount == 2 ? 230 : (buttonCount == 1 ? 130 : 12)
         let detailField = NSTextField(labelWithString: detail)
         detailField.frame = NSRect(x: 12, y: y + 28, width: max(80, width - 12 - reserved), height: 16)
         detailField.font = .systemFont(ofSize: 11)
         detailField.textColor = detailColor
         detailField.lineBreakMode = .byTruncatingMiddle
+        detailField.usesSingleLineMode = true
+        detailField.maximumNumberOfLines = 1
+        detailField.cell?.truncatesLastVisibleLine = true
         maintenanceDocument.addSubview(detailField)
 
         var buttonX = width - 118

@@ -120,6 +120,33 @@ KLIK_PRO_PREVIEW_ACCESSIBILITY_GRANTED=0 \
   "$EXECUTABLE" "$FIXTURES/settings-needs-permission.png" settings
 render_preview "$FIXTURES/app-profiles.png" profiles
 render_preview "$FIXTURES/app-profiles-empty.png" profiles "" 0 1
+# Responsive v1.5.2 acceptance: the released 13-inch frame remains the minimum,
+# while each larger Best Fit frame gives the long profile list more viewport.
+KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
+  KLIK_PRO_PREVIEW_FRAME_SIZE=940x770 \
+  "$EXECUTABLE" "$FIXTURES/responsive-mappings-13-m1.png" mappings
+KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
+  KLIK_PRO_PREVIEW_FRAME_SIZE=1000x820 \
+  "$EXECUTABLE" "$FIXTURES/responsive-profiles-13-modern.png" profiles
+KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
+  KLIK_PRO_PREVIEW_FRAME_SIZE=1080x860 \
+  "$EXECUTABLE" "$FIXTURES/responsive-profiles-14.png" profiles
+KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
+  KLIK_PRO_PREVIEW_FRAME_SIZE=1180x900 \
+  "$EXECUTABLE" "$FIXTURES/responsive-profiles-15.png" profiles
+KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
+  KLIK_PRO_PREVIEW_FRAME_SIZE=1280x960 \
+  "$EXECUTABLE" "$FIXTURES/responsive-profiles-16.png" profiles
+KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
+  KLIK_PRO_PREVIEW_FRAME_SIZE=1280x960 \
+  "$EXECUTABLE" "$FIXTURES/responsive-mappings-16.png" mappings
+KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
+  KLIK_PRO_PREVIEW_FRAME_SIZE=1280x960 \
+  "$EXECUTABLE" "$FIXTURES/responsive-settings-16.png" settings
+KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
+  KLIK_PRO_PREVIEW_FRAME_SIZE=1280x960 \
+  KLIK_PRO_PREVIEW_ADVANCED_UNLOCKED=1 \
+  "$EXECUTABLE" "$FIXTURES/responsive-advanced-16.png" advanced
 # Build-only Special Feature fixtures. These never replace the tracked README images.
 # PreviewMain converts the environment value into in-process Config overrides before
 # ToggleView is created; previews never inspect or mutate a live background service.
@@ -173,6 +200,14 @@ echo "  $FIXTURES/about.png"
 echo "  $FIXTURES/settings-needs-permission.png"
 echo "  $FIXTURES/app-profiles.png"
 echo "  $FIXTURES/app-profiles-empty.png"
+echo "  $FIXTURES/responsive-mappings-13-m1.png"
+echo "  $FIXTURES/responsive-profiles-13-modern.png"
+echo "  $FIXTURES/responsive-profiles-14.png"
+echo "  $FIXTURES/responsive-profiles-15.png"
+echo "  $FIXTURES/responsive-profiles-16.png"
+echo "  $FIXTURES/responsive-mappings-16.png"
+echo "  $FIXTURES/responsive-settings-16.png"
+echo "  $FIXTURES/responsive-advanced-16.png"
 echo "  $FIXTURES/special-feature-no-apps.png"
 echo "  $FIXTURES/special-feature-chatgpt-only.png"
 echo "  $FIXTURES/mouse-mapping-single.png"

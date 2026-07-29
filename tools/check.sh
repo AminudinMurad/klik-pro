@@ -90,8 +90,8 @@ for product_plist in \
 do
   product_version="$(plutil -extract CFBundleShortVersionString raw -o - "$product_plist")"
   product_build="$(plutil -extract CFBundleVersion raw -o - "$product_plist")"
-  if [[ "$product_version" != "1.5.1" || "$product_build" != "24" ]]; then
-    echo "$(basename "$product_plist") must remain version 1.5.1 build 24; found version $product_version build $product_build" >&2
+  if [[ "$product_version" != "1.5.2" || "$product_build" != "25" ]]; then
+    echo "$(basename "$product_plist") must remain version 1.5.2 build 25; found version $product_version build $product_build" >&2
     exit 1
   fi
 done
@@ -1544,6 +1544,8 @@ grep -q 'NSApp.disableRelaunchOnLogin()' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'previewRenderingIsActive = true' "$ROOT/tools/PreviewMain.swift"
 grep -q 'KLIK_PRO_PREVIEW_INSTALLED_TARGETS' "$ROOT/tools/PreviewMain.swift"
 grep -q 'KLIK_PRO_PREVIEW_UNSAVED' "$ROOT/tools/PreviewMain.swift"
+grep -q 'KLIK_PRO_PREVIEW_INTERACTIVE' "$ROOT/tools/PreviewMain.swift"
+grep -q 'KLIK_PRO_PREVIEW_FOCUS_BEST_FIT' "$ROOT/tools/PreviewMain.swift"
 grep -q 'KLIK_PRO_PREVIEW_USE_INSTALLED_APP_ICONS' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'render_preview "$ROOT/assets/screenshot-mappings.png" mappings "" 1' "$ROOT/tools/render-previews.sh"
 grep -q 'special-feature-no-apps.png' "$ROOT/tools/render-previews.sh"
@@ -1625,6 +1627,39 @@ grep -q 'roundedRect: borderRect' "$ROOT/tools/PreviewMain.swift"
 grep -q 'let previewScale: CGFloat = 2' "$ROOT/tools/PreviewMain.swift"
 grep -q 'bitmap.size = bounds.size' "$ROOT/tools/PreviewMain.swift"
 grep -q 'screenshot-onboarding.png' "$ROOT/tools/render-previews.sh"
+grep -q 'responsive-mappings-13-m1.png' "$ROOT/tools/render-previews.sh"
+grep -q 'responsive-profiles-13-modern.png' "$ROOT/tools/render-previews.sh"
+grep -q 'responsive-profiles-14.png' "$ROOT/tools/render-previews.sh"
+grep -q 'responsive-profiles-15.png' "$ROOT/tools/render-previews.sh"
+grep -q 'responsive-profiles-16.png' "$ROOT/tools/render-previews.sh"
+grep -q 'responsive-mappings-16.png' "$ROOT/tools/render-previews.sh"
+grep -q 'responsive-settings-16.png' "$ROOT/tools/render-previews.sh"
+grep -q 'responsive-advanced-16.png' "$ROOT/tools/render-previews.sh"
+
+require_source_literal \
+  'styleMask: [.titled, .closable, .miniaturizable, .resizable]' \
+  "$ROOT/Sources/KlikProApp.swift" \
+  "The v1.5.2 dashboard window must remain normally resizable"
+require_source_literal \
+  'static let minimumContentSize = NSSize(width: 940, height: 738)' \
+  "$ROOT/Sources/KlikProApp.swift" \
+  "The released 13-inch content size must remain the responsive minimum"
+require_source_literal \
+  'static let maximumContentSize = NSSize(width: 1_280, height: 928)' \
+  "$ROOT/Sources/KlikProApp.swift" \
+  "The 16-inch Best Fit content size must remain the responsive maximum"
+require_source_literal \
+  'private func persistWindowFrame()' \
+  "$ROOT/Sources/KlikProApp.swift" \
+  "The responsive dashboard must remember its last frame"
+require_source_literal \
+  'forKey: KlikProDashboardMetrics.framePreferenceKey' \
+  "$ROOT/Sources/KlikProApp.swift" \
+  "The responsive dashboard frame must use a stable preference key"
+require_source_literal \
+  'height: max(0, bounds.height - listY - 12)' \
+  "$ROOT/Sources/AppProfilesUI.swift" \
+  "Mappings app lists must consume added dashboard height"
 
 previewRunOne="$(mktemp -d "${TMPDIR:-/tmp}/klik-pro-check-preview-one-$STAMP.XXXXXX")"
 previewRunTwo="$(mktemp -d "${TMPDIR:-/tmp}/klik-pro-check-preview-two-$STAMP.XXXXXX")"
@@ -1664,6 +1699,51 @@ do
   }
   [[ "$(sips -g hasAlpha "$firstFixture" 2>/dev/null | awk '/hasAlpha/ { print $2 }')" == "no" ]] || {
     echo "Preview fixture must be opaque: $fixtureName" >&2
+    exit 1
+  }
+  cmp "$firstFixture" "$secondFixture"
+done
+
+# Every Best Fit fixture is Retina-rendered from the content rect. Exact
+# dimensions prove that the requested outer frame reached AppKit and that the
+# minimum did not silently grow.
+responsiveFixturePixels() {
+  case "$1" in
+    responsive-mappings-13-m1.png) echo "1880 1476" ;;
+    responsive-profiles-13-modern.png) echo "2000 1576" ;;
+    responsive-profiles-14.png) echo "2160 1656" ;;
+    responsive-profiles-15.png) echo "2360 1736" ;;
+    responsive-profiles-16.png|responsive-mappings-16.png|responsive-settings-16.png|responsive-advanced-16.png) echo "2560 1856" ;;
+    *) echo "0 0" ;;
+  esac
+}
+for fixtureName in \
+  responsive-mappings-13-m1.png \
+  responsive-profiles-13-modern.png \
+  responsive-profiles-14.png \
+  responsive-profiles-15.png \
+  responsive-profiles-16.png \
+  responsive-mappings-16.png \
+  responsive-settings-16.png \
+  responsive-advanced-16.png
+do
+  firstFixture="$previewRunOne/fixtures/$fixtureName"
+  secondFixture="$previewRunTwo/fixtures/$fixtureName"
+  [[ -f "$firstFixture" && -f "$secondFixture" ]] || {
+    echo "Missing responsive preview fixture: $fixtureName" >&2
+    exit 1
+  }
+  read -r expectedWidth expectedHeight <<<"$(responsiveFixturePixels "$fixtureName")"
+  [[ "$(sips -g pixelWidth "$firstFixture" 2>/dev/null | awk '/pixelWidth/ { print $2 }')" == "$expectedWidth" ]] || {
+    echo "Unexpected responsive preview width: $fixtureName" >&2
+    exit 1
+  }
+  [[ "$(sips -g pixelHeight "$firstFixture" 2>/dev/null | awk '/pixelHeight/ { print $2 }')" == "$expectedHeight" ]] || {
+    echo "Unexpected responsive preview height: $fixtureName" >&2
+    exit 1
+  }
+  [[ "$(sips -g hasAlpha "$firstFixture" 2>/dev/null | awk '/hasAlpha/ { print $2 }')" == "no" ]] || {
+    echo "Responsive preview fixture must be opaque: $fixtureName" >&2
     exit 1
   }
   cmp "$firstFixture" "$secondFixture"

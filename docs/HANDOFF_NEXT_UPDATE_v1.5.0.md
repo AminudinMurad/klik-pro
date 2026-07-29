@@ -1,193 +1,103 @@
 # Klik PRO next-update handoff
 
-Updated 2026-07-29 for the approved v1.5.1 (build 24) release. Read this before
-changing profile or input behavior.
+Updated 2026-07-29 for the v1.5.2 responsive-dashboard release.
 
 ## Released baseline
 
-- GitHub release: <https://github.com/AminudinMurad/klik-pro/releases/tag/v1.5.0>
-- Release tag: `v1.5.0`
-- Release commit: `66ce8ec` (the README follow-up is `acddca4`)
-- Published branch: `release/v1.5.0`; `main` includes the README follow-up.
-- Published app version/build: `1.5.0` / `23`.
-- Current local branch after the README follow-up: `release/v1.5.0`.
+- Current public release: **v1.5.2 build 25**.
+- Release tag: `v1.5.2`.
+- Installed app at handoff: **v1.5.2 build 25**.
+- Current local branch: `main`.
 
-## v1.5.1 release baseline
+## v1.5.2 scope
 
-- Version/build: `1.5.1` / `24` in both app plists.
-- Release authorization recorded: 2026-07-29.
-- Release source branch: `codex/v1.5.1-development`.
-- Release notes: `docs/RELEASE_NOTES_v1.5.1.md`.
-- The changelog and README now describe v1.5.1 as the current release.
+- Version/build: **1.5.2 / 25** in both app plists.
+- Scope: responsive dashboard and scalable long-list presentation only.
+- Mouse mappings, mapping identities, configuration schema, and physical-event
+  routing were not changed.
 
-Do not change the app build number without an explicit owner decision. The
-configuration schema version is independent from the app build number and may
-advance when persisted data changes.
+## Responsive design
 
-## Current continuation state
+The v1.5.1 940×770-point outer frame is retained as the minimum, not discarded.
+The window can grow to 1280×960 and restores its last valid frame.
 
-The v1.5.1 baseline contains:
+Settings offers five optional Best Fit outer-window frames:
 
-- the synchronized `1.5.1` / `24` main-app and helper metadata;
-- refreshed v1.5.1 README previews and standalone release notes;
-- the finalized v1.5.1 changelog section;
-- `tools/xcode-dev.sh` plus `docs/XCODE_DEVELOPMENT.md` for selecting the full
-  Xcode toolchain and recording repeatable Instruments traces; and
-- a full-check invariant that prevents either bundle from drifting away from
-  version 1.5.1 build 24.
+| Display choice | Width | Height |
+|---|---:|---:|
+| 13-inch M1 | 940 | 770 |
+| 13-inch M2+ | 1000 | 820 |
+| 14-inch | 1080 | 860 |
+| 15-inch | 1180 | 900 |
+| 16-inch | 1280 | 960 |
 
-The first v1.5.1 performance pass is documented in
-`docs/PERFORMANCE_BASELINE_v1.5.1.md`. Instruments measured repeated strict
-code-signature validation from the helper's five-second availability timer as the
-dominant idle cost. The stable poll now compares cheap profile-file fingerprints
-and performs full health validation only after a relevant change; managed launch
-actions continue to revalidate independently and fail closed.
+These choices only set the frame. The window stays freely resizable and reports
+non-matching frames as Custom.
 
-The dashboard is now sized around the MacBook Air M1 13-inch default
-1440 × 900 workspace:
+The dashboard keeps a centred 872-point content canvas. Wider windows gain calm
+side gutters instead of stretched controls. Additional height expands the
+independent Native Apps, App Profiles, generator, and maintenance viewports; each
+still scrolls when its content exceeds the available height.
 
-- fixed complete window size: `940 × 770` points, including the 32-point
-  macOS title bar (previously approximately `940 × 788`);
-- fixed AppKit content size: `940 × 738` points;
-- fixed dashboard viewport: `872 × 566` points, with no outer vertical scroller;
-- the Mappings mouse guide and its callouts use a compact 304-point card;
-- Native Apps, App Profiles, and Advanced maintenance are the only vertically
-  scrolling areas;
-- list-order pins remain available from cards on both Mappings and App Profiles;
-- all tracked dashboard screenshots and the App Profiles showcase were
-  re-rendered at `1880 × 1476` Retina content pixels.
+## Verification evidence
 
-Final full release verification:
+- All routing, helper, LaunchAgent, App Profile, and UI hit-test checks passed.
+- Two independently rendered preview sets matched byte for byte.
+- Responsive fixtures matched their expected Retina dimensions.
+- Minimum and maximum layouts were visually inspected.
+- Inspection copies are in `build/v1.5.2-responsive-previews/`.
+- Advanced long paths truncate before their action controls.
+- Live isolated AppKit QA passed all five presets, custom resizing, minimum and
+  maximum clamps, native zoom/restore, and compact/expanded list scrolling.
+- Accessibility actions exposed the Best Fit radio group correctly. Injected QA
+  focus proved Right Arrow navigation and Space activation without changing the
+  Mac's global keyboard setting.
+- Isolated Save → normal quit → relaunch retained the edited configuration and
+  exact preset/custom frames. Invalid and off-screen stored frames recovered.
+- Authenticated installed-app acceptance passed against
+  `/Applications/Klik PRO.app`:
+  - all five Best Fit controls applied their exact frames;
+  - continuous manual resizing reported a valid Custom frame;
+  - Save → normal quit → relaunch retained both the edited menu preference and
+    the exact 15-inch frame;
+  - the original menu and Caffeinate preferences were restored through the UI,
+    saved, relaunched, and matched the complete pre-test configuration snapshot.
+- Final pre-commit full gate: `build/check-20260729-170907` — passed.
+- `git diff --check` passed.
 
-```text
-./tools/xcode-dev.sh check
-All checks passed
-build/check-20260729-012636
-```
+## Release assets
 
-## Final release package
-
-The final universal v1.5.1 artifacts were rebuilt from the approved source and
-verified locally:
-
-- DMG: `releases/Klik-PRO-v1.5.1-macos-universal.dmg`
-  - SHA-256: `91f6abaef64022d920aefe9e335ca4087213ddb513e14745e89702c5c5944f48`
-- ZIP: `releases/Klik-PRO-v1.5.1-macos-universal.zip`
-  - SHA-256: `4ac2922313ac87456454eb50a5da44ac4fe4db793fa0d572275f086de638d45b`
-- Both checksum manifests and the local installer manifest have valid signatures
-  from the checked-in Klik PRO release key.
-- `install-klik-pro.sh --verify-only` passed every authenticity and integrity
-  check for the local DMG.
-- The owner explicitly approved committing, tagging, and publishing v1.5.1
-  build 24 on 2026-07-29.
-
-## What v1.5.0 delivers
-
-The release is a stable mapping-preset implementation, not hardware-isolated
-mouse routing. It provides:
-
-- Up to three saved mapping presets, each with its own button toggles, shortcut
-  combinations, Open App targets, browser selections, and display colour.
-- One active preset at a time. Browsing a slide only loads it for editing;
-  **Save** persists it and **Activate** makes it the helper's live preset.
-- Fresh/reset colours: Pearl White, Mist Blue, and Rose.
-- Fresh/reset defaults with all button toggles off; middle/gesture are Open App
-  with no app selected; forward/back retain browser-history defaults; thumb-wheel
-  switching is off by default.
-- Shortcut recording, conflict checks, browser checkboxes, app/profile launch
-  targets, and explicit Save/Discard handling on quit.
-- Smoother carousel navigation, deterministic previews, and a compact mappings
-  layout with three visible profile slides.
-- Physical mouse assignment/scanning UI is intentionally not part of the public
-  workflow. The current helper still applies one active mapping to supported
-  mouse events, regardless of which physical mouse generated them.
-
-## Source map
-
-| Area | Main files | Notes |
-|---|---|---|
-| Persisted config and migrations | `Sources/KlikProConfig.swift` | Mapping presets, schema migrations, reset defaults, active profile. |
-| Settings UI and carousel | `Sources/KlikProApp.swift` | Save/Activate, slide layout, browser picker, callout geometry. |
-| Event helper | `Sources/KlikProInput.swift` | Reads the active mapping and handles supported events. |
-| App discovery | `Sources/Duplication/AppScanner.swift` | Installed-app catalogue and icon discovery. |
-| Routing/UI regression tests | `Tests/MouseButtonRoutingTests.swift`, `tools/MouseSlideHitTestMain.swift` | Hit testing, migrations, click routing, profile behavior. |
-| Full verification | `tools/check.sh` | Builds/tests previews, permissions, launchers, icons, and release invariants. |
-| Xcode and Instruments workflow | `tools/xcode-dev.sh`, `docs/XCODE_DEVELOPMENT.md` | Full-Xcode SDK selection, repository checks/builds, LLDB guidance, and repeatable traces. |
-| Release packaging | `tools/build-release.sh`, `releases/install-klik-pro.sh` | Universal signed DMG/ZIP, checksums, signatures, local verification. |
+The GitHub release carries nine authenticated assets: universal DMG and ZIP
+archives, their signed SHA-256 manifests, the standalone installer, and the
+installer's signed manifest. Treat source verification, installed-app acceptance,
+packaging, publication, and public download verification as separate gates.
 
 ## Required invariants
 
-1. Keep `CFBundleShortVersionString` and `CFBundleVersion` in
-   `App/Info.plist` and `App/KlikProHelper-Info.plist` identical.
-2. Keep the development version at `1.5.1` / `24`. A later version bump requires
-   another owner decision and a release-plan update.
-3. Preserve existing mapping IDs and names during migrations. A deleted profile
-   must stay deleted; migration should only add missing defaults once.
-4. Save is the persistence boundary. Activate may save the selected preset as a
-   convenience, but browsing or editing must not mutate the helper's live state.
-5. Keep the current one-active-preset contract until true device routing is
-   implemented and tested.
-6. Do not reintroduce a misleading Assign Mouse/Rescan workflow unless it is
-   backed by real event-source routing. Device enumeration alone is not routing.
-7. Keep the app's Accessibility/Input Monitoring behavior explicit and fail safe.
-8. Run `./tools/check.sh` before a handoff. For a release, also run
-   `./tools/build-release.sh` and the installer `--verify-only` path.
+1. Keep the main and helper version/build metadata identical.
+2. Keep Save as the persistence boundary.
+3. Preserve existing mapping IDs, names, and the one-active-mapping contract.
+4. Do not change configuration schema for this UI-only release.
+5. Do not expose device assignment unless physical event-source routing is real
+   and tested.
+6. Keep Accessibility/Input Monitoring behavior explicit and fail safe.
+7. Run `./tools/check.sh` after any further source change.
 
-## Recommended next-update workflow
+## v1.6 boundary
 
-```zsh
-cd "/Users/aminudin/Documents/Business/Products/Klik PRO"
-git switch codex/v1.5.1-development
-git status --short
-./tools/xcode-dev.sh doctor
-./tools/xcode-dev.sh check
-```
+v1.6 is reserved for mouse-independent profiles. The current helper still applies
+one active mapping to supported mouse events regardless of the physical mouse.
+`IOHIDManager` enumeration does not establish the source of `CGEventTap` events.
+Read `TRUE_MOUSE_PROFILE_PLAN.md` before changing this model.
 
-Make one bounded change at a time. For persisted config work, add migration
-tests before changing the schema. For UI geometry, render deterministic mapping
-fixtures and inspect all three slide positions. For input changes, test both
-the event helper and the UI hit-test harness.
+## Source map
 
-Before merging or releasing:
-
-```zsh
-./tools/check.sh
-./tools/build-release.sh
-./releases/install-klik-pro.sh --verify-only \
-  --version v1.5.1 \
-  --dmg releases/Klik-PRO-v1.5.1-macos-universal.dmg \
-  --checksum releases/Klik-PRO-v1.5.1-macos-universal.dmg.sha256 \
-  --signature releases/Klik-PRO-v1.5.1-macos-universal.dmg.sha256.sig
-```
-
-Do not install the release as part of a local build unless the owner explicitly
-asks for installation. Keep release assets local until final manual testing is
-complete, then publish the tag and release assets together.
-
-## Known limitations and open decisions
-
-- Mapping presets are not bound to hardware. All connected mice share the one
-  active preset.
-- `IOHIDManager` scanning can enumerate devices, but scanning does not identify
-  the source of a `CGEventTap` button event.
-- True per-device routing is documented separately in
-  [`TRUE_MOUSE_PROFILE_PLAN.md`](TRUE_MOUSE_PROFILE_PLAN.md). Do not implement it
-  by merely restoring or exposing the old assignment UI.
-- Browser tab switching remains dependent on the browser's supported shortcut
-  behavior and the device's wheel events.
-- The app is ad-hoc signed and not notarized; the installer explains the normal
-  Gatekeeper path and verifies the signed release manifest before installation.
-
-## Handoff checklist
-
-- [ ] Read this document and `TRUE_MOUSE_PROFILE_PLAN.md`.
-- [ ] Confirm `git status` is clean and identify the active branch.
-- [ ] Confirm app version/build before editing plist files.
-- [ ] Decide whether the work is mapping-preset behavior or true hardware
-      routing; do not mix the two models in one UI change.
-- [ ] Add/update focused tests before running the full check.
-- [ ] Render and inspect the affected preview fixture.
-- [ ] Run the full check and record its output directory.
-- [ ] Review the staged diff for accidental generated files, secrets, or AI
-      attribution/trailers before committing.
-- [ ] Build and locally verify the DMG only when the owner requests a release.
+| Area | Main files |
+|---|---|
+| Responsive window and presets | `Sources/KlikProApp.swift` |
+| Expanding list viewports | `Sources/AppProfilesUI.swift` |
+| Preview frame injection | `tools/PreviewMain.swift` |
+| Responsive fixture matrix | `tools/render-previews.sh` |
+| Full verification | `tools/check.sh` |
+| Release notes | `docs/RELEASE_NOTES_v1.5.2.md` |
+| v1.6 design boundary | `docs/TRUE_MOUSE_PROFILE_PLAN.md` |

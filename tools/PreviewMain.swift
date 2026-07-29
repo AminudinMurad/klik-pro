@@ -113,6 +113,33 @@ private struct PreviewMain {
                 fputs("Unable to create settings preview window\n", stderr)
                 exit(1)
             }
+            if let rawFrameSize = ProcessInfo.processInfo.environment[
+                "KLIK_PRO_PREVIEW_FRAME_SIZE"
+            ] {
+                let parts = rawFrameSize.lowercased().split(separator: "x")
+                guard parts.count == 2,
+                      let width = Double(parts[0]),
+                      let height = Double(parts[1]),
+                      width >= 940,
+                      height >= 770 else {
+                    fputs(
+                        "KLIK_PRO_PREVIEW_FRAME_SIZE must be WIDTHxHEIGHT "
+                            + "at or above 940x770\n",
+                        stderr
+                    )
+                    exit(64)
+                }
+                settingsWindow.setFrame(
+                    NSRect(
+                        origin: settingsWindow.frame.origin,
+                        size: NSSize(
+                            width: CGFloat(width),
+                            height: CGFloat(height)
+                        )
+                    ),
+                    display: false
+                )
+            }
             window = settingsWindow
             content = settingsContent
             if let toggleView = content as? ToggleView {
@@ -171,6 +198,34 @@ private struct PreviewMain {
         window.displayIfNeeded()
         content.layoutSubtreeIfNeeded()
         content.display()
+
+        // Live QA uses the same isolated preview state as deterministic rendering,
+        // but keeps the real AppKit window open for resize, keyboard, scrolling,
+        // and Save/relaunch checks. No screenshot is written in this mode.
+        if ProcessInfo.processInfo.environment["KLIK_PRO_PREVIEW_INTERACTIVE"] == "1" {
+            app.setActivationPolicy(.regular)
+            let mainMenu = NSMenu()
+            let applicationMenuItem = NSMenuItem()
+            let applicationMenu = NSMenu()
+            applicationMenu.addItem(
+                withTitle: "Quit Klik PRO Live QA",
+                action: #selector(NSApplication.terminate(_:)),
+                keyEquivalent: "q"
+            )
+            applicationMenuItem.submenu = applicationMenu
+            mainMenu.addItem(applicationMenuItem)
+            app.mainMenu = mainMenu
+            window.makeKeyAndOrderFront(nil)
+            app.activate(ignoringOtherApps: true)
+            if ProcessInfo.processInfo.environment[
+                "KLIK_PRO_PREVIEW_FOCUS_BEST_FIT"
+            ] == "1",
+               let toggleView = content as? ToggleView {
+                toggleView.focusDashboardBestFitForPreview()
+            }
+            app.run()
+            return
+        }
 
         let bounds = content.bounds
         let previewScale: CGFloat = 2

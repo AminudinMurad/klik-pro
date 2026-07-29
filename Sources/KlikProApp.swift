@@ -8,6 +8,60 @@ import UniformTypeIdentifiers
 // NOTE: LaunchAgent identifiers and installer helpers live in KlikProConfig.swift,
 // shared with the combined background helper.
 
+/// Responsive dashboard contract. The smallest preset is the v1.5.1 frame that
+/// already fits a 13-inch MacBook. Larger presets add useful list height while
+/// keeping the 872-point card canvas at a readable maximum width.
+enum KlikProDashboardPreset: Int, CaseIterable {
+    case air13M1
+    case air13Modern
+    case pro14
+    case air15
+    case pro16
+
+    var controlTitle: String {
+        switch self {
+        case .air13M1: return "13-inch M1"
+        case .air13Modern: return "13-inch M2+"
+        case .pro14: return "14-inch"
+        case .air15: return "15-inch"
+        case .pro16: return "16-inch"
+        }
+    }
+
+    /// Outer frame size, matching what the user sees when comparing window size
+    /// with the available desktop. AppKit derives the content size from this.
+    var frameSize: NSSize {
+        switch self {
+        case .air13M1: return NSSize(width: 940, height: 770)
+        case .air13Modern: return NSSize(width: 1_000, height: 820)
+        case .pro14: return NSSize(width: 1_080, height: 860)
+        case .air15: return NSSize(width: 1_180, height: 900)
+        case .pro16: return NSSize(width: 1_280, height: 960)
+        }
+    }
+
+    var sizeTitle: String {
+        "\(Int(frameSize.width)) × \(Int(frameSize.height))"
+    }
+
+    static func matching(frameSize: NSSize) -> KlikProDashboardPreset? {
+        allCases.first {
+            abs(frameSize.width - $0.frameSize.width) < 1.5
+                && abs(frameSize.height - $0.frameSize.height) < 1.5
+        }
+    }
+}
+
+enum KlikProDashboardMetrics {
+    static let canvasWidth: CGFloat = 872
+    static let horizontalInset: CGFloat = 34
+    static let headerHeight: CGFloat = 82
+    static let footerHeight: CGFloat = 90
+    static let minimumContentSize = NSSize(width: 940, height: 738)
+    static let maximumContentSize = NSSize(width: 1_280, height: 928)
+    static let framePreferenceKey = "klikpro.dashboardWindowFrame.v1"
+}
+
 /// One physical pointer offered by the Mouse Profile selector. The persisted
 /// identity stays intentionally small (VID/PID/serial); presentation-only details
 /// are refreshed from IOKit whenever the settings window opens.
@@ -2896,6 +2950,24 @@ final class SettingsContentView: NSView {
         updateQuickLaunchAssignments(config: config, featureActive: self.specialFeatureOn)
     }
 
+    override func layout() {
+        super.layout()
+        // The mouse guide is intentionally stable: its callouts are measured
+        // against the source artwork. Responsive height is spent on the two
+        // independently scrolling app lists below it.
+        mouseSlideContainer.frame = SettingsContentView.deviceCard
+        mouseProfileHeader.frame = SettingsContentView.deviceCard
+        mappingProfilesView.frame = NSRect(
+            x: SettingsContentView.mappingBottomCard.minX,
+            y: SettingsContentView.mappingBottomCard.minY,
+            width: SettingsContentView.mappingBottomCard.width,
+            height: max(
+                SettingsContentView.mappingBottomCard.height,
+                bounds.height - SettingsContentView.mappingBottomCard.minY
+            )
+        )
+    }
+
     /// Reflects the current thumb-wheel config onto this tab's toggle + browsers pull-down.
     /// Called by the controller when the Settings-tab controls change, so the two stay synced.
     func setThumbWheel(_ thumbWheel: ThumbWheelConfig) {
@@ -3332,8 +3404,11 @@ final class PreferencesContentView: NSView {
     let settingsSponsorsLink: URLLinkView
     let settingsKofiLink: URLLinkView
     let settingsPayPalLink: URLLinkView
+    let dashboardSizeControl: NSSegmentedControl
+    private let dashboardSizeStatus = NSTextField(labelWithString: "")
     let accessibilityPermissionRow: PermissionStatusRowView
     private var accessibilityGranted: Bool
+    var onDashboardPresetChange: ((KlikProDashboardPreset) -> Void)?
 
     override var isFlipped: Bool { true }
 
@@ -3347,6 +3422,7 @@ final class PreferencesContentView: NSView {
     private static let aboutCard   = NSRect(x: rightX, y: 168, width: cardW, height: 126)
     private static let supportCard = NSRect(x: rightX, y: 310, width: cardW, height: 92)
     private static let thumbWheelCard = NSRect(x: leftX, y: 330, width: cardW, height: 84)
+    private static let bestFitCard = NSRect(x: 0, y: 430, width: 872, height: 120)
     private static let headingContentGap: CGFloat = 8
     private static let permissionRecheckXOffset: CGFloat = 168
 
@@ -3502,6 +3578,42 @@ final class PreferencesContentView: NSView {
             alignRight: false,
             frame: .zero
         )
+        dashboardSizeControl = NSSegmentedControl(
+            labels: KlikProDashboardPreset.allCases.map(\.controlTitle),
+            trackingMode: .selectOne,
+            target: nil,
+            action: nil
+        )
+        dashboardSizeControl.segmentStyle = .rounded
+        dashboardSizeControl.frame = NSRect(
+            x: PreferencesContentView.bestFitCard.minX + PreferencesContentView.pad,
+            y: PreferencesContentView.bestFitCard.minY + 42,
+            width: PreferencesContentView.bestFitCard.width
+                - PreferencesContentView.pad * 2,
+            height: 30
+        )
+        let segmentWidth = dashboardSizeControl.frame.width
+            / CGFloat(KlikProDashboardPreset.allCases.count)
+        for preset in KlikProDashboardPreset.allCases {
+            dashboardSizeControl.setWidth(
+                segmentWidth,
+                forSegment: preset.rawValue
+            )
+            dashboardSizeControl.setToolTip(
+                "\(preset.controlTitle) best fit · \(preset.sizeTitle)",
+                forSegment: preset.rawValue
+            )
+        }
+        dashboardSizeControl.setAccessibilityLabel("Dashboard Best Fit")
+        dashboardSizeStatus.frame = NSRect(
+            x: PreferencesContentView.bestFitCard.minX + PreferencesContentView.pad,
+            y: PreferencesContentView.bestFitCard.minY + 78,
+            width: PreferencesContentView.bestFitCard.width
+                - PreferencesContentView.pad * 2,
+            height: 18
+        )
+        dashboardSizeStatus.font = .systemFont(ofSize: 11, weight: .medium)
+        dashboardSizeStatus.textColor = .appTextSecondary
 
         let supportFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
         let supportIconSpan: CGFloat = 15 + 6
@@ -3543,7 +3655,9 @@ final class PreferencesContentView: NSView {
             supportX += buttonWidth + supportGap
         }
 
-        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 432))
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 566))
+        dashboardSizeControl.target = self
+        dashboardSizeControl.action = #selector(dashboardSizeChanged)
         [
             launchAtLoginRow,
             autoUpdateRow,
@@ -3559,14 +3673,51 @@ final class PreferencesContentView: NSView {
             settingsSponsorsLink,
             settingsKofiLink,
             settingsPayPalLink,
+            dashboardSizeControl,
+            dashboardSizeStatus,
             thumbWheelToggle,
             chromeCheck,
             braveCheck,
             firefoxCheck,
             safariCheck,
         ].forEach { addSubview($0) }
+        setDashboardFrameSize(
+            KlikProDashboardPreset.air13M1.frameSize
+        )
     }
     required init?(coder: NSCoder) { nil }
+
+    @objc private func dashboardSizeChanged() {
+        guard let preset = KlikProDashboardPreset(
+            rawValue: dashboardSizeControl.selectedSegment
+        ) else {
+            return
+        }
+        onDashboardPresetChange?(preset)
+    }
+
+    func setDashboardFrameSize(_ size: NSSize) {
+        if let preset = KlikProDashboardPreset.matching(frameSize: size) {
+            dashboardSizeControl.selectedSegment = preset.rawValue
+            dashboardSizeStatus.stringValue =
+                "ON now: \(preset.controlTitle) · \(preset.sizeTitle)"
+            dashboardSizeStatus.textColor = KlikProBrand.green
+            dashboardSizeControl.setAccessibilityValue(
+                "\(preset.controlTitle), on now"
+            )
+        } else {
+            dashboardSizeControl.selectedSegment = -1
+            dashboardSizeStatus.stringValue =
+                "Custom size · \(Int(size.width.rounded())) × \(Int(size.height.rounded()))"
+            dashboardSizeStatus.textColor = .appTextSecondary
+            dashboardSizeControl.setAccessibilityValue("Custom size")
+        }
+    }
+
+    func focusDashboardSizeControlForPreview() {
+        guard previewRenderingIsActive else { return }
+        window?.makeFirstResponder(dashboardSizeControl)
+    }
 
     func setAccessibilityGranted(_ granted: Bool) {
         guard accessibilityGranted != granted else { return }
@@ -3597,10 +3748,16 @@ final class PreferencesContentView: NSView {
         drawCard(PreferencesContentView.aboutCard)
         drawCard(PreferencesContentView.supportCard)
         drawCard(PreferencesContentView.thumbWheelCard)
+        drawCard(PreferencesContentView.bestFitCard)
         let ix = PreferencesContentView.leftX + PreferencesContentView.pad
         let rxi = PreferencesContentView.rightX + PreferencesContentView.pad
         drawSectionLabel("General", x: ix, y: PreferencesContentView.generalCard.minY + 16)
         drawSectionLabel("Thumb Wheel Tab Switching", x: ix, y: PreferencesContentView.thumbWheelCard.minY + 16)
+        drawSectionLabel(
+            "Dashboard Best Fit",
+            x: PreferencesContentView.bestFitCard.minX + PreferencesContentView.pad,
+            y: PreferencesContentView.bestFitCard.minY + 16
+        )
         ("Enabled" as NSString).draw(at: NSPoint(x: ix + 50, y: 378), withAttributes: [
             .font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.appTextPrimary])
         drawSectionLabel("Permissions", x: rxi, y: PreferencesContentView.permCard.minY + 16)
@@ -3610,6 +3767,18 @@ final class PreferencesContentView: NSView {
             x: rxi,
             y: PreferencesContentView.supportCard.minY + 12
         )
+        ("Applies a suggested frame only — the window remains freely resizable." as NSString)
+            .draw(
+                at: NSPoint(
+                    x: PreferencesContentView.bestFitCard.minX
+                        + PreferencesContentView.pad,
+                    y: PreferencesContentView.bestFitCard.minY + 98
+                ),
+                withAttributes: [
+                    .font: NSFont.systemFont(ofSize: 10.5),
+                    .foregroundColor: NSColor.tertiaryLabelColor,
+                ]
+            )
 
         ("Open-source mouse shortcuts and App Profiles for macOS." as NSString).draw(
             at: NSPoint(
@@ -4075,27 +4244,92 @@ func makeOnboardingAlert(
     return alert
 }
 
-// MARK: - Top-level window chrome (fixed header + scroll view + fixed footer)
+// MARK: - Top-level window chrome (fixed header/footer + responsive content)
 
-final class ToggleWindowController: NSWindowController {
+final class ToggleWindowController: NSWindowController, NSWindowDelegate {
     private let content = ToggleView()
+
+    private static var framePersistenceEnabled: Bool {
+        !previewRenderingIsActive
+            || ProcessInfo.processInfo.environment["KLIK_PRO_PREVIEW_INTERACTIVE"] == "1"
+    }
+
+    private static func storedDashboardFrame() -> NSRect? {
+        guard framePersistenceEnabled,
+              let value = UserDefaults.standard.string(
+                forKey: KlikProDashboardMetrics.framePreferenceKey
+              ) else {
+            return nil
+        }
+        let frame = NSRectFromString(value)
+        guard frame.origin.x.isFinite,
+              frame.origin.y.isFinite,
+              frame.width.isFinite,
+              frame.height.isFinite,
+              frame.width >= KlikProDashboardPreset.air13M1.frameSize.width,
+              frame.height >= KlikProDashboardPreset.air13M1.frameSize.height,
+              frame.width <= KlikProDashboardPreset.pro16.frameSize.width,
+              frame.height <= KlikProDashboardPreset.pro16.frameSize.height else {
+            return nil
+        }
+        return frame
+    }
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 940, height: 738),
-            styleMask: [.titled, .closable, .miniaturizable],
+            contentRect: NSRect(
+                origin: .zero,
+                size: KlikProDashboardMetrics.minimumContentSize
+            ),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Klik PRO"
-        window.center()
+        window.contentMinSize = KlikProDashboardMetrics.minimumContentSize
+        window.contentMaxSize = KlikProDashboardMetrics.maximumContentSize
+        window.isRestorable = true
+        if let storedFrame = Self.storedDashboardFrame() {
+            let targetScreen = NSScreen.screens.first {
+                $0.frame.intersects(storedFrame)
+            } ?? NSScreen.main
+            let constrainedFrame = targetScreen.map {
+                window.constrainFrameRect(storedFrame, to: $0)
+            } ?? storedFrame
+            window.setFrame(constrainedFrame, display: false)
+        } else {
+            window.center()
+        }
+        if let screen = window.screen ?? NSScreen.main {
+            window.setFrame(
+                window.constrainFrameRect(window.frame, to: screen),
+                display: false
+            )
+        }
         window.contentView = content
         super.init(window: window)
+        window.delegate = self
         content.onClose = { [weak self] in
             guard let self, self.content.confirmCloseDiscardingUnsavedChanges() else { return }
             self.close()
             NSApp.terminate(nil)
         }
+    }
+
+    func windowDidMove(_ notification: Notification) {
+        persistWindowFrame()
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        persistWindowFrame()
+    }
+
+    private func persistWindowFrame() {
+        guard Self.framePersistenceEnabled, let window else { return }
+        UserDefaults.standard.set(
+            NSStringFromRect(window.frame),
+            forKey: KlikProDashboardMetrics.framePreferenceKey
+        )
     }
 
     func showFirstLaunchOnboardingIfNeeded() {
@@ -4203,10 +4437,10 @@ final class ToggleView: NSView {
     )
     // Check-for-updates button, top-right of the header (where the status pill used to be).
     // Right edge stays at x=888; the compact "⟳ Updates…" label lets it be narrower.
-    private let updateButtonRect = NSRect(x: 768, y: 30, width: 120, height: 30)
+    private var updateButtonRect = NSRect(x: 768, y: 30, width: 120, height: 30)
     private var updateButtonTrackingArea: NSTrackingArea?
     private var updateButtonHovered = false
-    private let closeButtonRect = NSRect(x: 808, y: 670, width: 90, height: 42)
+    private var closeButtonRect = NSRect(x: 808, y: 670, width: 90, height: 42)
     private var closeButtonTrackingArea: NSTrackingArea?
     private var closeButtonHovered = false
     // Set by a successful check when a newer release exists; lights up the header button.
@@ -4222,6 +4456,8 @@ final class ToggleView: NSView {
     private var appProfilesTabRect = NSRect.zero
     private var advancedTabRect = NSRect.zero
     private var appActivationObserver: NSObjectProtocol?
+    private var dashboardCanvasX: CGFloat = KlikProDashboardMetrics.horizontalInset
+    private var footerBaselineY: CGFloat = 682
 
     override var isFlipped: Bool { true }
 
@@ -4335,6 +4571,9 @@ final class ToggleView: NSView {
             self?.saveConfiguration()
         }
         addSubview(saveButton)
+        preferencesView.onDashboardPresetChange = { [weak self] preset in
+            self?.applyDashboardPreset(preset)
+        }
 
         wireRowCallbacks()
         refreshMouseProfileEditor()
@@ -4408,12 +4647,90 @@ final class ToggleView: NSView {
         }
     }
 
+    override func layout() {
+        super.layout()
+
+        let canvasWidth = min(
+            KlikProDashboardMetrics.canvasWidth,
+            max(0, bounds.width - KlikProDashboardMetrics.horizontalInset * 2)
+        )
+        dashboardCanvasX = floor((bounds.width - canvasWidth) / 2)
+        let contentHeight = max(
+            566,
+            bounds.height
+                - KlikProDashboardMetrics.headerHeight
+                - KlikProDashboardMetrics.footerHeight
+        )
+        scrollView.frame = NSRect(
+            x: dashboardCanvasX,
+            y: KlikProDashboardMetrics.headerHeight,
+            width: canvasWidth,
+            height: contentHeight
+        )
+
+        let documentFrame = NSRect(
+            x: 0,
+            y: 0,
+            width: canvasWidth,
+            height: contentHeight
+        )
+        contentView.frame = documentFrame
+        preferencesView.frame = documentFrame
+        appProfilesView.frame = documentFrame
+        advancedView.frame = documentFrame
+
+        headerWordmark.frame.origin.x = dashboardCanvasX + 4
+        saveButton.frame.origin = NSPoint(
+            x: dashboardCanvasX + 14,
+            y: bounds.height - 68
+        )
+        updateButtonRect = NSRect(
+            x: dashboardCanvasX + canvasWidth - 138,
+            y: 30,
+            width: 120,
+            height: 30
+        )
+        closeButtonRect = NSRect(
+            x: dashboardCanvasX + canvasWidth - 98,
+            y: bounds.height - 68,
+            width: 90,
+            height: 42
+        )
+        footerBaselineY = bounds.height - 56
+        if let frameSize = window?.frame.size {
+            preferencesView.setDashboardFrameSize(frameSize)
+        }
+        window?.invalidateCursorRects(for: self)
+        needsDisplay = true
+    }
+
+    private func applyDashboardPreset(_ preset: KlikProDashboardPreset) {
+        guard let window else { return }
+        let size = preset.frameSize
+        let current = window.frame
+        var target = NSRect(
+            x: current.midX - size.width / 2,
+            y: current.maxY - size.height,
+            width: size.width,
+            height: size.height
+        )
+        if let screen = window.screen ?? NSScreen.main {
+            target = window.constrainFrameRect(target, to: screen)
+        }
+        window.setFrame(
+            target,
+            display: true,
+            animate: !previewRenderingIsActive
+        )
+        preferencesView.setDashboardFrameSize(window.frame.size)
+    }
+
     /// Switch between Mappings (0), Settings (1), App Profiles (2), Advanced (3).
     func selectTab(_ index: Int) {
         let previousTab = activeTab
         activeTab = index
-        // Crossfade the swapped content only; the window and scroll frame never resize.
-        // Previews must stay deterministic, so fixture rendering swaps instantly.
+        // Crossfade the swapped content only; resizing is owned by the window and
+        // relayout path, never by a tab change. Preview fixtures still swap instantly.
         if !previewRenderingIsActive && index != previousTab && scrollView.documentView != nil {
             scrollView.contentView.wantsLayer = true
             let fade = CATransition()
@@ -4462,6 +4779,11 @@ final class ToggleView: NSView {
     func showCloseButtonHoverPreview() {
         guard previewRenderingIsActive else { return }
         setCloseButtonHovered(true)
+    }
+
+    func focusDashboardBestFitForPreview() {
+        guard previewRenderingIsActive else { return }
+        preferencesView.focusDashboardSizeControlForPreview()
     }
 
     func showUnlockedAdvancedPreview() {
@@ -10215,7 +10537,10 @@ final class ToggleView: NSView {
                 .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
                 .foregroundColor: NSColor.systemRed
             ]
-            "Unsaved changes".draw(at: NSPoint(x: 184, y: 682), withAttributes: attrs)
+            "Unsaved changes".draw(
+                at: NSPoint(x: dashboardCanvasX + 150, y: footerBaselineY),
+                withAttributes: attrs
+            )
         }
 
         if let message = saveStatusMessage {
@@ -10223,7 +10548,10 @@ final class ToggleView: NSView {
                 .font: NSFont.systemFont(ofSize: 12),
                 .foregroundColor: NSColor.appTextSecondary
             ]
-            message.draw(at: NSPoint(x: 356, y: 682), withAttributes: attrs)
+            message.draw(
+                at: NSPoint(x: dashboardCanvasX + 322, y: footerBaselineY),
+                withAttributes: attrs
+            )
         }
     }
 
