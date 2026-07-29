@@ -90,8 +90,8 @@ for product_plist in \
 do
   product_version="$(plutil -extract CFBundleShortVersionString raw -o - "$product_plist")"
   product_build="$(plutil -extract CFBundleVersion raw -o - "$product_plist")"
-  if [[ "$product_version" != "1.5.2" || "$product_build" != "25" ]]; then
-    echo "$(basename "$product_plist") must remain version 1.5.2 build 25; found version $product_version build $product_build" >&2
+  if [[ "$product_version" != "1.5.3" || "$product_build" != "26" ]]; then
+    echo "$(basename "$product_plist") must remain version 1.5.3 build 26; found version $product_version build $product_build" >&2
     exit 1
   fi
 done
@@ -785,12 +785,18 @@ grep -q 'application.finishLaunching()' "$ROOT/Sources/KlikProInput.swift"
 grep -q 'let trusted = AXIsProcessTrusted()' "$ROOT/Sources/KlikProInput.swift"
 grep -q 'name: accessibilitySetupRequestedNotification' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'name: accessibilityStatusCheckRequestedNotification' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'title: "Reset Access…"' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'title: "Reset…"' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'title: "Recheck"' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'preferencesView.recheckAccessibilityLink.onClick' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'recheckAccessibilityLink.title = "Checking…"' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'permissionRecheckXOffset: CGFloat = 168' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'x: rxi + PreferencesContentView.permissionRecheckXOffset' "$ROOT/Sources/KlikProApp.swift"
+grep -A16 'openAccessibilityLink = URLLinkView' "$ROOT/Sources/KlikProApp.swift" \
+  | grep -q 'width: 136'
+grep -A12 'recheckAccessibilityLink = URLLinkView' "$ROOT/Sources/KlikProApp.swift" \
+  | grep -q 'x: rxi + 144'
+grep -A12 'resetAccessibilityLink = URLLinkView' "$ROOT/Sources/KlikProApp.swift" \
+  | grep -q 'x: rxi + 224'
+grep -A12 'openLogsLink = URLLinkView' "$ROOT/Sources/KlikProApp.swift" \
+  | grep -q 'x: rxi + 316'
 grep -q 'statusColor.withAlphaComponent(0.42).setStroke()' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'pillPath.lineWidth = 1' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")' "$ROOT/Sources/KlikProApp.swift"
@@ -890,26 +896,54 @@ fi
 grep -q 'options: \[.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect\]' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'animation.duration = 0.14' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'forKey: "supportButtonHover"' "$ROOT/Sources/KlikProApp.swift"
-primarySaveBlock="$(sed -n '/final class PrimaryHoverButton/,/^}/p' "$ROOT/Sources/KlikProApp.swift")"
-grep -q 'options: \[.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect\]' <<<"$primarySaveBlock"
-grep -q ': (isHovered ? KlikProBrand.green : accent)' <<<"$primarySaveBlock"
-grep -q 'if isHovered && isEnabled' <<<"$primarySaveBlock"
-grep -q 'NSColor.black.setStroke()' <<<"$primarySaveBlock"
+headerActionBlock="$(sed -n '/final class HeaderActionButton/,/^}/p' "$ROOT/Sources/KlikProApp.swift")"
+grep -q 'options: \[.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect\]' <<<"$headerActionBlock"
+grep -q ': (isHovered ? KlikProBrand.green : accent)' <<<"$headerActionBlock"
+grep -q 'if isHovered && isEnabled' <<<"$headerActionBlock"
+grep -q 'case .primary: stroke = .black' <<<"$headerActionBlock"
+grep -A6 'private let saveButton = HeaderActionButton' "$ROOT/Sources/KlikProApp.swift" \
+  | grep -q 'symbolName: "externaldrive.fill"'
+grep -A6 'private let closeDashboardButton = HeaderActionButton' "$ROOT/Sources/KlikProApp.swift" \
+  | grep -q 'symbolName: "xmark"'
+grep -A6 'private let powerOffButton = HeaderActionButton' "$ROOT/Sources/KlikProApp.swift" \
+  | grep -q 'symbolName: "power"'
 grep -q 'saveButton.onPress' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'self?.saveConfiguration()' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'closeDashboardButton.onPress' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'self?.requestCloseDashboard()' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'powerOffButton.onPress' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'self?.requestPowerOff()' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'label: "local.klik-pro.settings.save-apply"' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'saveApplyQueue.async' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'DispatchQueue.main.async' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'saveButton.title = inProgress ? "Applying…" : "Save"' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'saveButton.setAccessibilityLabel(' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'Saved — helper apply timed out.' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'func run(_ arguments: \[String\], timeout: TimeInterval = 8)' "$ROOT/Sources/KlikProConfig.swift"
 grep -q 'completion.wait(timeout: .now() + timeout)' "$ROOT/Sources/KlikProConfig.swift"
-grep -q 'rect: updateButtonRect' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'updateButtonHovered ? 0.20 : 0.12' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'checkForUpdatesLink = URLLinkView' "$ROOT/Sources/KlikProApp.swift"
+grep -A8 'checkForUpdatesLink = URLLinkView' "$ROOT/Sources/KlikProApp.swift" \
+  | grep -q 'title: "Updates…"'
+grep -q 'preferencesView.onCheckForUpdates' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'showUpdateButtonHoverPreview()' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'rect: closeButtonRect' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'showCloseButtonHoverPreview()' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'if closeButtonHovered' "$ROOT/Sources/KlikProApp.swift"
+if grep -Eq 'updateButtonRect|updateButtonHovered|updateButtonTrackingArea' \
+  "$ROOT/Sources/KlikProApp.swift"; then
+  echo "Updates must live in Settings > About, not in the dashboard header" >&2
+  exit 1
+fi
+grep -q 'alert.messageText = "Power Off Klik PRO?"' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'UserDefaults.standard.set(false, forKey: launchAtLoginPreferenceKey)' \
+  "$ROOT/Sources/KlikProApp.swift"
+grep -q 'let disabled = run(\["disable", inputTarget\]) == 0' \
+  "$ROOT/Sources/KlikProApp.swift"
+grep -q '_ = run(\["bootout", domain, inputPlistPath\])' \
+  "$ROOT/Sources/KlikProApp.swift"
+grep -q 'if previewRenderingIsActive {' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'static let footerHeight: CGFloat = 20' "$ROOT/Sources/KlikProApp.swift"
+if grep -Eq 'closeButtonRect|showCloseButtonHoverPreview|drawCentered\(\"Close\"' \
+  "$ROOT/Sources/KlikProApp.swift"; then
+  echo "Close must remain a native header action, not a custom footer control" >&2
+  exit 1
+fi
 grep -q 'let settingsButton = IconActionButton(' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'private let appProfilesView: AppProfilesContentView' "$ROOT/Sources/KlikProApp.swift"
 # Tab rects are recomputed each draw for the centered pill bar, so they are vars.
@@ -1194,18 +1228,22 @@ grep -A24 'onInstancesChange = { \[weak self\] instances in' \
 grep -q 'systemSymbolName: "arrow.counterclockwise"' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'Reset .* shortcut to default' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'recorder.setCombo(self.defaultCombo)' "$ROOT/Sources/KlikProApp.swift"
-# The Mappings tab groups the mouse and all its button callouts in one bordered,
-# compact Mouse Mappings slide. Browsing is non-wrapping and display-only; the
-# gear remains the sole activation/assignment/management surface.
+# The Mappings tab groups the mouse and all five compact mapping cards in one
+# bordered slide. Browsing is display-only; the gear remains the sole
+# activation/assignment/management surface.
 grep -Eq 'static let deviceCard +=' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'drawDeviceCard(in: SettingsContentView.deviceCard)' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'drawSectionLabel("Mouse Mappings"' "$ROOT/Sources/KlikProApp.swift"
-grep -Eq 'static let deviceCard += NSRect\(x: 0, y: 0, width: .* height: 304\)' \
+grep -Eq 'static let deviceCard += NSRect\(x: 0, y: 0, width: .* height: 374\)' \
   "$ROOT/Sources/KlikProApp.swift"
-grep -Eq 'static let mappingBottomCard += NSRect\(x: 0, y: 318,' \
+grep -Eq 'static let mappingBottomCard += NSRect\(x: 0, y: 388,' \
   "$ROOT/Sources/KlikProApp.swift"
-grep -q 'scrollView.frame = NSRect(x: 34, y: 82, width: 872, height: 566)' \
+grep -q 'scrollView.frame = NSRect(x: 34, y: 82, width: 872, height: 636)' \
   "$ROOT/Sources/KlikProApp.swift"
+grep -q 'func applyCompactCardLayout()' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'static let thumbWheelCard = NSRect(x: 296, y: 48, width: 280, height: 82)' \
+  "$ROOT/Sources/KlikProApp.swift"
+grep -q 'let cx = pill.minX + hpad' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'scrollView.hasVerticalScroller = false' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'private let menuButton = AppProfileGearButton' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'private var presentedMenu: NSMenu?' "$ROOT/Sources/KlikProApp.swift"
@@ -1302,15 +1340,16 @@ else
   exit 1
 fi
 
-# Closing must not silently discard staged edits. Nearly every mouse-mapping change only
-# stages, so quitting threw them away while the footer said "Unsaved changes" and nothing
-# acted on it.
+# Closing must not silently discard staged edits. Nearly every mouse-mapping
+# change only stages, so every termination route must use the same decision.
 grep -q 'func confirmCloseDiscardingUnsavedChanges() -> Bool' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'guard let self, self.content.confirmCloseDiscardingUnsavedChanges() else { return }' \
-  "$ROOT/Sources/KlikProApp.swift"
-grep -q 'alert.addButton(withTitle: "Discard and Close")' "$ROOT/Sources/KlikProApp.swift"
-# Cmd-Q, the Dock and the menu bar reach NSApp.terminate directly, so guarding only the
-# window's Close button still lost staged edits.
+grep -q 'discardButtonTitle: "Discard and Close"' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'discardButtonTitle: "Discard and Power Off"' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'alert.addButton(withTitle: discardButtonTitle)' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'func windowShouldClose(_ sender: NSWindow) -> Bool' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'windowCloseApprovedForTermination = true' "$ROOT/Sources/KlikProApp.swift"
+grep -q '"KLIK_PRO_PREVIEW_CONFIRM_CLOSE"' "$ROOT/Sources/KlikProApp.swift"
+# Cmd-Q, the Dock and the menu bar reach NSApp.terminate directly.
 grep -q 'func applicationShouldTerminate(' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'guard controller?.confirmCloseDiscardingUnsavedChanges() ?? true else {' \
   "$ROOT/Sources/KlikProApp.swift"
@@ -1584,11 +1623,15 @@ if [[ "$(grep -Fc 'appProfileRuntime.health(for: instance)' "$ROOT/Sources/KlikP
 fi
 grep -A4 'persistedConfig = configToSave' "$ROOT/Sources/KlikProApp.swift" | grep -q 'persistedControlState = controlStateToSave'
 grep -q '"Unsaved changes"' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'NSColor.systemRed' "$ROOT/Sources/KlikProApp.swift"
+grep -q '("Unsaved changes", .systemRed)' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'unsaved-changes.png' "$ROOT/tools/render-previews.sh"
 grep -q 'save-hover.png' "$ROOT/tools/render-previews.sh"
+grep -q 'settings.png' "$ROOT/tools/render-previews.sh"
 grep -q 'update-hover.png' "$ROOT/tools/render-previews.sh"
-grep -q 'close-hover.png' "$ROOT/tools/render-previews.sh"
+if grep -q 'close-hover.png' "$ROOT/tools/render-previews.sh"; then
+  echo "Close uses the shared native header action and needs no bespoke fixture" >&2
+  exit 1
+fi
 grep -q 'onboarding-back-hover.png' "$ROOT/tools/render-previews.sh"
 grep -q 'about.png' "$ROOT/tools/render-previews.sh"
 # README shows the animated onboarding flow (GIF) at the same display width. It is
@@ -1639,7 +1682,7 @@ grep -q 'responsive-advanced-16.png' "$ROOT/tools/render-previews.sh"
 require_source_literal \
   'styleMask: [.titled, .closable, .miniaturizable, .resizable]' \
   "$ROOT/Sources/KlikProApp.swift" \
-  "The v1.5.2 dashboard window must remain normally resizable"
+  "The v1.5.3 dashboard window must remain normally resizable"
 require_source_literal \
   'static let minimumContentSize = NSSize(width: 940, height: 738)' \
   "$ROOT/Sources/KlikProApp.swift" \
@@ -1656,6 +1699,35 @@ require_source_literal \
   'forKey: KlikProDashboardMetrics.framePreferenceKey' \
   "$ROOT/Sources/KlikProApp.swift" \
   "The responsive dashboard frame must use a stable preference key"
+require_source_literal \
+  'final class DashboardBestFitControl: NSView' \
+  "$ROOT/Sources/KlikProApp.swift" \
+  "Settings must retain the visual Best Fit panel"
+require_source_literal \
+  'final class DashboardPresetTileButton: NSButton' \
+  "$ROOT/Sources/KlikProApp.swift" \
+  "Each Best Fit preset must remain an accessible MacBook tile"
+require_source_literal \
+  'setAccessibilityRole(.radioGroup)' \
+  "$ROOT/Sources/KlikProApp.swift" \
+  "The visual Best Fit panel must remain a radio group"
+require_source_literal \
+  'setButtonType(.radio)' \
+  "$ROOT/Sources/KlikProApp.swift" \
+  "Each visual Best Fit tile must retain radio-button semantics"
+require_source_literal \
+  'private func drawMacBookIcon(' \
+  "$ROOT/Sources/KlikProApp.swift" \
+  "Best Fit tiles must keep their MacBook screen-size silhouettes"
+require_source_literal \
+  'The window remains freely resizable with a 940 × 770 minimum outer frame.' \
+  "$ROOT/Sources/KlikProApp.swift" \
+  "Best Fit guidance must describe the actual Klik PRO minimum"
+if grep -q 'dashboardSizeControl = NSSegmentedControl' \
+  "$ROOT/Sources/KlikProApp.swift"; then
+  echo "The old text-only Best Fit segmented control must not return" >&2
+  exit 1
+fi
 require_source_literal \
   'height: max(0, bounds.height - listY - 12)' \
   "$ROOT/Sources/AppProfilesUI.swift" \
@@ -1677,11 +1749,11 @@ for fixtureName in \
   mouse-mapping-first.png \
   mouse-mapping-middle.png \
   mouse-mapping-final.png \
+  settings.png \
   settings-needs-permission.png \
   unsaved-changes.png \
   save-hover.png \
-  update-hover.png \
-  close-hover.png
+  update-hover.png
 do
   firstFixture="$previewRunOne/fixtures/$fixtureName"
   secondFixture="$previewRunTwo/fixtures/$fixtureName"
@@ -1844,18 +1916,10 @@ then
 fi
 
 if cmp -s \
-  "$previewRunOne/fixtures/special-feature-no-apps.png" \
+  "$previewRunOne/fixtures/settings.png" \
   "$previewRunOne/fixtures/update-hover.png"
 then
   echo "Check-for-Updates hover fixture must differ from its normal state" >&2
-  exit 1
-fi
-
-if cmp -s \
-  "$previewRunOne/fixtures/special-feature-no-apps.png" \
-  "$previewRunOne/fixtures/close-hover.png"
-then
-  echo "Close-button hover fixture must differ from its normal state" >&2
   exit 1
 fi
 
@@ -1869,7 +1933,7 @@ echo "Deterministic Special Feature preview fixtures check passed"
 echo "Unsaved-configuration indicator check passed"
 echo "Save-button hover check passed"
 echo "Check-for-Updates hover check passed"
-echo "Close-button hover check passed"
+echo "Native close protection check passed"
 echo "Onboarding Back-button hover check passed"
 
 for arch in arm64 x86_64; do

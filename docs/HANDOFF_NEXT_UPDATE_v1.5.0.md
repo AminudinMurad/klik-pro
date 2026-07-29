@@ -1,13 +1,46 @@
 # Klik PRO next-update handoff
 
-Updated 2026-07-29 for the v1.5.2 responsive-dashboard release.
+Updated 2026-07-29 for the resumed v1.5.3 release candidate.
 
 ## Released baseline
 
 - Current public release: **v1.5.2 build 25**.
 - Release tag: `v1.5.2`.
 - Installed app at handoff: **v1.5.2 build 25**.
-- Current local branch: `main`.
+- Current local branch: `codex/v1.5.3-header-save-layout`.
+
+## v1.5.3 release-candidate state
+
+- Source version/build: **1.5.3 / 26** in both app plists.
+- Release source and release notes are prepared but remain uncommitted.
+- Public screenshots were regenerated from the final layout.
+- The user resumed and authorized the v1.5.3 GitHub release with its changelog
+  after the earlier handoff interrupted the final pre-commit gate.
+- The final pre-commit gate passed at `build/check-20260729-215001`. Continue
+  with the attribution gate, commit, universal packaging, installed-app
+  persistence acceptance, annotated tagging, nine-asset publication, and
+  public-download verification.
+- Mouse Mappings uses the selected five-card geometry:
+  Horizontal Thumb Wheel top-centre; Middle and Back above; Forward and Gesture
+  below; the mouse and teal leaders remain centred.
+- Each physical-button card has a compact header/status row and one aligned
+  action/value/reset row. Open App remains supported in the same footprint.
+- The header groups disk-icon Save, Close, and Power Off. Unsaved/apply/save
+  feedback appears under the group.
+- Close and the native red traffic-light route through the same Save / Discard /
+  Cancel protection as Cmd-Q, Dock Quit, and normal menu-bar Quit. Power Off has
+  its own confirmation, stops the helper, and turns off Launch at login.
+- Check for Updates is inside Settings > About. Permissions uses one status row
+  and one aligned Open Settings / Recheck / Reset / Logs action bar.
+- Settings > Best Fit follows the Sistem PRO tile pattern: five MacBook
+  silhouettes with exact Klik PRO outer-frame sizes, green active selection,
+  a dedicated current-size row, and one resize-guidance row. The actual Klik PRO
+  preset dimensions and minimum remain unchanged.
+- The Mouse Mappings stage grows from 304 to 374 points while the app-list
+  minimum remains 248 points. The 940×770 minimum and all five responsive
+  presets are unchanged.
+- Configuration schema and physical-event routing are unchanged. v1.6 remains
+  the mouse-independent profile milestone.
 
 ## v1.5.2 scope
 
@@ -40,6 +73,29 @@ independent Native Apps, App Profiles, generator, and maintenance viewports; eac
 still scrolls when its content exceeds the available height.
 
 ## Verification evidence
+
+- v1.5.3 final release-candidate gate passed at `build/check-20260729-215001`.
+- A later release-gate rerun at `build/check-20260729-213931` was manually
+  interrupted for this handoff after routing, hit-test, LaunchAgent,
+  App Profiles, preview rendering, and the reported UI isolation checks passed.
+  Do not treat that interrupted run as the final release gate.
+- Two independently rendered v1.5.3 fixture sets matched byte for byte, including
+  the minimum Settings/Permissions composition and the About-card Updates hover.
+- Live isolated Best Fit QA exposed one radio group with five radio buttons,
+  applied 13-inch M2+ by Right Arrow, applied 16-inch by click, and restored the
+  exact 13-inch M1 940×770 outer frame.
+- Live isolated AppKit QA verified all three header actions through Accessibility:
+  - Close presented Save / Discard and Close / Cancel for a staged draft.
+  - Power Off first protected the draft, then presented its separate stop and
+    Launch-at-login warning.
+  - Cancelling Power Off kept the dashboard open.
+  - Confirming Power Off terminated only the isolated preview; the installed
+    v1.5.2 helper remained running and its launch-at-login preference stayed on.
+  - Save → Close → relaunch retained the edited menu-bar preference in the
+    isolated `config.json`.
+- `git diff --check` passed after the header and Settings rework.
+
+v1.5.2 release evidence retained below:
 
 - All routing, helper, LaunchAgent, App Profile, and UI hit-test checks passed.
 - Two independently rendered preview sets matched byte for byte.
@@ -99,5 +155,5 @@ Read `TRUE_MOUSE_PROFILE_PLAN.md` before changing this model.
 | Preview frame injection | `tools/PreviewMain.swift` |
 | Responsive fixture matrix | `tools/render-previews.sh` |
 | Full verification | `tools/check.sh` |
-| Release notes | `docs/RELEASE_NOTES_v1.5.2.md` |
+| Release notes | `docs/RELEASE_NOTES_v1.5.3.md` |
 | v1.6 design boundary | `docs/TRUE_MOUSE_PROFILE_PLAN.md` |

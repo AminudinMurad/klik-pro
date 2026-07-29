@@ -44,6 +44,20 @@ enum KlikProDashboardPreset: Int, CaseIterable {
         "\(Int(frameSize.width)) × \(Int(frameSize.height))"
     }
 
+    var diagonal: CGFloat {
+        switch self {
+        case .air13M1: return 13.3
+        case .air13Modern: return 13.6
+        case .pro14: return 14.2
+        case .air15: return 15.3
+        case .pro16: return 16.2
+        }
+    }
+
+    var hasNotch: Bool {
+        self != .air13M1
+    }
+
     static func matching(frameSize: NSSize) -> KlikProDashboardPreset? {
         allCases.first {
             abs(frameSize.width - $0.frameSize.width) < 1.5
@@ -56,7 +70,10 @@ enum KlikProDashboardMetrics {
     static let canvasWidth: CGFloat = 872
     static let horizontalInset: CGFloat = 34
     static let headerHeight: CGFloat = 82
-    static let footerHeight: CGFloat = 90
+    // Save/status now live in the header. The old 90pt action footer is reduced
+    // to a quiet bottom gutter, giving the Mouse Mappings slide 70pt more room
+    // without raising the proven 13-inch minimum window size.
+    static let footerHeight: CGFloat = 20
     static let minimumContentSize = NSSize(width: 940, height: 738)
     static let maximumContentSize = NSSize(width: 1_280, height: 928)
     static let framePreferenceKey = "klikpro.dashboardWindowFrame.v1"
@@ -462,6 +479,7 @@ final class ThumbWheelBrowsersButton: NSPopUpButton {
 
 final class ConflictBadgeView: NSView {
     var status: ShortcutConflictStatus { didSet { needsDisplay = true } }
+    var alignsContentRight = false { didSet { needsDisplay = true } }
 
     init(status: ShortcutConflictStatus, frame: NSRect) {
         self.status = status
@@ -492,13 +510,19 @@ final class ConflictBadgeView: NSView {
         let checkW: CGFloat = 11, gap: CGFloat = 4
         let contentW = (status == .ok) ? (checkW + gap + textSize.width) : textSize.width
         let ph = bounds.height
-        let pill = NSRect(x: 0, y: 0, width: contentW + hpad * 2, height: ph)
+        let pillWidth = contentW + hpad * 2
+        let pill = NSRect(
+            x: alignsContentRight ? max(0, bounds.width - pillWidth) : 0,
+            y: 0,
+            width: pillWidth,
+            height: ph
+        )
         color.withAlphaComponent(0.15).setFill()
         NSBezierPath(roundedRect: pill, xRadius: ph / 2, yRadius: ph / 2).fill()
 
         let midY = pill.midY
         if status == .ok {
-            let cx = hpad
+            let cx = pill.minX + hpad
             let check = NSBezierPath()
             check.move(to: NSPoint(x: cx, y: midY + checkW * 0.04))
             check.line(to: NSPoint(x: cx + checkW * 0.36, y: midY - checkW * 0.30))
@@ -510,7 +534,13 @@ final class ConflictBadgeView: NSView {
             check.stroke()
             text.draw(at: NSPoint(x: cx + checkW + gap, y: midY - textSize.height / 2), withAttributes: attrs)
         } else {
-            text.draw(at: NSPoint(x: hpad, y: midY - textSize.height / 2), withAttributes: attrs)
+            text.draw(
+                at: NSPoint(
+                    x: pill.minX + hpad,
+                    y: midY - textSize.height / 2
+                ),
+                withAttributes: attrs
+            )
         }
     }
 }
@@ -806,22 +836,37 @@ final class FooterActionButton: NSButton {
     }
 }
 
-/// Primary footer button with a branded pointer-hover treatment. It remains a native
-/// NSButton for keyboard and VoiceOver activation: blue at rest, Klik PRO green with
-/// a black outline while hovered.
-final class PrimaryHoverButton: NSButton {
+/// Compact native header action. Save is the primary blue/green diskette;
+/// Close is neutral; Power Off is deliberately red. All three remain real
+/// NSButtons for keyboard and VoiceOver activation.
+final class HeaderActionButton: NSButton {
+    enum Treatment {
+        case primary
+        case neutral
+        case destructive
+    }
+
     var onPress: (() -> Void)?
     private var hoverTrackingArea: NSTrackingArea?
     private var isHovered = false
+    private let symbolName: String
+    private let treatment: Treatment
 
-    init(title: String, frame: NSRect) {
+    init(
+        symbolName: String,
+        accessibility: String,
+        treatment: Treatment,
+        frame: NSRect
+    ) {
+        self.symbolName = symbolName
+        self.treatment = treatment
         super.init(frame: frame)
-        self.title = title
+        title = ""
         isBordered = false
-        font = .boldSystemFont(ofSize: 14)
         target = self
         action = #selector(pressed)
-        setAccessibilityLabel(title)
+        setAccessibilityLabel(accessibility)
+        toolTip = accessibility
     }
 
     required init?(coder: NSCoder) { nil }
@@ -872,9 +917,21 @@ final class PrimaryHoverButton: NSButton {
 
     override func draw(_ dirtyRect: NSRect) {
         let accent = NSColor.controlAccentColor
-        let fill = !isEnabled
-            ? accent.withAlphaComponent(0.42)
-            : (isHovered ? KlikProBrand.green : accent)
+        let fill: NSColor
+        switch treatment {
+        case .primary:
+            fill = !isEnabled
+                ? accent.withAlphaComponent(0.42)
+                : (isHovered ? KlikProBrand.green : accent)
+        case .neutral:
+            fill = NSColor.appTextPrimary.withAlphaComponent(
+                isHovered && isEnabled ? 0.12 : 0.065
+            )
+        case .destructive:
+            fill = NSColor.systemRed.withAlphaComponent(
+                isHovered && isEnabled ? 0.20 : 0.11
+            )
+        }
         fill.setFill()
         let pill = NSBezierPath(
             roundedRect: bounds.insetBy(dx: 1, dy: 1),
@@ -884,22 +941,61 @@ final class PrimaryHoverButton: NSButton {
         pill.fill()
 
         if isHovered && isEnabled {
-            NSColor.black.setStroke()
+            let stroke: NSColor
+            switch treatment {
+            case .primary: stroke = .black
+            case .neutral: stroke = .controlAccentColor
+            case .destructive: stroke = .systemRed
+            }
+            stroke.setStroke()
             pill.lineWidth = 1.5
             pill.stroke()
         }
 
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font ?? .boldSystemFont(ofSize: 14),
-            .foregroundColor: NSColor.white.withAlphaComponent(isEnabled ? 1 : 0.78),
-        ]
-        let text = title as NSString
-        let size = text.size(withAttributes: attributes)
-        text.draw(
-            at: NSPoint(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2),
-            withAttributes: attributes
+        let iconColor: NSColor
+        switch treatment {
+        case .primary: iconColor = .white
+        case .neutral: iconColor = .appTextPrimary
+        case .destructive: iconColor = .systemRed
+        }
+        guard let icon = NSImage(
+            systemSymbolName: symbolName,
+            accessibilityDescription: accessibilityLabel()
+        )?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+                .applying(.init(paletteColors: [
+                    iconColor.withAlphaComponent(isEnabled ? 1 : 0.52)
+                ]))
+        ) else { return }
+        icon.draw(
+            in: NSRect(
+                x: bounds.midX - icon.size.width / 2,
+                y: bounds.midY - icon.size.height / 2,
+                width: icon.size.width,
+                height: icon.size.height
+            )
         )
     }
+}
+
+private func drawCompactMappingCard(in rect: NSRect, dividerY: CGFloat) {
+    NSColor.controlBackgroundColor.setFill()
+    let path = NSBezierPath(
+        roundedRect: rect.insetBy(dx: 0.5, dy: 0.5),
+        xRadius: 8,
+        yRadius: 8
+    )
+    path.fill()
+    NSColor.separatorColor.withAlphaComponent(0.30).setStroke()
+    path.lineWidth = 1
+    path.stroke()
+
+    let divider = NSBezierPath()
+    divider.move(to: NSPoint(x: rect.minX + 12, y: rect.minY + dividerY))
+    divider.line(to: NSPoint(x: rect.maxX - 12, y: rect.minY + dividerY))
+    NSColor.separatorColor.withAlphaComponent(0.22).setStroke()
+    divider.lineWidth = 1
+    divider.stroke()
 }
 
 private enum ShortcutRowLayout {
@@ -962,7 +1058,7 @@ final class RecordableShortcutRowView: NSView {
     private var appTargets: [(target: LaunchAssignmentTarget, label: String)] = []
     private var assignedAppTarget: LaunchAssignmentTarget?
     private var updatingActionControls = false
-    private var usesCompactStackedLayout = false
+    private var usesCompactCardLayout = false
 
     init(
         title: String,
@@ -1056,26 +1152,50 @@ final class RecordableShortcutRowView: NSView {
     required init?(coder: NSCoder) { nil }
     override var isFlipped: Bool { true }
 
-    /// Compact, narrow Mappings callout: title + toggle + conflict badge on line 1, then the
-    /// two dropdowns STACKED — action (Shortcut / Open App) on line 2 and the shortcut
-    /// recorder or app target on line 3. Stacking (instead of side by side) keeps the control
-    /// ~190pt wide so it tucks into a corner with clear margins around the centred mouse.
-    /// Each element sizes to its own content (the badge pill and popups hug their text with
-    /// only their own padding) rather than stretching to the column, without losing behavior.
-    func applyCompactStackedLayout() {
-        usesCompactStackedLayout = true
-        toggle.frame = NSRect(x: 0, y: 6, width: 40, height: 22)
-        // Badge tucks in right after the title (no dead gap); its pill hugs its own text.
-        let titleFont = NSFont.systemFont(ofSize: 12, weight: .medium)
-        let titleWidth = (titleLabel as NSString).size(withAttributes: [.font: titleFont]).width
-        badge.frame = NSRect(x: 48 + titleWidth + 8, y: 6, width: 86, height: 22)
-        // Popups size to their content (keeping the control's built-in padding); the app
-        // picker is sized in setOpenAppOptions once its items exist.
-        actionPicker.sizeToFit()
-        actionPicker.frame = NSRect(x: 48, y: 32, width: min(actionPicker.frame.width, 176), height: 28)
-        recorder.frame = NSRect(x: 48, y: 62, width: 96, height: 30)
-        resetButton.frame = NSRect(x: 150, y: 63, width: 20, height: 28)
-        appPicker.frame = NSRect(x: 48, y: 62, width: 132, height: 28)
+    /// Selected v1.5.3 Mappings card: switch, title and status share a compact
+    /// header; a divider separates them from one aligned action/value/reset row.
+    /// Open App mode uses the same lower row, replacing the value/reset pair with
+    /// the target selector rather than changing the card's height.
+    func applyCompactCardLayout() {
+        usesCompactCardLayout = true
+        let inset: CGFloat = 12
+        let lowerY: CGFloat = 46
+        let resetWidth: CGFloat = 20
+        let actionWidth: CGFloat = 118
+        let controlGap: CGFloat = 6
+        toggle.frame = NSRect(x: inset, y: 9, width: 40, height: 22)
+        badge.alignsContentRight = true
+        badge.frame = NSRect(x: bounds.width - 100, y: 9, width: 88, height: 22)
+        actionPicker.controlSize = .small
+        actionPicker.font = .systemFont(ofSize: 11)
+        actionPicker.frame = NSRect(
+            x: inset,
+            y: lowerY,
+            width: actionWidth,
+            height: 28
+        )
+        let recorderX = inset + actionWidth + controlGap
+        let resetX = bounds.width - inset - resetWidth
+        recorder.frame = NSRect(
+            x: recorderX,
+            y: lowerY,
+            width: resetX - controlGap - recorderX,
+            height: 28
+        )
+        resetButton.frame = NSRect(
+            x: resetX,
+            y: lowerY,
+            width: resetWidth,
+            height: 28
+        )
+        appPicker.controlSize = .small
+        appPicker.font = .systemFont(ofSize: 11)
+        appPicker.frame = NSRect(
+            x: recorderX,
+            y: lowerY,
+            width: bounds.width - inset - recorderX,
+            height: 28
+        )
         needsDisplay = true
     }
 
@@ -1096,19 +1216,18 @@ final class RecordableShortcutRowView: NSView {
             appPicker.addItem(withTitle: "Choose App…")
             targets.forEach { appPicker.addItem(withTitle: $0.label) }
         }
-        if usesCompactStackedLayout && targetsChanged {
-            // Hug the widest app/profile name (with the popup's own padding), clamped so a
-            // very long name can't blow out the narrow callout.
-            appPicker.sizeToFit()
-            appPicker.frame = NSRect(x: 48, y: 62, width: min(max(appPicker.frame.width, 88), 176), height: 28)
-        }
         if let assignedTarget,
            let index = targets.firstIndex(where: { $0.target == assignedTarget }) {
             actionPicker.selectItem(at: 1)
             appPicker.selectItem(at: index + 1)
             recorder.isHidden = true
             resetButton.isHidden = true
-            badge.isHidden = true
+            // The selected card design uses OK as the compact validity signal.
+            // An assigned target came from the currently launchable catalogue, so
+            // it is a complete mapping even though shortcut-conflict checks do not
+            // apply in Open App mode.
+            badge.status = .ok
+            badge.isHidden = false
             appPicker.isHidden = false
         } else if actionMode == .openApp {
             actionPicker.selectItem(at: 1)
@@ -1222,12 +1341,17 @@ final class RecordableShortcutRowView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        if usesCompactCardLayout {
+            drawCompactMappingCard(in: bounds, dividerY: 40)
+        }
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 12, weight: .medium),
             .foregroundColor: NSColor.appTextPrimary
         ]
-        let titleY = usesCompactStackedLayout ? 9 : (bounds.height - 15) / 2
-        titleLabel.draw(at: NSPoint(x: 48, y: titleY), withAttributes: attrs)
+        let titlePoint = usesCompactCardLayout
+            ? NSPoint(x: 62, y: 13)
+            : NSPoint(x: 48, y: (bounds.height - 15) / 2)
+        titleLabel.draw(at: titlePoint, withAttributes: attrs)
         guard linkedTarget != nil,
               let link = NSImage(systemSymbolName: "link", accessibilityDescription: nil) else { return }
         let iconSize = ShortcutRowLayout.dormantLinkIconSize
@@ -1709,6 +1833,11 @@ final class URLLinkView: NSView {
         needsDisplay = true
     }
 
+    func showHoverPreview() {
+        guard previewRenderingIsActive else { return }
+        setHovered(true)
+    }
+
     override func mouseDown(with event: NSEvent) {
         if let onClick = onClick {
             onClick()
@@ -2142,6 +2271,17 @@ final class MouseProfileHeaderView: NSView {
 
     required init?(coder: NSCoder) { nil }
 
+    override func layout() {
+        super.layout()
+        let navigationY = floor((bounds.height - previousButton.frame.height) / 2)
+        previousButton.frame.origin = NSPoint(x: 8, y: navigationY)
+        nextButton.frame.origin = NSPoint(
+            x: bounds.width - nextButton.frame.width - 8,
+            y: navigationY
+        )
+        menuButton.frame.origin.x = bounds.width - menuButton.frame.width - 16
+    }
+
     func configure(
         profiles: [MouseProfile],
         viewedID: UUID,
@@ -2531,13 +2671,6 @@ final class MouseProfileHeaderView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        ("Horizontal Thumb Wheel" as NSString).draw(
-            at: NSPoint(x: 380, y: 44),
-            withAttributes: [
-                .font: NSFont.systemFont(ofSize: 12, weight: .medium),
-                .foregroundColor: NSColor.appTextPrimary,
-            ]
-        )
         guard let viewedProfileID,
               let viewedIndex = profileIDs.firstIndex(of: viewedProfileID),
               let profile = profiles.first(where: { $0.id == viewedProfileID }) else { return }
@@ -2660,12 +2793,15 @@ final class SettingsContentView: NSView {
     // browsers pull-down that stays in sync with the Settings tab's four browser checkboxes.
     let thumbWheelToggle: ToggleSwitchView
     let thumbWheelBrowsers: ThumbWheelBrowsersButton
+    let thumbWheelBadge: ConflictBadgeView
+    let thumbWheelResetButton: ShortcutResetButton
     let mouseProfileHeader = MouseProfileHeaderView(
-        frame: NSRect(x: 0, y: 0, width: 872, height: 304)
+        frame: NSRect(x: 0, y: 0, width: 872, height: 374)
     )
     private let mouseSlideContainer: MouseSlideContainerView
     var onThumbWheelToggle: ((Bool) -> Void)?
     var onThumbWheelBrowserChange: ((ThumbWheelBrowsersButton.Browser, Bool) -> Void)?
+    var onThumbWheelReset: (() -> Void)?
     // App icons shown in the Special Feature card, loaded at runtime from the user's
     // installed apps (never bundled — avoids shipping third-party logos). The preview
     // process uses generated letter tiles so fixtures do not depend on the host Mac.
@@ -2699,9 +2835,18 @@ final class SettingsContentView: NSView {
     // The mouse-guide + callouts row is prioritised (it's the point of this tab); the
     // bottom two columns are a quick-access companion — full management lives on the
     // App Profiles tab — so the guide gets the larger share of the height.
-    static let deviceCard         = NSRect(x: 0, y: 0, width: rightCardX + rightCardW, height: 304)
+    static let deviceCard         = NSRect(x: 0, y: 0, width: rightCardX + rightCardW, height: 374)
     // Native apps + App Profiles, side by side across the full width, below the guide.
-    static let mappingBottomCard  = NSRect(x: 0, y: 318, width: rightCardX + rightCardW, height: 248)
+    static let mappingBottomCard  = NSRect(x: 0, y: 388, width: rightCardX + rightCardW, height: 248)
+
+    // Five selected v1.5.3 mapping cards. Their fixed geometry keeps the
+    // reference composition stable inside the centred 872pt canvas at every
+    // dashboard preset; responsive height continues to flow into the lists below.
+    static let thumbWheelCard = NSRect(x: 296, y: 48, width: 280, height: 82)
+    static let middleButtonCard = NSRect(x: 44, y: 126, width: 250, height: 82)
+    static let backButtonCard = NSRect(x: 578, y: 126, width: 250, height: 82)
+    static let forwardButtonCard = NSRect(x: 44, y: 256, width: 250, height: 82)
+    static let gestureButtonCard = NSRect(x: 578, y: 256, width: 250, height: 82)
 
     private static func previewAppIcon(for target: QuickLaunchTarget) -> NSImage {
         let label = target == .chatGPT ? "G" : "C"
@@ -2754,31 +2899,16 @@ final class SettingsContentView: NSView {
         let rxi = SettingsContentView.innerRightX
         let iw = SettingsContentView.innerW
 
-        // Mouse-button controls anchored to their callouts around a full-size mouse: the
-        // mouse stays big and centred, and the four controls sit in the card's CORNERS —
-        // Middle top-left / Back top-right / Forward bottom-left / Gesture bottom-right —
-        // each joined to its button by a leader line drawn in drawDeviceCallouts (via
-        // matching controlAnchor points). Each control STACKS its two dropdowns (action +
-        // shortcut/app), each sized to its content, so it stays narrow (~190pt) and is pulled
-        // in toward the centred mouse. Gesture is device-isolated through an MX Master 3-only
-        // F20 sentinel, so keyboard Command-Tab remains native for app switching.
-        let shortcutRowW: CGFloat = 190
-        let shortcutRowH: CGFloat = 96
-        let shortcutLeftX: CGFloat = 92     // top-left (Middle); inner edge ≈ x 282
-        let shortcutRightX: CGFloat = 590   // top-right (Back); symmetric
-        // The bottom pair is pulled in a little further toward the mouse and raised, so it
-        // doesn't sit too low against the app lists below.
-        let shortcutBottomLeftX: CGFloat = 110   // bottom-left (Forward); inner edge ≈ x 300
-        let shortcutBottomRightX: CGFloat = 574  // bottom-right (Gesture); symmetric
-        let shortcutTopY: CGFloat = 48    // leaves a header strip for the "Mouse Mappings" title
-        let shortcutBottomY: CGFloat = 182
+        // The selected reference uses four equal cards around a centred mouse:
+        // Middle / Back on the upper row, Forward / Gesture below. Each card
+        // keeps its behavior but compresses it into a header and one control row.
         middleButtonRow = RecordableShortcutRowView(
             title: "Middle Button",
             mapping: config.middleButton,
             defaultCombo: KlikProConfig.default.middleButton.combo,
             status: statuses[.middleButton] ?? .ok,
             baseActionTitle: "Shortcut",
-            frame: NSRect(x: shortcutLeftX, y: shortcutTopY, width: shortcutRowW, height: shortcutRowH)
+            frame: SettingsContentView.middleButtonCard
         )
         gestureButtonRow = RecordableShortcutRowView(
             title: "Gesture Button",
@@ -2786,7 +2916,7 @@ final class SettingsContentView: NSView {
             defaultCombo: KlikProConfig.default.gestureButton.combo,
             status: statuses[.gestureButton] ?? .ok,
             baseActionTitle: "Shortcut",
-            frame: NSRect(x: shortcutBottomRightX, y: shortcutBottomY, width: shortcutRowW, height: shortcutRowH)
+            frame: SettingsContentView.gestureButtonCard
         )
         let forwardDisplay = browserHistoryDisplayOverride(
             slot: .forwardButton,
@@ -2804,7 +2934,7 @@ final class SettingsContentView: NSView {
                 browserHistoryDisplayOverride(slot: .forwardButton, combo: combo)
             },
             baseActionTitle: "Browser Forward",
-            frame: NSRect(x: shortcutBottomLeftX, y: shortcutBottomY, width: shortcutRowW, height: shortcutRowH)
+            frame: SettingsContentView.forwardButtonCard
         )
         backRow = RecordableShortcutRowView(
             title: "Back Button", mapping: config.backButton,
@@ -2814,10 +2944,10 @@ final class SettingsContentView: NSView {
                 browserHistoryDisplayOverride(slot: .backButton, combo: combo)
             },
             baseActionTitle: "Browser Back",
-            frame: NSRect(x: shortcutRightX, y: shortcutTopY, width: shortcutRowW, height: shortcutRowH)
+            frame: SettingsContentView.backButtonCard
         )
         [middleButtonRow, gestureButtonRow, forwardRow, backRow].forEach {
-            $0.applyCompactStackedLayout()
+            $0.applyCompactCardLayout()
         }
 
         // RIGHT card — each launcher owns one clear column for its mouse-button
@@ -2908,18 +3038,34 @@ final class SettingsContentView: NSView {
             frame: SettingsContentView.mappingBottomCard
         )
         mouseSlideContainer = MouseSlideContainerView(frame: SettingsContentView.deviceCard)
-        // Thumb Wheel tab-switching, surfaced as a 5th callout top-centre above the mouse:
-        // a master toggle and a compact browsers pull-down (line 2). "Horizontal Thumb Wheel"
-        // is drawn as its title in draw(); the leader anchors just below it (see deviceCallouts).
+        // Thumb Wheel uses the same two-row card treatment as the four physical
+        // button mappings: enabled/title/status above, browsers/reset below.
+        let thumbCard = SettingsContentView.thumbWheelCard
         thumbWheelToggle = ToggleSwitchView(
             isOn: config.thumbWheel.enabled,
-            frame: NSRect(x: 332, y: 39, width: 40, height: 22)
+            frame: NSRect(x: thumbCard.minX + 14, y: thumbCard.minY + 9, width: 40, height: 22)
         )
         thumbWheelBrowsers = ThumbWheelBrowsersButton(
-            frame: NSRect(x: 380, y: 68, width: 150, height: 26)
+            frame: NSRect(x: thumbCard.minX + 14, y: thumbCard.minY + 46, width: 224, height: 28)
         )
+        thumbWheelBrowsers.controlSize = .small
+        thumbWheelBrowsers.font = .systemFont(ofSize: 11)
+        thumbWheelBadge = ConflictBadgeView(
+            status: .ok,
+            frame: NSRect(x: thumbCard.maxX - 100, y: thumbCard.minY + 9, width: 88, height: 22)
+        )
+        thumbWheelBadge.alignsContentRight = true
+        thumbWheelResetButton = ShortcutResetButton(
+            title: "Horizontal Thumb Wheel",
+            frame: NSRect(x: thumbCard.maxX - 34, y: thumbCard.minY + 46, width: 20, height: 28)
+        )
+        thumbWheelResetButton.setAccessibilityLabel("Reset Horizontal Thumb Wheel mapping")
+        thumbWheelResetButton.setAccessibilityHelp(
+            "Restore the default disabled state and clear every selected browser."
+        )
+        thumbWheelResetButton.toolTip = "Reset Horizontal Thumb Wheel mapping"
 
-        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 566))
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 636))
 
         mouseSlideContainer.wantsLayer = true
         mouseSlideContainer.drawArtwork = { [weak self] card in
@@ -2928,7 +3074,8 @@ final class SettingsContentView: NSView {
         addSubview(mouseSlideContainer)
         [
             middleButtonRow, gestureButtonRow, forwardRow, backRow,
-            thumbWheelToggle, thumbWheelBrowsers, mouseProfileHeader,
+            thumbWheelToggle, thumbWheelBrowsers, thumbWheelBadge,
+            thumbWheelResetButton, mouseProfileHeader,
         ].forEach { mouseSlideContainer.addSubview($0) }
         addSubview(mappingProfilesView)
         mouseProfileHeader.onBrowseAnimation = { [weak self] direction in
@@ -2945,6 +3092,9 @@ final class SettingsContentView: NSView {
         thumbWheelToggle.onChange = { [weak self] on in self?.onThumbWheelToggle?(on) }
         thumbWheelBrowsers.onToggle = { [weak self] browser, on in
             self?.onThumbWheelBrowserChange?(browser, on)
+        }
+        thumbWheelResetButton.onPress = { [weak self] in
+            self?.onThumbWheelReset?()
         }
         setSpecialFeatureAvailability(specialFeatureAvailable, isOn: specialFeatureOn)
         updateQuickLaunchAssignments(config: config, featureActive: self.specialFeatureOn)
@@ -2996,6 +3146,7 @@ final class SettingsContentView: NSView {
             window?.invalidateCursorRects(for: $0)
         }
         thumbWheelBrowsers.isEnabled = available && thumbWheelToggle.isOn
+        thumbWheelResetButton.isEnabled = available
     }
 
     required init?(coder: NSCoder) { nil }
@@ -3176,14 +3327,14 @@ final class SettingsContentView: NSView {
     private func drawMouseArtwork(in card: NSRect) {
         guard let image else { return }
         let imageAspect = image.size.height > 0 ? image.size.width / image.size.height : 1
-        // Inset chosen so the mouse keeps its v1.4.3 size (267x198) while centred in the
-        // taller guide card; the four button controls sit in the card's corners around it.
-        let available = card.insetBy(dx: 190, dy: 85)
-        let drawHeight = min(available.height, available.width / imageAspect)
+        // The selected card composition gives the hardware a compact, stable
+        // centre stage between the five mapping cards. Keep its size fixed
+        // within the 872pt canvas; extra dashboard height belongs to app lists.
+        let drawHeight = min(186, 250 / imageAspect)
         let drawWidth = drawHeight * imageAspect
         let rect = NSRect(
             x: card.midX - drawWidth / 2,
-            y: card.midY - drawHeight / 2 + 10,   // nudged down to clear the header title strip
+            y: 134,
             width: drawWidth,
             height: drawHeight
         )
@@ -3219,62 +3370,72 @@ final class SettingsContentView: NSView {
         }
 
         drawDeviceCallouts(in: rect)
+        drawThumbWheelCard()
     }
 
-    // Callouts mapped to the controls in the mouse artwork. Target = fraction of the drawn
-    // mouse rect. The four button callouts are merged onto their interactive control (in the
-    // left column) and draw only a leader line + dot. The thumb wheel is now a control too
-    // (toggle + browsers pull-down, top-centre above the mouse), so it likewise just draws a
-    // leader; its "Horizontal Thumb Wheel" title is drawn by SettingsContentView.
+    private func drawThumbWheelCard() {
+        let card = SettingsContentView.thumbWheelCard
+        drawCompactMappingCard(in: card, dividerY: 40)
+        ("Horizontal Thumb Wheel" as NSString).draw(
+            at: NSPoint(x: card.minX + 62, y: card.minY + 13),
+            withAttributes: [
+                .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+                .foregroundColor: NSColor.appTextPrimary,
+            ]
+        )
+    }
+
+    // Callouts mapped to the controls in the mouse artwork. Target = fraction
+    // of the drawn mouse rect; each leader starts at the closest card edge.
     private struct DeviceCallout {
         let title: String
         let fx: CGFloat            // target x as fraction of mouse rect
         let fy: CGFloat            // target y as fraction of mouse rect
-        // Inner-edge point of the control this callout is merged into; the leader runs from
-        // here to the button. nil = no control (draw a text label above the mouse instead).
-        let controlAnchor: NSPoint?
+        let controlAnchor: NSPoint
     }
 
-    // fx/fy are fractions of the drawn mouse rect (top-left origin), measured on the
-    // 1000x742 device artwork. controlAnchor points match the narrow corner controls set in
-    // init: the top row's inner edges are x 282 (left) / x 590 (right) with centre y 96 (the
-    // top row sits below the "Mouse Mappings" header strip); the bottom row is pulled in a
-    // little further — the forward leader starts at x 342 (just beyond its popup) and the
-    // gesture edge is x 574, both with centre y 230. Each anchor
-    // is the control edge nearest the mouse, so the leader runs from there to the button.
+    // fx/fy are fractions of the 1000×742 source artwork. Anchors match the
+    // selected top-centre / four-corner card geometry above.
     private static let deviceCallouts: [DeviceCallout] = [
-        DeviceCallout(title: "Middle Button (Scroll Wheel)", fx: 0.245, fy: 0.413, controlAnchor: NSPoint(x: 282, y: 96)),
-        // The compact action popup extends past the row's nominal frame, so start the
-        // leader just beyond its real right edge instead of drawing through its arrow.
-        DeviceCallout(title: "Forward Button",               fx: 0.584, fy: 0.546, controlAnchor: NSPoint(x: 342, y: 230)),
-        DeviceCallout(title: "Horizontal Thumb Wheel",       fx: 0.594, fy: 0.422, controlAnchor: NSPoint(x: 436, y: 96)),
-        DeviceCallout(title: "Back Button",                  fx: 0.692, fy: 0.447, controlAnchor: NSPoint(x: 590, y: 96)),
-        DeviceCallout(title: "Gesture Button",               fx: 0.755, fy: 0.745, controlAnchor: NSPoint(x: 574, y: 230)),
+        DeviceCallout(
+            title: "Middle Button (Scroll Wheel)",
+            fx: 0.245,
+            fy: 0.413,
+            controlAnchor: NSPoint(x: middleButtonCard.maxX, y: middleButtonCard.midY)
+        ),
+        DeviceCallout(
+            title: "Forward Button",
+            fx: 0.584,
+            fy: 0.546,
+            controlAnchor: NSPoint(x: forwardButtonCard.maxX, y: forwardButtonCard.midY)
+        ),
+        DeviceCallout(
+            title: "Horizontal Thumb Wheel",
+            fx: 0.594,
+            fy: 0.422,
+            controlAnchor: NSPoint(x: thumbWheelCard.midX, y: thumbWheelCard.maxY)
+        ),
+        DeviceCallout(
+            title: "Back Button",
+            fx: 0.692,
+            fy: 0.447,
+            controlAnchor: NSPoint(x: backButtonCard.minX, y: backButtonCard.midY)
+        ),
+        DeviceCallout(
+            title: "Gesture Button",
+            fx: 0.755,
+            fy: 0.745,
+            controlAnchor: NSPoint(x: gestureButtonCard.minX, y: gestureButtonCard.midY)
+        ),
     ]
 
     private func drawDeviceCallouts(in mouseRect: NSRect) {
         let teal = NSColor(calibratedRed: 0.04, green: 0.70, blue: 0.68, alpha: 1)
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.boldSystemFont(ofSize: 11),
-            .foregroundColor: NSColor.appTextSecondary
-        ]
 
         for c in SettingsContentView.deviceCallouts {
             let target = NSPoint(x: mouseRect.minX + c.fx * mouseRect.width,
                                  y: mouseRect.minY + c.fy * mouseRect.height)
-            let anchor: NSPoint
-            if let controlAnchor = c.controlAnchor {
-                // Merged onto its control: the leader starts at the control's inner edge and
-                // the control itself carries the title, so no text is drawn here.
-                anchor = controlAnchor
-            } else {
-                // Thumb wheel: a small centred label above the mouse, with a leader down to
-                // the wheel.
-                let size = (c.title as NSString).size(withAttributes: attrs)
-                let labelPoint = NSPoint(x: mouseRect.midX - size.width / 2, y: mouseRect.minY - 22)
-                (c.title as NSString).draw(at: labelPoint, withAttributes: attrs)
-                anchor = NSPoint(x: mouseRect.midX, y: mouseRect.minY - 6)
-            }
+            let anchor = c.controlAnchor
 
             let path = NSBezierPath()
             path.move(to: anchor)
@@ -3381,6 +3542,402 @@ final class PermissionStatusRowView: NSView {
     }
 }
 
+/// One visual MacBook target in Settings > Best Fit. It keeps the familiar radio
+/// semantics for VoiceOver and keyboard users while drawing the richer Sistem PRO
+/// tile treatment: device silhouette, model, exact outer frame, and green active
+/// state.
+final class DashboardPresetTileButton: NSButton {
+    let preset: KlikProDashboardPreset
+    var onSelect: ((KlikProDashboardPreset) -> Void)?
+    var onNavigate: ((KlikProDashboardPreset, Int) -> Void)?
+
+    private var hoverTrackingArea: NSTrackingArea?
+    private var isHovered = false
+
+    override var isFlipped: Bool { true }
+    override var acceptsFirstResponder: Bool { true }
+
+    init(preset: KlikProDashboardPreset) {
+        self.preset = preset
+        super.init(frame: .zero)
+        title = ""
+        isBordered = false
+        setButtonType(.radio)
+        target = self
+        action = #selector(pressed)
+        setAccessibilityLabel(preset.controlTitle)
+        setAccessibilityHelp(
+            "\(preset.controlTitle) best fit · \(preset.sizeTitle)"
+        )
+        toolTip = "\(preset.controlTitle) · \(preset.sizeTitle)"
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea {
+            removeTrackingArea(hoverTrackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        setHovered(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        setHovered(false)
+    }
+
+    private func setHovered(_ hovered: Bool) {
+        guard isHovered != hovered else { return }
+        isHovered = hovered
+        needsDisplay = true
+    }
+
+    @objc private func pressed() {
+        onSelect?(preset)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        switch event.keyCode {
+        case 123, 126:
+            onNavigate?(preset, -1)
+        case 124, 125:
+            onNavigate?(preset, 1)
+        case 36, 49, 76:
+            onSelect?(preset)
+        default:
+            super.keyDown(with: event)
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let selected = state == .on
+        let focused = window?.firstResponder === self
+        let deepGreen = KlikProBrand.green.blended(
+            withFraction: 0.30,
+            of: .black
+        ) ?? .systemGreen
+        let tile = bounds.insetBy(
+            dx: isHovered ? 0.75 : 1.5,
+            dy: isHovered ? 0.75 : 1.5
+        )
+        let path = NSBezierPath(
+            roundedRect: tile,
+            xRadius: 8,
+            yRadius: 8
+        )
+
+        let fill: NSColor
+        if selected {
+            fill = KlikProBrand.green.withAlphaComponent(0.10)
+        } else {
+            fill = NSColor.appTextPrimary.withAlphaComponent(
+                isHovered ? 0.065 : 0.035
+            )
+        }
+
+        NSGraphicsContext.saveGraphicsState()
+        if isHovered {
+            let shadow = NSShadow()
+            shadow.shadowColor = KlikProBrand.green.withAlphaComponent(0.18)
+            shadow.shadowBlurRadius = 6
+            shadow.shadowOffset = NSSize(width: 0, height: -2)
+            shadow.set()
+        }
+        fill.setFill()
+        path.fill()
+        NSGraphicsContext.restoreGraphicsState()
+
+        let stroke: NSColor
+        if selected {
+            stroke = deepGreen.withAlphaComponent(0.72)
+        } else if focused {
+            stroke = NSColor.controlAccentColor.withAlphaComponent(0.86)
+        } else {
+            stroke = NSColor.appTextPrimary.withAlphaComponent(
+                isHovered ? 0.24 : 0.09
+            )
+        }
+        stroke.setStroke()
+        path.lineWidth = selected || focused ? 1.5 : 1
+        path.stroke()
+
+        drawMacBookIcon(
+            in: NSRect(x: 10, y: 15, width: 40, height: 26),
+            color: selected || isHovered ? deepGreen : .appTextSecondary,
+            selected: selected
+        )
+
+        let title = preset == .air13Modern
+            ? "13-inch\nM2+"
+            : preset.controlTitle
+        (title as NSString).draw(
+            in: NSRect(x: 55, y: 8, width: bounds.width - 63, height: 30),
+            withAttributes: [
+                .font: NSFont.systemFont(ofSize: 11.5, weight: .semibold),
+                .foregroundColor: NSColor.appTextPrimary,
+            ]
+        )
+        (preset.sizeTitle as NSString).draw(
+            at: NSPoint(x: 55, y: 35),
+            withAttributes: [
+                .font: NSFont.monospacedDigitSystemFont(
+                    ofSize: 10.5,
+                    weight: .regular
+                ),
+                .foregroundColor: NSColor.appTextSecondary,
+            ]
+        )
+    }
+
+    private func drawMacBookIcon(
+        in rect: NSRect,
+        color: NSColor,
+        selected: Bool
+    ) {
+        let screenWidth = min(
+            rect.width - 7,
+            25 + (preset.diagonal - 13.3) * 3
+        )
+        let screenRect = NSRect(
+            x: rect.midX - screenWidth / 2,
+            y: rect.minY,
+            width: screenWidth,
+            height: 20
+        )
+        let screen = NSBezierPath(
+            roundedRect: screenRect,
+            xRadius: 2.5,
+            yRadius: 2.5
+        )
+        let iconFill = selected || isHovered
+            ? KlikProBrand.green.withAlphaComponent(0.12)
+            : NSColor.appTextPrimary.withAlphaComponent(0.055)
+        iconFill.setFill()
+        screen.fill()
+        color.withAlphaComponent(selected ? 0.90 : 0.60).setStroke()
+        screen.lineWidth = selected ? 1.4 : 1
+        screen.stroke()
+
+        if preset.hasNotch {
+            let notch = NSBezierPath(
+                roundedRect: NSRect(
+                    x: screenRect.midX - 3.5,
+                    y: screenRect.minY,
+                    width: 7,
+                    height: 3.5
+                ),
+                xRadius: 1.75,
+                yRadius: 1.75
+            )
+            color.withAlphaComponent(0.78).setFill()
+            notch.fill()
+        }
+
+        let base = NSBezierPath(
+            roundedRect: NSRect(
+                x: screenRect.minX - 2.5,
+                y: screenRect.maxY + 2,
+                width: screenRect.width + 5,
+                height: 2
+            ),
+            xRadius: 1,
+            yRadius: 1
+        )
+        color.withAlphaComponent(selected ? 0.90 : 0.60).setFill()
+        base.fill()
+    }
+}
+
+/// Sistem PRO-style Best Fit panel adapted to Klik PRO's existing five outer-frame
+/// presets. The panel owns presentation and accessibility; the window controller
+/// remains the sole owner of actual resize behavior.
+final class DashboardBestFitControl: NSView {
+    var onChange: ((KlikProDashboardPreset) -> Void)?
+
+    private var presetButtons: [DashboardPresetTileButton] = []
+    private let statusField = NSTextField(labelWithString: "")
+    private let helperField = NSTextField(wrappingLabelWithString:
+        "Choose the MacBook screen size to apply its predicted best-fit outer frame. "
+            + "The window remains freely resizable with a 940 × 770 minimum outer frame."
+    )
+    private var selectedPreset: KlikProDashboardPreset?
+
+    override var isFlipped: Bool { true }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setAccessibilityRole(.radioGroup)
+        setAccessibilityLabel("Dashboard Best Fit")
+
+        statusField.font = .systemFont(ofSize: 11, weight: .semibold)
+        statusField.textColor = .appTextSecondary
+        helperField.font = .systemFont(ofSize: 10.5)
+        helperField.textColor = .appTextSecondary
+        helperField.maximumNumberOfLines = 2
+        helperField.lineBreakMode = .byWordWrapping
+        addSubview(statusField)
+        addSubview(helperField)
+
+        for preset in KlikProDashboardPreset.allCases {
+            let button = DashboardPresetTileButton(preset: preset)
+            button.onSelect = { [weak self] selected in
+                self?.select(selected)
+            }
+            button.onNavigate = { [weak self] current, direction in
+                self?.navigate(from: current, direction: direction)
+            }
+            presetButtons.append(button)
+            addSubview(button)
+        }
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func layout() {
+        super.layout()
+        let sidePadding: CGFloat = 10
+        let gap: CGFloat = 8
+        let tileWidth = (
+            bounds.width
+                - sidePadding * 2
+                - gap * CGFloat(presetButtons.count - 1)
+        ) / CGFloat(presetButtons.count)
+        for (index, button) in presetButtons.enumerated() {
+            button.frame = NSRect(
+                x: sidePadding + CGFloat(index) * (tileWidth + gap),
+                y: 10,
+                width: tileWidth,
+                height: 58
+            )
+        }
+        statusField.frame = NSRect(
+            x: 48,
+            y: 88,
+            width: bounds.width - 66,
+            height: 18
+        )
+        helperField.frame = NSRect(
+            x: 18,
+            y: 125,
+            width: bounds.width - 36,
+            height: 30
+        )
+    }
+
+    func updateForDashboardFrameSize(_ size: NSSize) {
+        selectedPreset = KlikProDashboardPreset.matching(frameSize: size)
+        if let selectedPreset {
+            statusField.stringValue =
+                "ON now: \(selectedPreset.controlTitle) · \(selectedPreset.sizeTitle)"
+            statusField.textColor = deepGreen
+            setAccessibilityValue(
+                "\(selectedPreset.controlTitle), on now"
+            )
+        } else {
+            statusField.stringValue =
+                "Custom size · \(Int(size.width.rounded())) × \(Int(size.height.rounded()))"
+            statusField.textColor = .appTextSecondary
+            setAccessibilityValue("Custom size")
+        }
+        for button in presetButtons {
+            button.state = button.preset == selectedPreset ? .on : .off
+            button.needsDisplay = true
+        }
+        needsDisplay = true
+    }
+
+    func focusSelectedPreset() {
+        guard let target = presetButtons.first(where: {
+            $0.preset == selectedPreset
+        }) ?? presetButtons.first else { return }
+        window?.makeFirstResponder(target)
+    }
+
+    private var deepGreen: NSColor {
+        KlikProBrand.green.blended(withFraction: 0.30, of: .black)
+            ?? .systemGreen
+    }
+
+    private func select(_ preset: KlikProDashboardPreset) {
+        updateForDashboardFrameSize(preset.frameSize)
+        if let button = presetButtons.first(where: { $0.preset == preset }) {
+            window?.makeFirstResponder(button)
+        }
+        onChange?(preset)
+    }
+
+    private func navigate(
+        from preset: KlikProDashboardPreset,
+        direction: Int
+    ) {
+        guard let currentIndex = presetButtons.firstIndex(where: {
+            $0.preset == preset
+        }) else { return }
+        let nextIndex = min(
+            max(0, currentIndex + direction),
+            presetButtons.count - 1
+        )
+        select(presetButtons[nextIndex].preset)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let panel = NSBezierPath(
+            roundedRect: bounds,
+            xRadius: 14,
+            yRadius: 14
+        )
+        NSColor.appTextPrimary.withAlphaComponent(0.035).setFill()
+        panel.fill()
+
+        for y in [80.0, 116.0] {
+            let divider = NSBezierPath()
+            divider.move(to: NSPoint(x: 12, y: y))
+            divider.line(to: NSPoint(x: bounds.maxX - 12, y: y))
+            NSColor.appTextPrimary.withAlphaComponent(0.08).setStroke()
+            divider.lineWidth = 1
+            divider.stroke()
+        }
+
+        if selectedPreset != nil {
+            let circleRect = NSRect(x: 18, y: 90, width: 11, height: 11)
+            deepGreen.setFill()
+            NSBezierPath(ovalIn: circleRect).fill()
+            let check = NSBezierPath()
+            check.move(to: NSPoint(x: 20.5, y: 95.5))
+            check.line(to: NSPoint(x: 22.8, y: 98))
+            check.line(to: NSPoint(x: 27, y: 92.8))
+            NSColor.white.setStroke()
+            check.lineWidth = 1.35
+            check.lineCapStyle = .round
+            check.lineJoinStyle = .round
+            check.stroke()
+        } else if let icon = NSImage(
+            systemSymbolName: "slider.horizontal.3",
+            accessibilityDescription: nil
+        )?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+                .applying(.init(paletteColors: [.appTextSecondary]))
+        ) {
+            icon.draw(in: NSRect(x: 18, y: 90, width: 12, height: 12))
+        }
+    }
+}
+
 // MARK: - PreferencesContentView (the "Settings" tab)
 
 final class PreferencesContentView: NSView {
@@ -3400,15 +3957,16 @@ final class PreferencesContentView: NSView {
     let resetAccessibilityLink: URLLinkView
     let openSourceLink: URLLinkView
     let openLogsLink: URLLinkView
+    let checkForUpdatesLink: URLLinkView
     let settingsGithubLink: URLLinkView
     let settingsSponsorsLink: URLLinkView
     let settingsKofiLink: URLLinkView
     let settingsPayPalLink: URLLinkView
-    let dashboardSizeControl: NSSegmentedControl
-    private let dashboardSizeStatus = NSTextField(labelWithString: "")
+    let dashboardSizeControl: DashboardBestFitControl
     let accessibilityPermissionRow: PermissionStatusRowView
     private var accessibilityGranted: Bool
     var onDashboardPresetChange: ((KlikProDashboardPreset) -> Void)?
+    var onCheckForUpdates: (() -> Void)?
 
     override var isFlipped: Bool { true }
 
@@ -3422,10 +3980,8 @@ final class PreferencesContentView: NSView {
     private static let aboutCard   = NSRect(x: rightX, y: 168, width: cardW, height: 126)
     private static let supportCard = NSRect(x: rightX, y: 310, width: cardW, height: 92)
     private static let thumbWheelCard = NSRect(x: leftX, y: 330, width: cardW, height: 84)
-    private static let bestFitCard = NSRect(x: 0, y: 430, width: 872, height: 120)
+    private static let bestFitPanel = NSRect(x: 0, y: 458, width: 872, height: 158)
     private static let headingContentGap: CGFloat = 8
-    private static let permissionRecheckXOffset: CGFloat = 168
-
     init(
         accessibilityGranted: Bool,
         launchAtLogin: Bool,
@@ -3480,14 +4036,14 @@ final class PreferencesContentView: NSView {
             )
         )
         openAccessibilityLink = URLLinkView(
-            title: accessibilityGranted ? "Open Accessibility…" : "Set Up Accessibility…",
+            title: accessibilityGranted ? "Open Settings…" : "Set Up…",
             urlString: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
             style: .outline,
             alignRight: false,
             frame: NSRect(
                 x: rxi,
                 y: 96 + PreferencesContentView.headingContentGap,
-                width: 164,
+                width: 136,
                 height: 28
             )
         )
@@ -3497,21 +4053,21 @@ final class PreferencesContentView: NSView {
             style: .outline,
             alignRight: false,
             frame: NSRect(
-                x: rxi + PreferencesContentView.permissionRecheckXOffset,
-                y: 56 + PreferencesContentView.headingContentGap,
-                width: 80,
-                height: 24
+                x: rxi + 144,
+                y: 96 + PreferencesContentView.headingContentGap,
+                width: 72,
+                height: 28
             )
         )
         resetAccessibilityLink = URLLinkView(
-            title: "Reset Access…",
+            title: "Reset…",
             urlString: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
             style: .outline,
             alignRight: false,
             frame: NSRect(
-                x: rxi + 172,
+                x: rxi + 224,
                 y: 96 + PreferencesContentView.headingContentGap,
-                width: 116,
+                width: 84,
                 height: 28
             )
         )
@@ -3533,16 +4089,34 @@ final class PreferencesContentView: NSView {
                 height: 24
             )
         )
-        openLogsLink = URLLinkView(title: "Open Logs",
+        openLogsLink = URLLinkView(title: "Logs",
             urlString: "file://" + NSString(string: "~/Library/Logs").expandingTildeInPath,
             style: .outline,
             alignRight: false,
             frame: NSRect(
-                x: rxi + 296,
+                x: rxi + 316,
                 y: 96 + PreferencesContentView.headingContentGap,
-                width: 88,
+                width: 76,
                 height: 28
             ))
+        openLogsLink.toolTip = "Open Klik PRO logs in Finder."
+        checkForUpdatesLink = URLLinkView(
+            title: "Updates…",
+            urlString: "",
+            style: .outline,
+            icon: NSImage(
+                systemSymbolName: "arrow.clockwise",
+                accessibilityDescription: "Check for updates"
+            )?.tinted(.controlAccentColor),
+            alignRight: false,
+            frame: NSRect(
+                x: rxi + 280,
+                y: 248 + PreferencesContentView.headingContentGap,
+                width: 112,
+                height: 28
+            )
+        )
+        checkForUpdatesLink.toolTip = "Check GitHub for a newer Klik PRO release."
         settingsGithubLink = URLLinkView(
             title: "GitHub",
             urlString: "https://github.com/AminudinMurad/klik-pro",
@@ -3578,42 +4152,9 @@ final class PreferencesContentView: NSView {
             alignRight: false,
             frame: .zero
         )
-        dashboardSizeControl = NSSegmentedControl(
-            labels: KlikProDashboardPreset.allCases.map(\.controlTitle),
-            trackingMode: .selectOne,
-            target: nil,
-            action: nil
+        dashboardSizeControl = DashboardBestFitControl(
+            frame: PreferencesContentView.bestFitPanel
         )
-        dashboardSizeControl.segmentStyle = .rounded
-        dashboardSizeControl.frame = NSRect(
-            x: PreferencesContentView.bestFitCard.minX + PreferencesContentView.pad,
-            y: PreferencesContentView.bestFitCard.minY + 42,
-            width: PreferencesContentView.bestFitCard.width
-                - PreferencesContentView.pad * 2,
-            height: 30
-        )
-        let segmentWidth = dashboardSizeControl.frame.width
-            / CGFloat(KlikProDashboardPreset.allCases.count)
-        for preset in KlikProDashboardPreset.allCases {
-            dashboardSizeControl.setWidth(
-                segmentWidth,
-                forSegment: preset.rawValue
-            )
-            dashboardSizeControl.setToolTip(
-                "\(preset.controlTitle) best fit · \(preset.sizeTitle)",
-                forSegment: preset.rawValue
-            )
-        }
-        dashboardSizeControl.setAccessibilityLabel("Dashboard Best Fit")
-        dashboardSizeStatus.frame = NSRect(
-            x: PreferencesContentView.bestFitCard.minX + PreferencesContentView.pad,
-            y: PreferencesContentView.bestFitCard.minY + 78,
-            width: PreferencesContentView.bestFitCard.width
-                - PreferencesContentView.pad * 2,
-            height: 18
-        )
-        dashboardSizeStatus.font = .systemFont(ofSize: 11, weight: .medium)
-        dashboardSizeStatus.textColor = .appTextSecondary
 
         let supportFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
         let supportIconSpan: CGFloat = 15 + 6
@@ -3655,9 +4196,10 @@ final class PreferencesContentView: NSView {
             supportX += buttonWidth + supportGap
         }
 
-        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 566))
-        dashboardSizeControl.target = self
-        dashboardSizeControl.action = #selector(dashboardSizeChanged)
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 628))
+        dashboardSizeControl.onChange = { [weak self] preset in
+            self?.onDashboardPresetChange?(preset)
+        }
         [
             launchAtLoginRow,
             autoUpdateRow,
@@ -3669,54 +4211,34 @@ final class PreferencesContentView: NSView {
             resetAccessibilityLink,
             openSourceLink,
             openLogsLink,
+            checkForUpdatesLink,
             settingsGithubLink,
             settingsSponsorsLink,
             settingsKofiLink,
             settingsPayPalLink,
             dashboardSizeControl,
-            dashboardSizeStatus,
             thumbWheelToggle,
             chromeCheck,
             braveCheck,
             firefoxCheck,
             safariCheck,
         ].forEach { addSubview($0) }
+        checkForUpdatesLink.onClick = { [weak self] in
+            self?.onCheckForUpdates?()
+        }
         setDashboardFrameSize(
             KlikProDashboardPreset.air13M1.frameSize
         )
     }
     required init?(coder: NSCoder) { nil }
 
-    @objc private func dashboardSizeChanged() {
-        guard let preset = KlikProDashboardPreset(
-            rawValue: dashboardSizeControl.selectedSegment
-        ) else {
-            return
-        }
-        onDashboardPresetChange?(preset)
-    }
-
     func setDashboardFrameSize(_ size: NSSize) {
-        if let preset = KlikProDashboardPreset.matching(frameSize: size) {
-            dashboardSizeControl.selectedSegment = preset.rawValue
-            dashboardSizeStatus.stringValue =
-                "ON now: \(preset.controlTitle) · \(preset.sizeTitle)"
-            dashboardSizeStatus.textColor = KlikProBrand.green
-            dashboardSizeControl.setAccessibilityValue(
-                "\(preset.controlTitle), on now"
-            )
-        } else {
-            dashboardSizeControl.selectedSegment = -1
-            dashboardSizeStatus.stringValue =
-                "Custom size · \(Int(size.width.rounded())) × \(Int(size.height.rounded()))"
-            dashboardSizeStatus.textColor = .appTextSecondary
-            dashboardSizeControl.setAccessibilityValue("Custom size")
-        }
+        dashboardSizeControl.updateForDashboardFrameSize(size)
     }
 
     func focusDashboardSizeControlForPreview() {
         guard previewRenderingIsActive else { return }
-        window?.makeFirstResponder(dashboardSizeControl)
+        dashboardSizeControl.focusSelectedPreset()
     }
 
     func setAccessibilityGranted(_ granted: Bool) {
@@ -3726,8 +4248,19 @@ final class PreferencesContentView: NSView {
             granted ? "Granted" : "Needs permission",
             color: granted ? .systemGreen : .systemOrange
         )
-        openAccessibilityLink.title = granted ? "Open Accessibility…" : "Set Up Accessibility…"
+        openAccessibilityLink.title = granted ? "Open Settings…" : "Set Up…"
         needsDisplay = true
+    }
+
+    func setUpdateAvailable(_ available: Bool) {
+        checkForUpdatesLink.title = available ? "Update ready" : "Updates…"
+        checkForUpdatesLink.toolTip = available
+            ? "Open the latest Klik PRO release."
+            : "Check GitHub for a newer Klik PRO release."
+    }
+
+    func showUpdateButtonHoverPreview() {
+        checkForUpdatesLink.showHoverPreview()
     }
 
     private func drawCard(_ rect: NSRect) {
@@ -3748,15 +4281,16 @@ final class PreferencesContentView: NSView {
         drawCard(PreferencesContentView.aboutCard)
         drawCard(PreferencesContentView.supportCard)
         drawCard(PreferencesContentView.thumbWheelCard)
-        drawCard(PreferencesContentView.bestFitCard)
         let ix = PreferencesContentView.leftX + PreferencesContentView.pad
         let rxi = PreferencesContentView.rightX + PreferencesContentView.pad
         drawSectionLabel("General", x: ix, y: PreferencesContentView.generalCard.minY + 16)
         drawSectionLabel("Thumb Wheel Tab Switching", x: ix, y: PreferencesContentView.thumbWheelCard.minY + 16)
-        drawSectionLabel(
-            "Dashboard Best Fit",
-            x: PreferencesContentView.bestFitCard.minX + PreferencesContentView.pad,
-            y: PreferencesContentView.bestFitCard.minY + 16
+        ("Best Fit" as NSString).draw(
+            at: NSPoint(x: PreferencesContentView.pad, y: 430),
+            withAttributes: [
+                .font: NSFont.systemFont(ofSize: 14, weight: .semibold),
+                .foregroundColor: NSColor.appTextPrimary,
+            ]
         )
         ("Enabled" as NSString).draw(at: NSPoint(x: ix + 50, y: 378), withAttributes: [
             .font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.appTextPrimary])
@@ -3767,19 +4301,6 @@ final class PreferencesContentView: NSView {
             x: rxi,
             y: PreferencesContentView.supportCard.minY + 12
         )
-        ("Applies a suggested frame only — the window remains freely resizable." as NSString)
-            .draw(
-                at: NSPoint(
-                    x: PreferencesContentView.bestFitCard.minX
-                        + PreferencesContentView.pad,
-                    y: PreferencesContentView.bestFitCard.minY + 98
-                ),
-                withAttributes: [
-                    .font: NSFont.systemFont(ofSize: 10.5),
-                    .foregroundColor: NSColor.tertiaryLabelColor,
-                ]
-            )
-
         ("Open-source mouse shortcuts and App Profiles for macOS." as NSString).draw(
             at: NSPoint(
                 x: rxi,
@@ -4244,10 +4765,11 @@ func makeOnboardingAlert(
     return alert
 }
 
-// MARK: - Top-level window chrome (fixed header/footer + responsive content)
+// MARK: - Top-level window chrome (fixed header + responsive content)
 
 final class ToggleWindowController: NSWindowController, NSWindowDelegate {
     private let content = ToggleView()
+    private var windowCloseApprovedForTermination = false
 
     private static var framePersistenceEnabled: Bool {
         !previewRenderingIsActive
@@ -4309,11 +4831,6 @@ final class ToggleWindowController: NSWindowController, NSWindowDelegate {
         window.contentView = content
         super.init(window: window)
         window.delegate = self
-        content.onClose = { [weak self] in
-            guard let self, self.content.confirmCloseDiscardingUnsavedChanges() else { return }
-            self.close()
-            NSApp.terminate(nil)
-        }
     }
 
     func windowDidMove(_ notification: Notification) {
@@ -4322,6 +4839,16 @@ final class ToggleWindowController: NSWindowController, NSWindowDelegate {
 
     func windowDidResize(_ notification: Notification) {
         persistWindowFrame()
+    }
+
+    /// The in-content Close button is intentionally gone. Route the native red
+    /// traffic-light through the same Save / Discard / Cancel protection, then
+    /// terminate without allowing AppKit to hide the window before the decision.
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard content.confirmCloseDiscardingUnsavedChanges() else { return false }
+        windowCloseApprovedForTermination = true
+        NSApp.terminate(nil)
+        return false
     }
 
     private func persistWindowFrame() {
@@ -4337,7 +4864,11 @@ final class ToggleWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func confirmCloseDiscardingUnsavedChanges() -> Bool {
-        content.confirmCloseDiscardingUnsavedChanges()
+        if windowCloseApprovedForTermination {
+            windowCloseApprovedForTermination = false
+            return true
+        }
+        return content.confirmCloseDiscardingUnsavedChanges()
     }
 
     func checkForUpdatesFromMenuBar() {
@@ -4366,8 +4897,6 @@ final class ToggleView: NSView {
         var specialFeatureEnabled: Bool
     }
 
-    var onClose: (() -> Void)?
-
     private var menuRunning: Bool
     private var config: KlikProConfig
     private var persistedConfig: KlikProConfig   // snapshot as-loaded, for conflict-engine's false-positive check
@@ -4381,6 +4910,9 @@ final class ToggleView: NSView {
     )
     private var saveInProgress = false
     private var appProfileLifecycleInProgress = false
+    /// Power Off deliberately changes launchd state before terminating. Consume one
+    /// termination query so a discarded draft does not trigger the close alert twice.
+    private var powerOffTerminationApproved = false
     /// The data folder chosen during first-run onboarding, applied together with the
     /// other first-run choices on the last page. Nil means new profiles stay in
     /// Application Support.
@@ -4431,19 +4963,26 @@ final class ToggleView: NSView {
     /// Set when the last scan was refused for want of Input Monitoring, so the gear can
     /// say so instead of claiming there are no mice attached.
     private var mouseAccessRequired = false
-    private let saveButton = PrimaryHoverButton(
-        title: "Save",
-        frame: NSRect(x: 48, y: 670, width: 120, height: 42)
+    private let saveButton = HeaderActionButton(
+        symbolName: "externaldrive.fill",
+        accessibility: "Save settings",
+        treatment: .primary,
+        frame: NSRect(x: 752, y: 30, width: 40, height: 30)
     )
-    // Check-for-updates button, top-right of the header (where the status pill used to be).
-    // Right edge stays at x=888; the compact "⟳ Updates…" label lets it be narrower.
-    private var updateButtonRect = NSRect(x: 768, y: 30, width: 120, height: 30)
-    private var updateButtonTrackingArea: NSTrackingArea?
-    private var updateButtonHovered = false
-    private var closeButtonRect = NSRect(x: 808, y: 670, width: 90, height: 42)
-    private var closeButtonTrackingArea: NSTrackingArea?
-    private var closeButtonHovered = false
-    // Set by a successful check when a newer release exists; lights up the header button.
+    private let closeDashboardButton = HeaderActionButton(
+        symbolName: "xmark",
+        accessibility: "Close dashboard",
+        treatment: .neutral,
+        frame: NSRect(x: 800, y: 30, width: 40, height: 30)
+    )
+    private let powerOffButton = HeaderActionButton(
+        symbolName: "power",
+        accessibility: "Power off Klik PRO",
+        treatment: .destructive,
+        frame: NSRect(x: 848, y: 30, width: 40, height: 30)
+    )
+    // Set by a successful check when a newer release exists; the About-card
+    // Updates button then opens the release directly.
     private var updateAvailableURL: URL?
     static let autoCheckKey = "klikpro.autoCheckUpdates"
     // Pill tab bar. Segment frames are recomputed each draw from measured label
@@ -4457,7 +4996,6 @@ final class ToggleView: NSView {
     private var advancedTabRect = NSRect.zero
     private var appActivationObserver: NSObjectProtocol?
     private var dashboardCanvasX: CGFloat = KlikProDashboardMetrics.horizontalInset
-    private var footerBaselineY: CGFloat = 682
 
     override var isFlipped: Bool { true }
 
@@ -4540,12 +5078,12 @@ final class ToggleView: NSView {
         appProfilesView = AppProfilesContentView(
             instances: loadedConfig.instances,
             width: 872,
-            height: 566
+            height: 636
         )
         advancedView = AdvancedSettingsContentView(
             dataRoot: loadedConfig.dataRoot,
             width: 872,
-            height: 566
+            height: 636
         )
 
         super.init(frame: frameRect)
@@ -4554,7 +5092,7 @@ final class ToggleView: NSView {
         layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
 
         addSubview(headerWordmark)
-        scrollView.frame = NSRect(x: 34, y: 82, width: 872, height: 566)
+        scrollView.frame = NSRect(x: 34, y: 82, width: 872, height: 636)
         scrollView.hasVerticalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
@@ -4570,7 +5108,21 @@ final class ToggleView: NSView {
         saveButton.onPress = { [weak self] in
             self?.saveConfiguration()
         }
-        addSubview(saveButton)
+        closeDashboardButton.onPress = { [weak self] in
+            self?.requestCloseDashboard()
+        }
+        powerOffButton.onPress = { [weak self] in
+            self?.requestPowerOff()
+        }
+        [saveButton, closeDashboardButton, powerOffButton].forEach(addSubview)
+        preferencesView.onCheckForUpdates = { [weak self] in
+            guard let self else { return }
+            if let updateAvailableURL {
+                NSWorkspace.shared.open(updateAvailableURL)
+            } else {
+                checkForUpdates()
+            }
+        }
         preferencesView.onDashboardPresetChange = { [weak self] preset in
             self?.applyDashboardPreset(preset)
         }
@@ -4656,7 +5208,7 @@ final class ToggleView: NSView {
         )
         dashboardCanvasX = floor((bounds.width - canvasWidth) / 2)
         let contentHeight = max(
-            566,
+            636,
             bounds.height
                 - KlikProDashboardMetrics.headerHeight
                 - KlikProDashboardMetrics.footerHeight
@@ -4680,27 +5232,34 @@ final class ToggleView: NSView {
         advancedView.frame = documentFrame
 
         headerWordmark.frame.origin.x = dashboardCanvasX + 4
-        saveButton.frame.origin = NSPoint(
-            x: dashboardCanvasX + 14,
-            y: bounds.height - 68
-        )
-        updateButtonRect = NSRect(
-            x: dashboardCanvasX + canvasWidth - 138,
+        let actionWidth: CGFloat = 40
+        let actionGap: CGFloat = 8
+        let actionGroupWidth = actionWidth * 3 + actionGap * 2
+        let actionGroupX = dashboardCanvasX + canvasWidth - 18 - actionGroupWidth
+        saveButton.frame = NSRect(
+            x: actionGroupX,
             y: 30,
-            width: 120,
+            width: actionWidth,
             height: 30
         )
-        closeButtonRect = NSRect(
-            x: dashboardCanvasX + canvasWidth - 98,
-            y: bounds.height - 68,
-            width: 90,
-            height: 42
+        closeDashboardButton.frame = NSRect(
+            x: saveButton.frame.maxX + actionGap,
+            y: 30,
+            width: actionWidth,
+            height: 30
         )
-        footerBaselineY = bounds.height - 56
+        powerOffButton.frame = NSRect(
+            x: closeDashboardButton.frame.maxX + actionGap,
+            y: 30,
+            width: actionWidth,
+            height: 30
+        )
         if let frameSize = window?.frame.size {
             preferencesView.setDashboardFrameSize(frameSize)
         }
-        window?.invalidateCursorRects(for: self)
+        [saveButton, closeDashboardButton, powerOffButton].forEach {
+            window?.invalidateCursorRects(for: $0)
+        }
         needsDisplay = true
     }
 
@@ -4773,12 +5332,7 @@ final class ToggleView: NSView {
 
     func showUpdateButtonHoverPreview() {
         guard previewRenderingIsActive else { return }
-        setUpdateButtonHovered(true)
-    }
-
-    func showCloseButtonHoverPreview() {
-        guard previewRenderingIsActive else { return }
-        setCloseButtonHovered(true)
+        preferencesView.showUpdateButtonHoverPreview()
     }
 
     func focusDashboardBestFitForPreview() {
@@ -5561,6 +6115,15 @@ final class ToggleView: NSView {
             case .safari: self.preferencesView.safariCheck.isOn = on
             }
         }
+        contentView.onThumbWheelReset = { [weak self] in
+            guard let self else { return }
+            self.updateViewedMouseProfile {
+                $0.thumbWheel = KlikProConfig.default.thumbWheel
+            }
+            if self.viewedMouseProfileID == self.config.activeMouseProfileID {
+                self.refreshActiveMouseProfileSettings()
+            }
+        }
 
         contentView.middleButtonRow.onToggleChange = { [weak self] on in
             self?.updateViewedMouseProfile { $0.middleButton.enabled = on }
@@ -5675,10 +6238,92 @@ final class ToggleView: NSView {
         }
     }
 
-    /// Close used to terminate outright. Almost every mouse-mapping edit only stages —
+    private func requestCloseDashboard() {
+        guard !saveInProgress else { return }
+        if let window {
+            window.performClose(nil)
+        } else {
+            NSApp.terminate(nil)
+        }
+    }
+
+    private func requestPowerOff() {
+        guard !saveInProgress else { return }
+        let mayContinue = confirmDiscardingUnsavedChanges(
+            discardButtonTitle: "Discard and Power Off"
+        ) { [weak self] in
+            self?.confirmPowerOffKlikPro()
+        }
+        if mayContinue {
+            confirmPowerOffKlikPro()
+        }
+    }
+
+    private func confirmPowerOffKlikPro() {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Power Off Klik PRO?"
+        alert.informativeText =
+            "Klik PRO will stop, and Launch at login will be turned off. "
+            + "Open Klik PRO from Applications when you want to start it again."
+        alert.addButton(withTitle: "Power Off")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        // Interactive preview QA must exercise the confirmation and termination path
+        // without touching the user's real LaunchAgent or launch-at-login preference.
+        if previewRenderingIsActive {
+            powerOffTerminationApproved = true
+            NSApp.terminate(nil)
+            return
+        }
+
+        setSaveInProgress(true)
+        saveStatusMessage = "Powering off…"
+        let previousLaunchAtLogin = controlState.launchAtLogin
+        UserDefaults.standard.set(false, forKey: launchAtLoginPreferenceKey)
+        preferencesView.launchAtLoginRow.toggle.isOn = false
+        controlState.launchAtLogin = false
+
+        saveApplyQueue.async { [weak self] in
+            _ = clearGestureSentinelMappingIfOwned()
+            let disabled = run(["disable", inputTarget]) == 0
+            _ = run(["bootout", domain, inputPlistPath])
+            let stopped = run(["print", inputTarget]) != 0
+            let poweredOff = disabled && stopped
+            if !poweredOff && previousLaunchAtLogin {
+                _ = run(["enable", inputTarget])
+            }
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                guard poweredOff else {
+                    if previousLaunchAtLogin {
+                        UserDefaults.standard.set(
+                            true,
+                            forKey: launchAtLoginPreferenceKey
+                        )
+                    }
+                    self.preferencesView.launchAtLoginRow.toggle.isOn =
+                        previousLaunchAtLogin
+                    self.controlState.launchAtLogin = previousLaunchAtLogin
+                    self.setSaveInProgress(false)
+                    self.saveStatusMessage =
+                        "Could not power off — open Logs in Settings for details."
+                    self.needsDisplay = true
+                    NSSound.beep()
+                    return
+                }
+                self.powerOffTerminationApproved = true
+                NSApp.terminate(nil)
+            }
+        }
+    }
+
+    /// Closing used to terminate outright. Almost every mouse-mapping edit only stages —
     /// `updateViewedMouseProfile` marks the config dirty and stops there — so quitting
-    /// discarded them without a word. The footer had been saying "Unsaved changes" the
-    /// whole time and nothing ever acted on it, which made persistence look arbitrary:
+    /// discarded them without a word. The dashboard had been saying "Unsaved changes"
+    /// and nothing ever acted on it, which made persistence look arbitrary:
     /// edits made before an Activate survived, because Activate saves the whole staged
     /// config, and edits made after it did not.
     ///
@@ -5687,7 +6332,29 @@ final class ToggleView: NSView {
     /// through. A failed save or an edit made while Save was running leaves the window
     /// open, so quitting can never silently discard a newer draft.
     func confirmCloseDiscardingUnsavedChanges() -> Bool {
-        guard hasUnsavedConfigurationChanges, !previewRenderingIsActive else { return true }
+        if powerOffTerminationApproved {
+            powerOffTerminationApproved = false
+            return true
+        }
+        return confirmDiscardingUnsavedChanges(
+            discardButtonTitle: "Discard and Close"
+        ) {
+            NSApp.terminate(nil)
+        }
+    }
+
+    private func confirmDiscardingUnsavedChanges(
+        discardButtonTitle: String,
+        afterSaving: @escaping () -> Void
+    ) -> Bool {
+        let previewCloseConfirmationEnabled =
+            ProcessInfo.processInfo.environment[
+                "KLIK_PRO_PREVIEW_CONFIRM_CLOSE"
+            ] == "1"
+        guard hasUnsavedConfigurationChanges,
+              !previewRenderingIsActive || previewCloseConfirmationEnabled else {
+            return true
+        }
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "You have unsaved changes."
@@ -5695,13 +6362,13 @@ final class ToggleView: NSView {
             "Your mouse mappings and settings have changes that are not saved yet. "
             + "Closing now discards them."
         alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Discard and Close")
+        alert.addButton(withTitle: discardButtonTitle)
         alert.addButton(withTitle: "Cancel")
         switch alert.runModal() {
         case .alertFirstButtonReturn:
             saveConfiguration { savedCurrentDraft in
                 guard savedCurrentDraft else { return }
-                NSApp.terminate(nil)
+                afterSaving()
             }
             return false
         case .alertSecondButtonReturn:
@@ -10038,70 +10705,6 @@ final class ToggleView: NSView {
         )
     }
 
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let updateButtonTrackingArea = updateButtonTrackingArea {
-            removeTrackingArea(updateButtonTrackingArea)
-        }
-        if let closeButtonTrackingArea = closeButtonTrackingArea {
-            removeTrackingArea(closeButtonTrackingArea)
-        }
-        let updateArea = NSTrackingArea(
-            rect: updateButtonRect,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow],
-            owner: self,
-            userInfo: nil
-        )
-        let closeArea = NSTrackingArea(
-            rect: closeButtonRect,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(updateArea)
-        addTrackingArea(closeArea)
-        updateButtonTrackingArea = updateArea
-        closeButtonTrackingArea = closeArea
-    }
-
-    override func resetCursorRects() {
-        super.resetCursorRects()
-        addCursorRect(updateButtonRect, cursor: .pointingHand)
-        addCursorRect(closeButtonRect, cursor: .pointingHand)
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        if event.trackingArea === updateButtonTrackingArea {
-            setUpdateButtonHovered(true)
-        } else if event.trackingArea === closeButtonTrackingArea {
-            setCloseButtonHovered(true)
-        } else {
-            super.mouseEntered(with: event)
-        }
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        if event.trackingArea === updateButtonTrackingArea {
-            setUpdateButtonHovered(false)
-        } else if event.trackingArea === closeButtonTrackingArea {
-            setCloseButtonHovered(false)
-        } else {
-            super.mouseExited(with: event)
-        }
-    }
-
-    private func setUpdateButtonHovered(_ hovered: Bool) {
-        guard updateButtonHovered != hovered else { return }
-        updateButtonHovered = hovered
-        needsDisplay = true
-    }
-
-    private func setCloseButtonHovered(_ hovered: Bool) {
-        guard closeButtonHovered != hovered else { return }
-        closeButtonHovered = hovered
-        needsDisplay = true
-    }
-
     private func recomputeConflictBadges() {
         let displayConfig = configViewingMouseProfile(viewedMouseProfileID, from: config)
         let persistedDisplayConfig: KlikProConfig
@@ -10240,12 +10843,15 @@ final class ToggleView: NSView {
     private func setSaveInProgress(_ inProgress: Bool) {
         saveInProgress = inProgress
         saveButton.isEnabled = !inProgress
-        saveButton.title = inProgress ? "Applying…" : "Save"
+        closeDashboardButton.isEnabled = !inProgress
+        powerOffButton.isEnabled = !inProgress
         saveButton.setAccessibilityLabel(
             inProgress ? "Applying saved settings" : "Save settings"
         )
-        saveButton.needsDisplay = true
-        window?.invalidateCursorRects(for: saveButton)
+        [saveButton, closeDashboardButton, powerOffButton].forEach {
+            $0.needsDisplay = true
+            window?.invalidateCursorRects(for: $0)
+        }
         if inProgress {
             saveStatusMessage = "Applying changes…"
         }
@@ -10255,30 +10861,16 @@ final class ToggleView: NSView {
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
 
-        if updateButtonRect.contains(point) {
-            if let url = updateAvailableURL { NSWorkspace.shared.open(url) } else { checkForUpdates() }
-            return
-        }
         if mappingsTabRect.contains(point) { selectTab(0); return }
         if settingsTabRect.contains(point) { selectTab(1); return }
         if appProfilesTabRect.contains(point) { selectTab(2); return }
         if advancedTabRect.contains(point) { selectTab(3); return }
 
-        if closeButtonRect.contains(point) {
-            if saveInProgress {
-                NSSound.beep()
-                saveStatusMessage = "Please wait while settings are applied…"
-                needsDisplay = true
-                return
-            }
-            onClose?()
-        }
     }
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         drawHeader()
-        drawFooter()
     }
 
     private var versionString: String {
@@ -10302,65 +10894,6 @@ final class ToggleView: NSView {
             withAttributes: bodyAttributes
         )
 
-        // Check-for-updates button — lights up green when an update is available.
-        let hasUpdate = updateAvailableURL != nil
-        let updateFill: NSColor
-        if hasUpdate {
-            updateFill = updateButtonHovered
-                ? (NSColor.systemGreen.blended(withFraction: 0.12, of: .white) ?? .systemGreen)
-                : .systemGreen
-        } else {
-            updateFill = NSColor.controlAccentColor.withAlphaComponent(
-                updateButtonHovered ? 0.20 : 0.12
-            )
-        }
-        let updateButtonPath = NSBezierPath(
-            roundedRect: updateButtonRect,
-            xRadius: updateButtonRect.height / 2,
-            yRadius: updateButtonRect.height / 2
-        )
-        updateFill.setFill()
-        updateButtonPath.fill()
-        if updateButtonHovered {
-            (hasUpdate
-                ? NSColor.white.withAlphaComponent(0.55)
-                : NSColor.controlAccentColor.withAlphaComponent(0.68)
-            ).setStroke()
-            updateButtonPath.lineWidth = 1.5
-            updateButtonPath.stroke()
-        }
-        let cfuColor: NSColor = hasUpdate ? .white : .controlAccentColor
-        let cfuAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
-            .foregroundColor: cfuColor,
-        ]
-        // Default state is a compact clockwise-arrow glyph + "Updates…"; the
-        // update-available state stays text-only so it reads as a distinct alert.
-        let cfuTitle = (hasUpdate ? "Update available" : "Updates…") as NSString
-        let cfuTextSize = cfuTitle.size(withAttributes: cfuAttrs)
-        let cfuGlyph: NSImage? = hasUpdate ? nil : NSImage(
-            systemSymbolName: "arrow.clockwise", accessibilityDescription: nil
-        )?.withSymbolConfiguration(
-            NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
-                .applying(.init(paletteColors: [cfuColor]))
-        )
-        let cfuGlyphGap: CGFloat = 5
-        let cfuGlyphW = cfuGlyph?.size.width ?? 0
-        let cfuGlyphH = cfuGlyph?.size.height ?? 0
-        let cfuTotalW = cfuTextSize.width + (cfuGlyph != nil ? cfuGlyphW + cfuGlyphGap : 0)
-        var cfuX = updateButtonRect.midX - cfuTotalW / 2
-        if let cfuGlyph {
-            cfuGlyph.draw(in: NSRect(
-                x: cfuX, y: updateButtonRect.midY - cfuGlyphH / 2,
-                width: cfuGlyphW, height: cfuGlyphH
-            ))
-            cfuX += cfuGlyphW + cfuGlyphGap
-        }
-        cfuTitle.draw(
-            at: NSPoint(x: cfuX, y: updateButtonRect.midY - cfuTextSize.height / 2),
-            withAttributes: cfuAttrs
-        )
-
         // Pill tab bar: a rounded track holds the four tabs (visual order Mappings,
         // App Profiles, Settings, Advanced) with even padding; the active tab is a
         // filled accent pill with white text. Segment frames are measured here and
@@ -10369,7 +10902,7 @@ final class ToggleView: NSView {
         let tabHPad: CGFloat = 18
         let tabTrackPad: CGFloat = 4
         // Centered on the header's ~44pt centerline so the tab bar lines up with the
-        // logo (y 14–74, center 44) and the Updates button (y 30–60, center 45).
+        // logo and the three icon actions.
         let tabTrackY: CGFloat = 28
         let tabTrackHeight: CGFloat = 32
         let tabLockGap: CGFloat = 5
@@ -10445,12 +10978,45 @@ final class ToggleView: NSView {
             }
             tabX += segWidth
         }
+
+        let headerStatus: (text: String, color: NSColor)?
+        if let saveStatusMessage {
+            headerStatus = (saveStatusMessage, .appTextSecondary)
+        } else if hasUnsavedConfigurationChanges {
+            headerStatus = ("Unsaved changes", .systemRed)
+        } else {
+            headerStatus = nil
+        }
+        if let headerStatus {
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.alignment = .center
+            paragraph.lineBreakMode = .byTruncatingTail
+            let statusRect = NSRect(
+                x: saveButton.frame.minX - 8,
+                y: 63,
+                width: powerOffButton.frame.maxX - saveButton.frame.minX + 16,
+                height: 14
+            )
+            (headerStatus.text as NSString).draw(
+                in: statusRect,
+                withAttributes: [
+                    .font: NSFont.systemFont(
+                        ofSize: 10,
+                        weight: hasUnsavedConfigurationChanges ? .semibold : .regular
+                    ),
+                    .foregroundColor: headerStatus.color,
+                    .paragraphStyle: paragraph,
+                ]
+            )
+        }
     }
 
     // silent = auto-check on launch: never shows the "up to date"/"couldn't check" alerts,
-    // only lights up the header button if a newer release exists.
+    // only updates the Settings > About action if a newer release exists.
     private func checkForUpdates(silent: Bool = false) {
-        if !silent { saveStatusMessage = "Checking for updates…"; needsDisplay = true }
+        if !silent {
+            preferencesView.checkForUpdatesLink.title = "Checking…"
+        }
         let current = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
         var req = URLRequest(url: URL(string: "https://api.github.com/repos/AminudinMurad/klik-pro/releases/latest")!)
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
@@ -10459,10 +11025,12 @@ final class ToggleView: NSView {
         URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
             DispatchQueue.main.async {
                 guard let self = self else { return }
-                if !silent { self.saveStatusMessage = nil; self.needsDisplay = true }
                 guard error == nil, let data = data,
                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                       let tag = obj["tag_name"] as? String else {
+                    if !silent {
+                        self.preferencesView.setUpdateAvailable(false)
+                    }
                     if !silent {
                         self.showUpdateAlert("Couldn't check for updates",
                                              "Please check your connection and try again, or visit the Releases page.",
@@ -10474,14 +11042,22 @@ final class ToggleView: NSView {
                 let releaseURL = (obj["html_url"] as? String).flatMap { URL(string: $0) }
                 if self.isNewer(latest, than: current) {
                     self.updateAvailableURL = releaseURL
-                    self.needsDisplay = true
+                    self.preferencesView.setUpdateAvailable(true)
                     if !silent {
                         self.showUpdateAlert("Update available — \(tag)",
                                              "You have v\(current). Open the release page to download the latest version.",
                                              releaseURL)
                     }
-                } else if !silent {
-                    self.showUpdateAlert("You're up to date", "Klik PRO v\(current) is the latest version.", nil)
+                } else {
+                    self.updateAvailableURL = nil
+                    self.preferencesView.setUpdateAvailable(false)
+                    if !silent {
+                        self.showUpdateAlert(
+                            "You're up to date",
+                            "Klik PRO v\(current) is the latest version.",
+                            nil
+                        )
+                    }
                 }
             }
         }.resume()
@@ -10489,6 +11065,7 @@ final class ToggleView: NSView {
 
     func checkForUpdatesFromMenuBar() {
         NSApp.activate(ignoringOtherApps: true)
+        selectTab(1)
         checkForUpdates()
     }
 
@@ -10513,45 +11090,6 @@ final class ToggleView: NSView {
         } else {
             alert.addButton(withTitle: "OK")
             alert.runModal()
-        }
-    }
-
-    private func drawFooter() {
-        NSColor.controlColor.setFill()
-        let closeButtonPath = NSBezierPath(
-            roundedRect: closeButtonRect,
-            xRadius: closeButtonRect.height / 2,
-            yRadius: closeButtonRect.height / 2
-        )
-        closeButtonPath.fill()
-        if closeButtonHovered {
-            NSColor.controlAccentColor.withAlphaComponent(0.68).setStroke()
-            closeButtonPath.lineWidth = 1.5
-            closeButtonPath.stroke()
-        }
-
-        drawCentered("Close", in: closeButtonRect, font: .systemFont(ofSize: 14), color: .appTextPrimary)
-
-        if hasUnsavedConfigurationChanges {
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
-                .foregroundColor: NSColor.systemRed
-            ]
-            "Unsaved changes".draw(
-                at: NSPoint(x: dashboardCanvasX + 150, y: footerBaselineY),
-                withAttributes: attrs
-            )
-        }
-
-        if let message = saveStatusMessage {
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 12),
-                .foregroundColor: NSColor.appTextSecondary
-            ]
-            message.draw(
-                at: NSPoint(x: dashboardCanvasX + 322, y: footerBaselineY),
-                withAttributes: attrs
-            )
         }
     }
 
@@ -10597,9 +11135,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
-    /// Cmd-Q, the Dock and the menu bar all reach `NSApp.terminate` directly, bypassing
-    /// the window's Close button. Guarding only that button still lost staged edits —
-    /// which is most of them, since mouse-mapping changes stage until Save.
+    /// Cmd-Q, the Dock and the menu bar all reach `NSApp.terminate` directly. The
+    /// native red traffic-light is guarded by `windowShouldClose`; this delegate
+    /// path protects every other termination route.
     func applicationShouldTerminate(
         _ sender: NSApplication
     ) -> NSApplication.TerminateReply {

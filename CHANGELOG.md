@@ -2,6 +2,35 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.5.3
+
+Klik PRO's Mouse Mappings workspace now uses the selected five-card dashboard
+composition while keeping the responsive v1.5.2 window range.
+
+- **Five compact mapping cards.** Middle, Back, Forward, Gesture, and Horizontal
+  Thumb Wheel controls now sit in bordered two-row cards around the centred
+  mouse. Each card keeps its real toggle, action selector, value field, status,
+  and reset behavior.
+- **More room for the mouse slide.** Removing the detached action footer gives
+  the Mouse Mappings stage 70 additional points of height at the unchanged
+  940×770-point minimum. The app lists keep their existing minimum viewport and
+  still expand at larger Best Fit sizes.
+- **Compact header actions.** Save is now a disk icon, followed by Close and
+  Power Off. Compact unsaved, applying, and saved feedback stays directly
+  beneath the group.
+- **Close and Power Off have distinct jobs.** Close and every normal Quit route
+  retain Save / Discard / Cancel protection. Power Off adds a confirmation,
+  stops the helper, and turns off Launch at login.
+- **Updates moved into Settings.** Check for Updates now lives in the About card
+  instead of competing with the main dashboard actions.
+- **Permissions regrouped.** Accessibility status occupies one clean row, with
+  Open Settings, Recheck, Reset, and Logs aligned in one compact action bar.
+- **Visual Best Fit choices.** Settings now presents the five responsive presets
+  as MacBook tiles with exact outer-frame dimensions, a green current-selection
+  row, and concise resize guidance modelled on Sistem PRO.
+- **No v1.6 routing changes.** Mapping schema, profile identity, active-profile
+  behavior, and physical mouse-event routing are unchanged.
+
 ## 1.5.2
 
 Klik PRO's compact 13-inch dashboard is now the minimum of a responsive,

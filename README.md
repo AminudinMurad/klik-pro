@@ -24,7 +24,7 @@ help support continued development and mouse/browser compatibility testing:**
 
 </div>
 
-Klik PRO is no longer limited to ChatGPT / Codex and Claude. The v1.5.2 release
+Klik PRO is no longer limited to ChatGPT / Codex and Claude. The v1.5.3 release
 keeps the compact 13-inch dashboard as its minimum and adds a resizable workspace
 with five Best Fit sizes, so longer app lists can use more of a larger screen. It
 also includes the expanded installed-app catalogue introduced in v1.5.0 and the
@@ -34,6 +34,13 @@ apps, with compatibility badges and clear per-app actions. It also adds three sa
 mouse-mapping slides, explicit
 **Save** and **Activate** behavior, quieter fresh defaults, and a cleaner app-card
 layout across Mappings and App Profiles.
+
+The v1.5.3 dashboard refines that responsive workspace: Mouse Mappings
+uses five compact control cards around the centred mouse, the header groups
+disk-icon Save, Close, and Power Off actions, and the removed action footer gives
+the mapping slide more vertical breathing room. Updates now lives in Settings >
+About. This is a presentation release only; the sender-aware,
+mouse-independent profile work remains reserved for v1.6.
 
 Klik PRO remaps supported middle, forward, back, and Gesture mouse-button events to
 the currently active saved mapping preset. Enabling Gesture replaces the tested
@@ -53,6 +60,26 @@ appear only while its Accessibility input tap is operational. Optional native-ap
 launchers add separate icons, user-recorded hotkeys for ChatGPT / Codex, Claude, and
 Gemini, and temporary mouse-button launch actions where supported. Actual button and
 wheel support varies by hardware.
+
+## v1.5.3 highlights
+
+- **Selected five-card mapping layout** — four button cards surround the mouse,
+  with Horizontal Thumb Wheel in a matching top-centre card.
+- **One aligned control row per card** — action, shortcut/app value, and reset
+  remain compact without losing the existing Open App and conflict behavior.
+- **Compact header actions** — disk-icon Save, Close, and Power Off sit together
+  with compact state feedback; the detached footer band is removed.
+- **Close remains safe; Power Off is explicit** — Close and normal Quit routes
+  protect unsaved edits with Save, Discard, and Cancel. Power Off confirms before
+  stopping the helper and turning off Launch at login.
+- **Focused Settings actions** — Updates is inside About, while Accessibility
+  status and its four actions use one aligned row instead of scattered controls.
+- **Visual Best Fit tiles** — the five MacBook targets show their exact Klik PRO
+  outer-frame sizes, active state, and resizable-window guidance at a glance.
+- **Responsive range retained** — the 940×770 minimum, five Best Fit choices,
+  remembered frame, and 1280×960 maximum are unchanged.
+- **v1.6 stays separate** — no sender-aware device routing or mouse-independent
+  profile behavior is included.
 
 ## v1.5.2 highlights
 
@@ -103,41 +130,41 @@ Step 2 offers a durable data folder up front, so profile logins are stored where
 survive an uninstall from the very first profile:
 
 <p align="center">
-  <img src="assets/onboarding-flow.gif?v=1.5.2-b25" width="462" alt="Klik PRO first-launch onboarding animation cycling through its four steps: Welcome, the data folder for profile logins, Preferences, and an opt-in Accessibility step">
+  <img src="assets/onboarding-flow.gif?v=1.5.3-b26" width="462" alt="Klik PRO first-launch onboarding animation cycling through its four steps: Welcome, the data folder for profile logins, Preferences, and an opt-in Accessibility step">
 </p>
 
 **Supported controls** — configure compatible mouse controls and see live conflict
 checks:
 
-<img src="assets/screenshot-mappings.png?v=1.5.2-b25" width="940" alt="Klik PRO v1.5.2 Mappings tab with three saved mouse mapping slides, browser checkboxes, shortcut settings, and independently scrolling Native Apps and App Profiles lists">
+<img src="assets/screenshot-mappings.png?v=1.5.3-b26" width="940" alt="Klik PRO v1.5.3 Mappings tab with five compact mapping cards around the mouse and independently scrolling Native Apps and App Profiles lists">
 
 **App Profiles** — generate isolated extra instances for supported apps such as
 ChatGPT / Codex, Claude, and Gemini, each with its own login where the app supports
 profile isolation; open or assign each profile, and give it a custom PNG/ICO, colour
 tint, or one-character badge so every account is recognisable at a glance:
 
-<img src="assets/screenshot-app-profiles.png?v=1.5.2-b25" width="940" alt="Klik PRO App Profiles tab showing native-app Open, New Profile, and Assign Button actions plus individually styled generated profiles">
+<img src="assets/screenshot-app-profiles.png?v=1.5.3-b26" width="940" alt="Klik PRO App Profiles tab showing native-app Open, New Profile, and Assign Button actions plus individually styled generated profiles">
 
 **Icon customisation** — distinguish profiles with colour tints or custom badges,
 manage them from the per-profile gear menu, and see the same identity immediately in
 Mappings:
 
 <p align="center">
-  <img src="assets/app-profiles-icon-showcase.gif?v=1.5.2-b25" width="600" alt="Klik PRO animation showing full-size tinted and initial-badged App Profile icons, profile management controls, and matching icons in the Mappings tab">
+  <img src="assets/app-profiles-icon-showcase.gif?v=1.5.3-b26" width="600" alt="Klik PRO animation showing full-size tinted and initial-badged App Profile icons, profile management controls, and matching icons in the Mappings tab">
 </p>
 
 **Settings** — launch-at-login, menu-icon visibility, update-check, guided
 Accessibility setup/reset controls, and five optional Dashboard Best Fit sizes:
 
-<img src="assets/screenshot-settings.png?v=1.5.2-b25" width="940" alt="Klik PRO v1.5.2 Settings tab with Dashboard Best Fit sizes for 13-inch M1, 13-inch M2+, 14-inch, 15-inch, and 16-inch MacBooks">
+<img src="assets/screenshot-settings.png?v=1.5.3-b26" width="940" alt="Klik PRO v1.5.3 Settings tab with visual Best Fit MacBook tiles, compact Permissions actions, and Updates inside About">
 
 **Advanced — durable data folder (lock-gated).** The Advanced tab is locked by default. Its options change where App Profile data is stored on disk, so clicking the padlock shows a risk confirmation before anything unlocks:
 
-<img src="assets/screenshot-advanced-locked.png?v=1.5.2-b25" width="940" alt="Klik PRO Advanced tab locked: a padlock, a warning that these options change where App Profile data is stored on disk and can leave profiles unfindable, and a Click the lock to unlock hint">
+<img src="assets/screenshot-advanced-locked.png?v=1.5.3-b26" width="940" alt="Klik PRO Advanced tab locked: a padlock, a warning that these options change where App Profile data is stored on disk and can leave profiles unfindable, and a Click the lock to unlock hint">
 
 Once unlocked, point new App Profiles at a durable data folder so their logins survive uninstalling Klik PRO, scan an existing folder to recover profiles after a reinstall, and review profile health. Missing launchers can be repaired; active profiles can be archived without deleting their login data or custom icon, then restored later with the same identity:
 
-<img src="assets/screenshot-advanced.png?v=1.5.2-b25" width="940" alt="Klik PRO v1.5.2 Advanced tab unlocked, showing aligned Data Folder and Profile Cleanup cards above a responsive scrolling App Profile Maintenance panel">
+<img src="assets/screenshot-advanced.png?v=1.5.3-b26" width="940" alt="Klik PRO v1.5.3 Advanced tab unlocked, showing aligned Data Folder and Profile Cleanup cards above a responsive scrolling App Profile Maintenance panel">
 
 ## Features
 
@@ -207,10 +234,10 @@ Once unlocked, point new App Profiles at a durable data folder so their logins s
 
 ## Install (pre-built release)
 
-The current release is **Klik PRO v1.5.2 (build 25)**, provided as one universal
+The current release is **Klik PRO v1.5.3 (build 26)**, provided as one universal
 macOS app for Apple Silicon and Intel Macs. The DMG is the recommended download;
 the ZIP contains the same app as an alternative.
-**[Download Klik PRO v1.5.2](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.5.2).**
+**[Download Klik PRO v1.5.3](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.5.3).**
 
 > [!IMPORTANT]
 > **Since version 1.5.0, fresh/reset defaults are quieter.** Existing setups keep their saved
@@ -379,9 +406,9 @@ LaunchAgent, plus a separate settings app:
   launch-at-login, main and Special Feature menu-icon visibility, automatic update
   checks, and guided Accessibility setup with live status, a manual **Recheck** action,
   and a confirmed reset that
-  restarts onboarding. The
-  header has a **Check for Updates** button (lights up when a newer GitHub release
-  exists), and the footer links to the project's GitHub repo and its GitHub
+  restarts onboarding. The About card has an **Updates** action (it becomes
+  **Update ready** when a newer GitHub release exists), and the Support card links
+  to the project's GitHub repo and its GitHub
   Sponsors / Ko-fi / PayPal support pages.
 
 For browser-local conflict warnings, the settings app reads local supported-browser
@@ -650,7 +677,7 @@ setups Klik PRO has been tested against:
 | | |
 |---|---|
 | macOS | 26.5.2 (build 25F84) |
-| Klik PRO | v1.5.2 (build 25), universal Apple Silicon + Intel build |
+| Klik PRO | v1.5.3 (build 26), universal Apple Silicon + Intel build |
 | Primary mouse | Logitech MX Master 3 (Mac edition), firmware `MPM19.01_0015`, connected over Bluetooth (BLE) |
 | Additional tested mouse | Logi M650, firmware `RBM16.10_0014` |
 | Vendor software / driver | None — no mouse driver or manufacturer software installed |

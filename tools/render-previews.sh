@@ -113,8 +113,9 @@ KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
   "$EXECUTABLE" "$FIXTURES/onboarding-back-hover.png" onboarding
 # Menu-bar About uses the same shared wordmark and badge metrics.
 render_preview "$FIXTURES/about.png" about
-# The longer permission badge is retained as a regression fixture so the nearby
-# Recheck button cannot silently drift back into it.
+# Settings fixtures keep the compact Permissions action bar and About-card Updates
+# control deterministic in both granted and needs-permission states.
+render_preview "$FIXTURES/settings.png" settings
 KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
 KLIK_PRO_PREVIEW_ACCESSIBILITY_GRANTED=0 \
   "$EXECUTABLE" "$FIXTURES/settings-needs-permission.png" settings
@@ -176,12 +177,7 @@ KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
 KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
   KLIK_PRO_PREVIEW_INSTALLED_TARGETS=none \
   KLIK_PRO_PREVIEW_UPDATE_HOVER=1 \
-  "$EXECUTABLE" "$FIXTURES/update-hover.png" mappings
-KLIK_PRO_CONFIG_DIRECTORY="$CONFIG" \
-  KLIK_PRO_PREVIEW_INSTALLED_TARGETS=none \
-  KLIK_PRO_PREVIEW_CLOSE_HOVER=1 \
-  "$EXECUTABLE" "$FIXTURES/close-hover.png" mappings
-
+  "$EXECUTABLE" "$FIXTURES/update-hover.png" settings
 if [[ "$MODE" == "all" ]]; then
   # The README onboarding animation is built from the fixtures above, so adding or
   # reordering a first-run page can never leave a stale hand-made recording behind.
@@ -197,6 +193,7 @@ echo "  $FIXTURES/onboarding-access.png"
 echo "  $FIXTURES/onboarding-granted.png"
 echo "  $FIXTURES/onboarding-back-hover.png"
 echo "  $FIXTURES/about.png"
+echo "  $FIXTURES/settings.png"
 echo "  $FIXTURES/settings-needs-permission.png"
 echo "  $FIXTURES/app-profiles.png"
 echo "  $FIXTURES/app-profiles-empty.png"
@@ -217,4 +214,3 @@ echo "  $FIXTURES/mouse-mapping-final.png"
 echo "  $FIXTURES/unsaved-changes.png"
 echo "  $FIXTURES/save-hover.png"
 echo "  $FIXTURES/update-hover.png"
-echo "  $FIXTURES/close-hover.png"

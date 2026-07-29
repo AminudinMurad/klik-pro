@@ -152,9 +152,6 @@ private struct PreviewMain {
                 if ProcessInfo.processInfo.environment["KLIK_PRO_PREVIEW_UPDATE_HOVER"] == "1" {
                     toggleView.showUpdateButtonHoverPreview()
                 }
-                if ProcessInfo.processInfo.environment["KLIK_PRO_PREVIEW_CLOSE_HOVER"] == "1" {
-                    toggleView.showCloseButtonHoverPreview()
-                }
                 if tab == "settings" {
                     toggleView.selectTab(1)
                 } else if tab == "advanced" {
