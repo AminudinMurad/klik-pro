@@ -979,14 +979,35 @@ final class HeaderActionButton: NSButton {
 }
 
 private func drawCompactMappingCard(in rect: NSRect, dividerY: CGFloat) {
-    NSColor.controlBackgroundColor.setFill()
     let path = NSBezierPath(
-        roundedRect: rect.insetBy(dx: 0.5, dy: 0.5),
+        roundedRect: rect.insetBy(dx: 1.5, dy: 1.5),
         xRadius: 8,
         yRadius: 8
     )
+
+    // Lift the mapping controls off the slide instead of stacking white rectangles
+    // on a white sheet. The restrained gradient remains legible in both appearances.
+    NSGraphicsContext.saveGraphicsState()
+    let shadow = NSShadow()
+    shadow.shadowColor = NSColor.black.withAlphaComponent(0.12)
+    shadow.shadowOffset = NSSize(width: 0, height: -1)
+    shadow.shadowBlurRadius = 3
+    shadow.set()
+    NSColor.controlBackgroundColor.setFill()
     path.fill()
-    NSColor.separatorColor.withAlphaComponent(0.30).setStroke()
+    NSGraphicsContext.restoreGraphicsState()
+
+    let top = NSColor.controlBackgroundColor.blended(
+        withFraction: 0.07,
+        of: NSColor.white
+    ) ?? NSColor.controlBackgroundColor
+    let bottom = NSColor.controlBackgroundColor.blended(
+        withFraction: 0.035,
+        of: NSColor.controlAccentColor
+    ) ?? NSColor.controlBackgroundColor
+    NSGradient(starting: top, ending: bottom)?.draw(in: path, angle: -90)
+
+    NSColor.separatorColor.withAlphaComponent(0.38).setStroke()
     path.lineWidth = 1
     path.stroke()
 
@@ -1161,7 +1182,8 @@ final class RecordableShortcutRowView: NSView {
         let inset: CGFloat = 12
         let lowerY: CGFloat = 46
         let resetWidth: CGFloat = 20
-        let actionWidth: CGFloat = 118
+        // Give the Browser ←/→ values enough room to clear the Reset control.
+        let actionWidth: CGFloat = 100
         let controlGap: CGFloat = 6
         toggle.frame = NSRect(x: inset, y: 9, width: 40, height: 22)
         badge.alignsContentRight = true
@@ -2086,6 +2108,15 @@ final class ToggleOnlyRowView: NSView {
 final class MouseSlideContainerView: NSView {
     override var isFlipped: Bool { true }
 
+    /// A quiet wash makes the selected mapping read as one carousel slide. The mouse
+    /// keeps the stronger version of this same colour.
+    var slideTint: MouseSlideTint? {
+        didSet {
+            guard slideTint != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
     /// The mouse artwork and its five leader lines are drawn here rather than by the
     /// superview. They used to be painted *behind* this container, which put them outside
     /// the layer the browse CATransition animates — so the control rows slid across while
@@ -2097,6 +2128,33 @@ final class MouseSlideContainerView: NSView {
     var drawArtwork: ((NSRect) -> Void)?
 
     override func draw(_ dirtyRect: NSRect) {
+        let slide = NSBezierPath(
+            roundedRect: bounds.insetBy(dx: 1, dy: 1),
+            xRadius: 11,
+            yRadius: 11
+        )
+        NSGraphicsContext.saveGraphicsState()
+        slide.addClip()
+        let accent = slideTint.map {
+            NSColor(
+                calibratedRed: $0.red,
+                green: $0.green,
+                blue: $0.blue,
+                alpha: 1
+            )
+        } ?? KlikProBrand.green
+        let start = accent.withAlphaComponent(slideTint == nil ? 0.055 : 0.13)
+        let end = accent.withAlphaComponent(slideTint == nil ? 0.012 : 0.025)
+        NSGradient(starting: start, ending: end)?.draw(in: bounds, angle: -90)
+        NSGraphicsContext.restoreGraphicsState()
+
+        NSColor.white.withAlphaComponent(0.30).setStroke()
+        let highlight = NSBezierPath()
+        highlight.move(to: NSPoint(x: 12, y: 1.5))
+        highlight.line(to: NSPoint(x: bounds.maxX - 12, y: 1.5))
+        highlight.lineWidth = 1
+        highlight.stroke()
+
         drawArtwork?(bounds)
     }
 }
@@ -2793,7 +2851,6 @@ final class SettingsContentView: NSView {
     // browsers pull-down that stays in sync with the Settings tab's four browser checkboxes.
     let thumbWheelToggle: ToggleSwitchView
     let thumbWheelBrowsers: ThumbWheelBrowsersButton
-    let thumbWheelBadge: ConflictBadgeView
     let thumbWheelResetButton: ShortcutResetButton
     let mouseProfileHeader = MouseProfileHeaderView(
         frame: NSRect(x: 0, y: 0, width: 872, height: 374)
@@ -3050,11 +3107,6 @@ final class SettingsContentView: NSView {
         )
         thumbWheelBrowsers.controlSize = .small
         thumbWheelBrowsers.font = .systemFont(ofSize: 11)
-        thumbWheelBadge = ConflictBadgeView(
-            status: .ok,
-            frame: NSRect(x: thumbCard.maxX - 100, y: thumbCard.minY + 9, width: 88, height: 22)
-        )
-        thumbWheelBadge.alignsContentRight = true
         thumbWheelResetButton = ShortcutResetButton(
             title: "Horizontal Thumb Wheel",
             frame: NSRect(x: thumbCard.maxX - 34, y: thumbCard.minY + 46, width: 20, height: 28)
@@ -3074,7 +3126,7 @@ final class SettingsContentView: NSView {
         addSubview(mouseSlideContainer)
         [
             middleButtonRow, gestureButtonRow, forwardRow, backRow,
-            thumbWheelToggle, thumbWheelBrowsers, thumbWheelBadge,
+            thumbWheelToggle, thumbWheelBrowsers,
             thumbWheelResetButton, mouseProfileHeader,
         ].forEach { mouseSlideContainer.addSubview($0) }
         addSubview(mappingProfilesView)
@@ -3165,6 +3217,7 @@ final class SettingsContentView: NSView {
         let tint = color.tint
         guard tint != mouseSlideTint else { return }
         mouseSlideTint = tint
+        mouseSlideContainer.slideTint = tint
         // The artwork is drawn by the container now, so that is what has to repaint.
         mouseSlideContainer.needsDisplay = true
     }

@@ -651,9 +651,9 @@ struct MouseProfileLaunchAssignment: Codable, Equatable {
     var button: QuickLaunchMouseButton
 }
 
-/// A `.sourceAtop` wash laid over the one mouse artwork at draw time. Kept as plain
-/// components so this model type stays renderer-agnostic, exactly as
-/// `AppProfileMenuColor.iconColor` does; the view feeds them to
+/// Colour components used for the mouse's `.sourceAtop` wash and the mapping slide's
+/// quieter background wash. Kept renderer-agnostic, exactly as
+/// `AppProfileMenuColor.iconColor` is; the view feeds them to
 /// `NSColor(calibratedRed:green:blue:alpha:)`, which is the space the first three
 /// colourways were authored and measured in.
 struct MouseSlideTint: Equatable {

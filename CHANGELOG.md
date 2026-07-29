@@ -7,7 +7,15 @@ All notable changes to Klik PRO are documented here.
 - **Consistent shortcut action menus.** Forward and Back now use the same
   `Shortcut` action-menu label as Middle and Gesture instead of presenting
   `Browser Forward` and `Browser Back` as if they were different action types.
-  Their existing Browser → and Browser ← shortcut values, reset controls, and
+  Their existing Browser → and Browser ← shortcut values remain editable.
+- **Unclipped browser values.** The Forward and Back value fields now leave
+  enough room for the complete arrow label and the adjacent reset control.
+- **Honest thumb-wheel presentation.** Horizontal Thumb Wheel no longer shows
+  an `OK` shortcut-validation badge where no shortcut conflict is being checked.
+- **Mapping-slide depth restored.** The selected mapping's saved colour now
+  washes the carousel background as well as the mouse, while subtle gradients,
+  highlights, and shadows lift the five control cards from the slide.
+- Mouse routing, configuration schema, responsive sizes, reset behavior, and
   optional Open App mode are unchanged.
 
 ## 1.5.3

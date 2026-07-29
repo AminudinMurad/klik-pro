@@ -1,6 +1,6 @@
 # Klik PRO next-update handoff
 
-Updated 2026-07-29 for the v1.5.4 corrective DMG handover.
+Updated 2026-07-29 for the final v1.5.4 release.
 
 ## Released baseline
 
@@ -9,33 +9,34 @@ Updated 2026-07-29 for the v1.5.4 corrective DMG handover.
 - Installed app at handoff: **v1.5.3 build 26**.
 - Current local branch: `codex/v1.5.3-header-save-layout`.
 
-## v1.5.4 corrective state
+## v1.5.4 final release state
 
 - Source version/build: **1.5.4 / 27** in both app plists.
-- Scope is deliberately limited to the Forward and Back action-menu labels:
-  both now use `Shortcut`, matching Middle and Gesture.
-- Browser → and Browser ← remain the actual default keyboard-shortcut values.
-  Their recorder fields, reset controls, and optional Open App mode are
-  unchanged.
+- Forward and Back both use `Shortcut`, matching Middle and Gesture, while their
+  complete Browser → and Browser ← values fit beside Reset.
+- Horizontal Thumb Wheel no longer shows a meaningless `OK` shortcut-conflict
+  badge.
+- Mapping-specific colour washes, compact-card gradients, highlights, and
+  restrained shadows restore visual depth to the five-card carousel.
+- Reset controls, optional Open App mode, routing, configuration schema,
+  responsive sizes, and the v1.6 boundary are unchanged.
 - Regression coverage rejects a return of `Browser Forward` or `Browser Back`
   as the action-menu title.
-- The focused correction passed the full gate at
-  `build/check-20260729-222654` before the version/documentation bump.
 - The final v1.5.4 build-27 gate passed at
-  `build/check-20260729-223620`.
-- `docs/RELEASE_NOTES_v1.5.4.md` contains the candidate release notes.
-- Release source commit: `e3f892b`.
+  `build/check-20260729-234234`.
+- `docs/RELEASE_NOTES_v1.5.4.md` contains the final release notes.
 - Signed universal DMG:
   `releases/Klik-PRO-v1.5.4-macos-universal.dmg`.
 - DMG SHA-256:
-  `e072fc0d29b0cb2be607bffb820587a320c6fe9bf41c9812b41ea97b78b1bd4f`.
+  `f4bf131ed4e32a8d68f96b37a885b5d06b5fa2681e9b8aee3cf0c5b245e54a43`.
 - ZIP SHA-256:
-  `743f9d207c23b0fe34ffc472ace56102a74dabd4fe54d5bd568d5437c62f851c`.
+  `9940d12d41937ea2979443f02483f0da68005433981f51a852d777322af19dbb`.
+- Installer SHA-256:
+  `2ffc712a75a24e967f0e514025b0849da5e16a3b9c6cd92376df33b966c3b562`.
 - The DMG, ZIP, and authenticated installer checksum manifests and Ed25519
   signatures were verified. Both embedded executables are `x86_64 arm64`, and
   the extracted app passed deep strict code-signature validation.
-- v1.5.4 was not installed, tagged, pushed, or published. Do not rewrite the
-  published v1.5.3 tag or assets.
+- Do not rewrite the published v1.5.3 tag or assets.
 
 ## v1.5.3 released state
 
