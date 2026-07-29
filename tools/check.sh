@@ -90,8 +90,8 @@ for product_plist in \
 do
   product_version="$(plutil -extract CFBundleShortVersionString raw -o - "$product_plist")"
   product_build="$(plutil -extract CFBundleVersion raw -o - "$product_plist")"
-  if [[ "$product_version" != "1.5.3" || "$product_build" != "26" ]]; then
-    echo "$(basename "$product_plist") must remain version 1.5.3 build 26; found version $product_version build $product_build" >&2
+  if [[ "$product_version" != "1.5.4" || "$product_build" != "27" ]]; then
+    echo "$(basename "$product_plist") must remain version 1.5.4 build 27; found version $product_version build $product_build" >&2
     exit 1
   fi
 done
@@ -1500,9 +1500,11 @@ grep -q 'header.onSave = ' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'private func saveMouseProfile(_ id: UUID)' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'thumbWheelCard = NSRect(x: leftX' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'actionPicker.addItems(withTitles: \[baseActionTitle, "Open App"\])' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'baseActionTitle: "Browser Forward"' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'baseActionTitle: "Browser Back"' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'baseActionTitle: "Shortcut"' "$ROOT/Sources/KlikProApp.swift"
+if grep -Eq 'baseActionTitle: "Browser (Forward|Back)"' "$ROOT/Sources/KlikProApp.swift"; then
+  echo "Forward and Back must use the same Shortcut action menu as the other buttons" >&2
+  exit 1
+fi
 if grep -q 'showsShortcutControls: false' "$ROOT/Sources/KlikProApp.swift"; then
   echo "All four mouse-button rows must expose their shortcut recorder" >&2
   exit 1
@@ -1682,7 +1684,7 @@ grep -q 'responsive-advanced-16.png' "$ROOT/tools/render-previews.sh"
 require_source_literal \
   'styleMask: [.titled, .closable, .miniaturizable, .resizable]' \
   "$ROOT/Sources/KlikProApp.swift" \
-  "The v1.5.3 dashboard window must remain normally resizable"
+  "The v1.5.4 dashboard window must remain normally resizable"
 require_source_literal \
   'static let minimumContentSize = NSSize(width: 940, height: 738)' \
   "$ROOT/Sources/KlikProApp.swift" \

@@ -2,6 +2,14 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.5.4
+
+- **Consistent shortcut action menus.** Forward and Back now use the same
+  `Shortcut` action-menu label as Middle and Gesture instead of presenting
+  `Browser Forward` and `Browser Back` as if they were different action types.
+  Their existing Browser → and Browser ← shortcut values, reset controls, and
+  optional Open App mode are unchanged.
+
 ## 1.5.3
 
 Klik PRO's Mouse Mappings workspace now uses the selected five-card dashboard

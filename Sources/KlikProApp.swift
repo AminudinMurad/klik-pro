@@ -2933,7 +2933,7 @@ final class SettingsContentView: NSView {
             displayOverrideResolver: { combo in
                 browserHistoryDisplayOverride(slot: .forwardButton, combo: combo)
             },
-            baseActionTitle: "Browser Forward",
+            baseActionTitle: "Shortcut",
             frame: SettingsContentView.forwardButtonCard
         )
         backRow = RecordableShortcutRowView(
@@ -2943,7 +2943,7 @@ final class SettingsContentView: NSView {
             displayOverrideResolver: { combo in
                 browserHistoryDisplayOverride(slot: .backButton, combo: combo)
             },
-            baseActionTitle: "Browser Back",
+            baseActionTitle: "Shortcut",
             frame: SettingsContentView.backButtonCard
         )
         [middleButtonRow, gestureButtonRow, forwardRow, backRow].forEach {

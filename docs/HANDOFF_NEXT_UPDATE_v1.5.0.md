@@ -1,25 +1,40 @@
 # Klik PRO next-update handoff
 
-Updated 2026-07-29 for the resumed v1.5.3 release candidate.
+Updated 2026-07-29 for the v1.5.4 corrective DMG handover.
 
 ## Released baseline
 
-- Current public release: **v1.5.2 build 25**.
-- Release tag: `v1.5.2`.
-- Installed app at handoff: **v1.5.2 build 25**.
+- Current public release: **v1.5.3 build 26**.
+- Release tag: `v1.5.3`.
+- Installed app at handoff: **v1.5.3 build 26**.
 - Current local branch: `codex/v1.5.3-header-save-layout`.
 
-## v1.5.3 release-candidate state
+## v1.5.4 corrective state
 
-- Source version/build: **1.5.3 / 26** in both app plists.
-- Release source and release notes are prepared but remain uncommitted.
-- Public screenshots were regenerated from the final layout.
-- The user resumed and authorized the v1.5.3 GitHub release with its changelog
-  after the earlier handoff interrupted the final pre-commit gate.
-- The final pre-commit gate passed at `build/check-20260729-215001`. Continue
-  with the attribution gate, commit, universal packaging, installed-app
-  persistence acceptance, annotated tagging, nine-asset publication, and
-  public-download verification.
+- Source version/build: **1.5.4 / 27** in both app plists.
+- Scope is deliberately limited to the Forward and Back action-menu labels:
+  both now use `Shortcut`, matching Middle and Gesture.
+- Browser → and Browser ← remain the actual default keyboard-shortcut values.
+  Their recorder fields, reset controls, and optional Open App mode are
+  unchanged.
+- Regression coverage rejects a return of `Browser Forward` or `Browser Back`
+  as the action-menu title.
+- The focused correction passed the full gate at
+  `build/check-20260729-222654` before the version/documentation bump.
+- The final v1.5.4 build-27 gate passed at
+  `build/check-20260729-223620`.
+- `docs/RELEASE_NOTES_v1.5.4.md` contains the candidate release notes.
+- Commit and build the signed universal DMG from this tested state. Do not
+  rewrite the published v1.5.3 tag or assets.
+
+## v1.5.3 released state
+
+- v1.5.3 build 26 was published from commit `4380dcd`.
+- Annotated tag `v1.5.3` and `origin/main` resolve to that commit.
+- The Latest non-draft/non-prerelease GitHub Release contains nine verified
+  signed assets and the public CHANGELOG includes the v1.5.3 section.
+- Installed v1.5.3 Save → Close → relaunch persistence passed with an isolated
+  schema-16 config; the user's original configuration hash remained unchanged.
 - Mouse Mappings uses the selected five-card geometry:
   Horizontal Thumb Wheel top-centre; Middle and Back above; Forward and Gesture
   below; the mouse and teal leaders remain centred.
@@ -155,5 +170,5 @@ Read `TRUE_MOUSE_PROFILE_PLAN.md` before changing this model.
 | Preview frame injection | `tools/PreviewMain.swift` |
 | Responsive fixture matrix | `tools/render-previews.sh` |
 | Full verification | `tools/check.sh` |
-| Release notes | `docs/RELEASE_NOTES_v1.5.3.md` |
+| Release notes | `docs/RELEASE_NOTES_v1.5.4.md` |
 | v1.6 design boundary | `docs/TRUE_MOUSE_PROFILE_PLAN.md` |
