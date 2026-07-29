@@ -24,8 +24,18 @@ Updated 2026-07-29 for the v1.5.4 corrective DMG handover.
 - The final v1.5.4 build-27 gate passed at
   `build/check-20260729-223620`.
 - `docs/RELEASE_NOTES_v1.5.4.md` contains the candidate release notes.
-- Commit and build the signed universal DMG from this tested state. Do not
-  rewrite the published v1.5.3 tag or assets.
+- Release source commit: `e3f892b`.
+- Signed universal DMG:
+  `releases/Klik-PRO-v1.5.4-macos-universal.dmg`.
+- DMG SHA-256:
+  `e072fc0d29b0cb2be607bffb820587a320c6fe9bf41c9812b41ea97b78b1bd4f`.
+- ZIP SHA-256:
+  `743f9d207c23b0fe34ffc472ace56102a74dabd4fe54d5bd568d5437c62f851c`.
+- The DMG, ZIP, and authenticated installer checksum manifests and Ed25519
+  signatures were verified. Both embedded executables are `x86_64 arm64`, and
+  the extracted app passed deep strict code-signature validation.
+- v1.5.4 was not installed, tagged, pushed, or published. Do not rewrite the
+  published v1.5.3 tag or assets.
 
 ## v1.5.3 released state
 
