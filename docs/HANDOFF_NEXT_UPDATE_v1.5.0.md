@@ -4,8 +4,8 @@ Updated 2026-07-29 for the final v1.5.4 release.
 
 ## Released baseline
 
-- Current public release: **v1.5.3 build 26**.
-- Release tag: `v1.5.3`.
+- Current public release: **v1.5.4 build 27**.
+- Release tag: `v1.5.4`.
 - Installed app at handoff: **v1.5.3 build 26**.
 - Current local branch: `codex/v1.5.3-header-save-layout`.
 
@@ -25,6 +25,11 @@ Updated 2026-07-29 for the final v1.5.4 release.
 - The final v1.5.4 build-27 gate passed at
   `build/check-20260729-234234`.
 - `docs/RELEASE_NOTES_v1.5.4.md` contains the final release notes.
+- Release source commit: `f737df4`.
+- Annotated tag `v1.5.4` resolves to `f737df4` and was pushed with the release
+  source to `origin/main`.
+- Public release:
+  `https://github.com/AminudinMurad/klik-pro/releases/tag/v1.5.4`.
 - Signed universal DMG:
   `releases/Klik-PRO-v1.5.4-macos-universal.dmg`.
 - DMG SHA-256:
@@ -36,6 +41,9 @@ Updated 2026-07-29 for the final v1.5.4 release.
 - The DMG, ZIP, and authenticated installer checksum manifests and Ed25519
   signatures were verified. Both embedded executables are `x86_64 arm64`, and
   the extracted app passed deep strict code-signature validation.
+- The non-draft, non-prerelease GitHub Release is marked Latest and contains
+  exactly nine assets. Every GitHub server-side digest matched the local file;
+  a fresh public download passed all three checksums and Ed25519 signatures.
 - Do not rewrite the published v1.5.3 tag or assets.
 
 ## v1.5.3 released state
