@@ -103,7 +103,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 for command_name in \
-    curl ssh-keygen shasum hdiutil plutil codesign lipo ditto xattr \
+    curl ssh-keygen shasum hdiutil plutil codesign lipo ditto xattr cmp \
     pgrep pkill osascript launchctl open
 do
     require_command "$command_name"
@@ -276,6 +276,20 @@ plist_value() {
     plutil -extract "$2" raw -o - "$1/Contents/Info.plist"
 }
 
+verify_executable_identity() {
+    local source_bundle="$1"
+    local candidate_bundle="$2"
+    local candidate_label="$3"
+    local relative_path
+    for relative_path in \
+        "Contents/MacOS/Klik PRO" \
+        "Contents/Helpers/Klik PRO Helper.app/Contents/MacOS/klik-pro-input"
+    do
+        cmp -s "$source_bundle/$relative_path" "$candidate_bundle/$relative_path" \
+            || fail "$candidate_label executable does not exactly match the authenticated DMG: $relative_path"
+    done
+}
+
 [[ "$(plist_value "$source_app" CFBundleIdentifier)" == "$EXPECTED_APP_IDENTIFIER" ]] \
     || fail "Unexpected main-app bundle identifier"
 [[ "$(plist_value "$source_helper" CFBundleIdentifier)" == "$EXPECTED_HELPER_IDENTIFIER" ]] \
@@ -344,6 +358,7 @@ run_privileged rm -rf "$stage_path" "$backup_path"
 run_privileged ditto --norsrc --noqtn "$source_app" "$stage_path"
 run_privileged codesign --verify --deep --strict --verbose=2 "$stage_path" >/dev/null 2>&1 \
     || fail "Staged app failed code-signature verification"
+verify_executable_identity "$source_app" "$stage_path" "Staged app"
 run_privileged xattr -dr com.apple.quarantine "$stage_path"
 
 # Quit the settings app before its bundle is replaced. The TERM fallback is used only
@@ -386,6 +401,7 @@ if ! run_privileged codesign --verify --deep --strict --verbose=2 "$destination_
     fi
     fail "Installed app verification failed; the previous copy was restored"
 fi
+verify_executable_identity "$source_app" "$destination_app" "Installed app"
 
 if [[ -e "$backup_path" ]]; then
     run_privileged rm -rf "$backup_path"

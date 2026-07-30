@@ -28,9 +28,10 @@ Before changing `/Applications`, the installer verifies the checksum manifest wi
 Klik PRO's dedicated Ed25519 release key, validates the DMG checksum and structure,
 checks the main and helper bundle identifiers, release versions, universal
 architectures, and code-signature integrity, and asks for confirmation before
-removing quarantine. It stages the new app and keeps the existing app as a temporary
-rollback copy until post-install verification succeeds. Configuration and logs remain
-untouched. The release-key fingerprint is:
+removing quarantine. It also requires both staged and installed executables to
+match the authenticated DMG byte for byte. The installer keeps the existing app as
+a temporary rollback copy until every post-install check succeeds. Configuration
+and logs remain untouched. The release-key fingerprint is:
 
 ```text
 SHA256:Evg4ITqpPJY/aIT48Zv9Cp3psQfo977uCz/35a2k79E

@@ -41,8 +41,10 @@ disk-icon Save, Close, and Power Off actions, and the removed action footer give
 the mapping slide more vertical breathing room. Updates now lives in Settings >
 About. v1.5.4 corrects that dashboard with fully visible Browser arrow values,
 removes the misleading status badge from Horizontal Thumb Wheel, and restores
-mapping-specific colour and depth to the carousel. This is a presentation release
-only; the sender-aware,
+mapping-specific colour and depth to the carousel. v1.5.5 hardens authenticated
+upgrades by requiring the staged and installed main/helper executables to match
+the verified DMG byte for byte before the rollback copy is discarded. The
+sender-aware,
 mouse-independent profile work remains reserved for v1.6.
 
 Klik PRO remaps supported middle, forward, back, and Gesture mouse-button events to
@@ -63,6 +65,19 @@ appear only while its Accessibility input tap is operational. Optional native-ap
 launchers add separate icons, user-recorded hotkeys for ChatGPT / Codex, Claude, and
 Gemini, and temporary mouse-button launch actions where supported. Actual button and
 wheel support varies by hardware.
+
+## v1.5.5 highlights
+
+- **Exact executable identity after installation** — the Terminal installer
+  compares the main app and nested helper against the authenticated DMG after
+  staging and again after activation.
+- **Fail-safe upgrade rollback** — an executable mismatch aborts the upgrade
+  while the previous app is still available for automatic restoration.
+- **Corrected mapping dashboard retained** — Horizontal Thumb Wheel has no
+  misleading `OK`, Browser ←/→ values fit, and mapping slides keep their colour
+  wash, gradients, highlights, and card depth.
+- **Runtime behavior remains stable** — configuration, mouse routing, App
+  Profiles, responsive sizes, and the v1.6 boundary are unchanged.
 
 ## v1.5.4 highlights
 
@@ -250,10 +265,10 @@ Once unlocked, point new App Profiles at a durable data folder so their logins s
 
 ## Install (pre-built release)
 
-The current release is **Klik PRO v1.5.4 (build 27)**, provided as one universal
+The current release is **Klik PRO v1.5.5 (build 28)**, provided as one universal
 macOS app for Apple Silicon and Intel Macs. The DMG is the recommended download;
 the ZIP contains the same app as an alternative.
-**[Download Klik PRO v1.5.4](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.5.4).**
+**[Download Klik PRO v1.5.5](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.5.5).**
 
 > [!IMPORTANT]
 > **Since version 1.5.0, fresh/reset defaults are quieter.** Existing setups keep their saved
@@ -693,7 +708,7 @@ setups Klik PRO has been tested against:
 | | |
 |---|---|
 | macOS | 26.5.2 (build 25F84) |
-| Klik PRO | v1.5.4 (build 27), universal Apple Silicon + Intel build |
+| Klik PRO | v1.5.5 (build 28), universal Apple Silicon + Intel build |
 | Primary mouse | Logitech MX Master 3 (Mac edition), firmware `MPM19.01_0015`, connected over Bluetooth (BLE) |
 | Additional tested mouse | Logi M650, firmware `RBM16.10_0014` |
 | Vendor software / driver | None — no mouse driver or manufacturer software installed |

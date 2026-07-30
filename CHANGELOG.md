@@ -2,6 +2,20 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.5.5
+
+- **Exact installed-executable verification.** The authenticated Terminal
+  installer now compares both the main app and nested helper executable against
+  the verified DMG after staging and again after activation.
+- **Rollback remains fail-safe.** Any executable mismatch aborts installation
+  before the previous app is discarded, allowing the existing rollback path to
+  restore the prior bundle.
+- **Corrected dashboard retained.** Horizontal Thumb Wheel remains free of the
+  misleading `OK` badge, Browser ←/→ values remain fully visible, and mapping
+  colour washes, gradients, highlights, and card shadows remain intact.
+- Configuration schema, mouse routing, responsive sizes, App Profiles, and the
+  v1.6 mouse-independent profile boundary are unchanged.
+
 ## 1.5.4
 
 - **Consistent shortcut action menus.** Forward and Back now use the same

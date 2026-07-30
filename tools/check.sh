@@ -90,8 +90,8 @@ for product_plist in \
 do
   product_version="$(plutil -extract CFBundleShortVersionString raw -o - "$product_plist")"
   product_build="$(plutil -extract CFBundleVersion raw -o - "$product_plist")"
-  if [[ "$product_version" != "1.5.4" || "$product_build" != "27" ]]; then
-    echo "$(basename "$product_plist") must remain version 1.5.4 build 27; found version $product_version build $product_build" >&2
+  if [[ "$product_version" != "1.5.5" || "$product_build" != "28" ]]; then
+    echo "$(basename "$product_plist") must remain version 1.5.5 build 28; found version $product_version build $product_build" >&2
     exit 1
   fi
 done
@@ -605,6 +605,10 @@ grep -q 'codesign --verify --deep --strict' "$ROOT/install.sh"
 grep -q 'EXPECTED_HELPER_IDENTIFIER="local.klik-pro.helper"' "$ROOT/install.sh"
 grep -q 'xattr -dr com.apple.quarantine "$stage_path"' "$ROOT/install.sh"
 grep -q 'Keeping the existing app as a temporary rollback copy' "$ROOT/install.sh"
+grep -q 'verify_executable_identity "$source_app" "$stage_path" "Staged app"' \
+  "$ROOT/install.sh"
+grep -q 'verify_executable_identity "$source_app" "$destination_app" "Installed app"' \
+  "$ROOT/install.sh"
 if sed '/^[[:space:]]*#/d' "$ROOT/install.sh" \
   | grep -Eq 'curl[^#]*\|[[:space:]]*(ba)?sh'; then
   echo "Installer must never pipe a network response into a shell" >&2
@@ -1684,7 +1688,7 @@ grep -q 'responsive-advanced-16.png' "$ROOT/tools/render-previews.sh"
 require_source_literal \
   'styleMask: [.titled, .closable, .miniaturizable, .resizable]' \
   "$ROOT/Sources/KlikProApp.swift" \
-  "The v1.5.4 dashboard window must remain normally resizable"
+  "The v1.5.5 dashboard window must remain normally resizable"
 require_source_literal \
   'static let minimumContentSize = NSSize(width: 940, height: 738)' \
   "$ROOT/Sources/KlikProApp.swift" \
