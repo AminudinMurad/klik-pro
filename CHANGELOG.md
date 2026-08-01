@@ -2,6 +2,32 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.5.6
+
+- **One stable dashboard width.** Every MacBook preset now keeps the proven
+  940-point width instead of spreading cards and controls across larger screens.
+- **Height-only Best Fit choices.** The existing 13-inch M1, 13-inch M2+,
+  14-inch, 15-inch, and 16-inch choices now apply `940×770`, `940×820`,
+  `940×860`, `940×900`, and `940×960` outer frames respectively.
+- **Vertical resizing only.** Manual resizing remains available from 770 to 960
+  points high, while both minimum and maximum width stay fixed at 940 points.
+- **Clearer Settings language.** Best Fit is now labelled Dashboard Height and
+  describes the fixed width, height presets, and custom-height state directly.
+- **Compact thumb-wheel callout.** The Mappings card moves upward and now shows
+  its toggle, title, and a small globe menu for quickly enabling browsers. The
+  full browser controls remain in Settings.
+- **Centred mouse artwork.** The device image is centred both horizontally and
+  vertically inside the mapping slider, and the four surrounding control cards
+  move upward into a vertically centred group. The thumb-wheel callout is now a
+  clean straight line without the previous kink at the card border.
+- **Positional slide dots.** The current mapping name now occupies its sequence
+  position: slide one has two dots on the right, slide two has one on each side,
+  and slide three has two on the left.
+- Existing saved wider frames migrate to the fixed width while retaining their
+  valid height and approximate horizontal centre.
+- Mouse routing, configuration schema, App Profiles, and the v1.6
+  mouse-independent profile boundary are unchanged.
+
 ## 1.5.5
 
 - **Exact installed-executable verification.** The authenticated Terminal

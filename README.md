@@ -24,9 +24,9 @@ help support continued development and mouse/browser compatibility testing:**
 
 </div>
 
-Klik PRO is no longer limited to ChatGPT / Codex and Claude. The v1.5.3 release
-keeps the compact 13-inch dashboard as its minimum and adds a resizable workspace
-with five Best Fit sizes, so longer app lists can use more of a larger screen. It
+Klik PRO is no longer limited to ChatGPT / Codex and Claude. The v1.5.6 dashboard
+keeps the compact 940-point width on every MacBook and offers five height choices,
+so longer app lists can use more vertical space without stretching the layout. It
 also includes the expanded installed-app catalogue introduced in v1.5.0 and the
 reduced background CPU use introduced in v1.5.1.
 Supported tools include Gemini, Canva, Zoom, Spotify, browsers, editors, and work
@@ -43,7 +43,9 @@ About. v1.5.4 corrects that dashboard with fully visible Browser arrow values,
 removes the misleading status badge from Horizontal Thumb Wheel, and restores
 mapping-specific colour and depth to the carousel. v1.5.5 hardens authenticated
 upgrades by requiring the staged and installed main/helper executables to match
-the verified DMG byte for byte before the rollback copy is discarded. The
+the verified DMG byte for byte before the rollback copy is discarded. v1.5.6
+locks manual resizing to the same 940-point width and renames Best Fit to
+Dashboard Height. The
 sender-aware,
 mouse-independent profile work remains reserved for v1.6.
 
@@ -65,6 +67,24 @@ appear only while its Accessibility input tap is operational. Optional native-ap
 launchers add separate icons, user-recorded hotkeys for ChatGPT / Codex, Claude, and
 Gemini, and temporary mouse-button launch actions where supported. Actual button and
 wheel support varies by hardware.
+
+## v1.5.6 highlights
+
+- **Fixed 940-point width** — every MacBook choice preserves the compact,
+  readable 13-inch dashboard width.
+- **Height-only MacBook choices** — 13-inch M1, 13-inch M2+, 14-inch, 15-inch,
+  and 16-inch now apply heights of 770, 820, 860, 900, and 960 points.
+- **Vertical manual resizing** — width remains locked while height can be
+  adjusted continuously across the supported range.
+- **Dashboard Height settings** — clearer wording replaces screen-size guidance
+  and reports non-preset heights as Custom height.
+- **Smaller thumb-wheel card** — Mappings keeps the Horizontal Thumb Wheel toggle
+  and title compact, with a small globe menu for quickly enabling browsers.
+- **Centred device artwork** — the mouse now sits on the horizontal and vertical
+  centre of the mapping slider, with the four surrounding cards raised into a
+  vertically centred group.
+- **Sequence-aware slide dots** — dots now sit before or after the current mapping
+  name to show its actual first, middle, or final position.
 
 ## v1.5.5 highlights
 
@@ -107,8 +127,8 @@ wheel support varies by hardware.
   status and its four actions use one aligned row instead of scattered controls.
 - **Visual Best Fit tiles** — the five MacBook targets show their exact Klik PRO
   outer-frame sizes, active state, and resizable-window guidance at a glance.
-- **Responsive range retained** — the 940×770 minimum, five Best Fit choices,
-  remembered frame, and 1280×960 maximum are unchanged.
+- **Responsive range retained in v1.5.3** — the 940×770 minimum, five Best Fit
+  choices, remembered frame, and then-current 1280×960 maximum were unchanged.
 - **v1.6 stays separate** — no sender-aware device routing or mouse-independent
   profile behavior is included.
 
@@ -185,9 +205,10 @@ Mappings:
 </p>
 
 **Settings** — launch-at-login, menu-icon visibility, update-check, guided
-Accessibility setup/reset controls, and five optional Dashboard Best Fit sizes:
+Accessibility setup/reset controls, and five Dashboard Height choices that keep
+the width fixed while adding vertical list space:
 
-<img src="assets/screenshot-settings.png?v=1.5.3-b26" width="940" alt="Klik PRO v1.5.3 Settings tab with visual Best Fit MacBook tiles, compact Permissions actions, and Updates inside About">
+<img src="assets/screenshot-settings.png?v=1.5.6-b29" width="940" alt="Klik PRO v1.5.6 Settings tab with five fixed-width Dashboard Height MacBook choices, compact Permissions actions, and Updates inside About">
 
 **Advanced — durable data folder (lock-gated).** The Advanced tab is locked by default. Its options change where App Profile data is stored on disk, so clicking the padlock shows a risk confirmation before anything unlocks:
 
@@ -265,10 +286,10 @@ Once unlocked, point new App Profiles at a durable data folder so their logins s
 
 ## Install (pre-built release)
 
-The current release is **Klik PRO v1.5.5 (build 28)**, provided as one universal
+The current release is **Klik PRO v1.5.6 (build 29)**, provided as one universal
 macOS app for Apple Silicon and Intel Macs. The DMG is the recommended download;
 the ZIP contains the same app as an alternative.
-**[Download Klik PRO v1.5.5](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.5.5).**
+**[Download Klik PRO v1.5.6](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.5.6).**
 
 > [!IMPORTANT]
 > **Since version 1.5.0, fresh/reset defaults are quieter.** Existing setups keep their saved
@@ -708,7 +729,7 @@ setups Klik PRO has been tested against:
 | | |
 |---|---|
 | macOS | 26.5.2 (build 25F84) |
-| Klik PRO | v1.5.5 (build 28), universal Apple Silicon + Intel build |
+| Klik PRO | v1.5.6 (build 29), universal Apple Silicon + Intel build |
 | Primary mouse | Logitech MX Master 3 (Mac edition), firmware `MPM19.01_0015`, connected over Bluetooth (BLE) |
 | Additional tested mouse | Logi M650, firmware `RBM16.10_0014` |
 | Vendor software / driver | None — no mouse driver or manufacturer software installed |
