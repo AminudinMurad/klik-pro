@@ -7426,6 +7426,7 @@ final class ToggleView: NSView {
             guard let self else { return }
             var removed = 0
             var failed = 0
+            var failedPaths: [URL] = []
             var working = config
             for lo in leftovers {
                 do {
@@ -7434,6 +7435,7 @@ final class ToggleView: NSView {
                     removed += 1
                 } catch {
                     failed += 1
+                    failedPaths.append(lo.url)
                 }
             }
             for orphan in orphans {
@@ -7443,9 +7445,18 @@ final class ToggleView: NSView {
                         target: target, config: working, mode: mode
                     )
                     working = result.config
-                    if result.allRemoved { removed += 1 } else { failed += 1 }
+                    if result.allRemoved {
+                        removed += 1
+                    } else {
+                        failed += 1
+                        failedPaths.append(contentsOf: result.perArtifact.compactMap { artifact in
+                            if case .failed = artifact.outcome { return artifact.url }
+                            return nil
+                        })
+                    }
                 } catch {
                     failed += 1
+                    failedPaths.append(contentsOf: orphan.dataPaths)
                 }
             }
             for path in staleDockPaths {
@@ -7455,6 +7466,7 @@ final class ToggleView: NSView {
                     removed += 1
                 } else {
                     failed += 1
+                    failedPaths.append(URL(fileURLWithPath: path, isDirectory: true))
                 }
             }
             _ = applySavedConfig()
@@ -7468,7 +7480,9 @@ final class ToggleView: NSView {
                     failed == 0
                         ? "\(removed) leftover item(s) \(verb)."
                         : "\(removed) \(verb); \(failed) could not be removed and remain on disk — Klik PRO either could not verify them as its own or the disk refused. Check those paths in Finder, then scan again.",
-                    color: failed == 0 ? KlikProBrand.green : .systemOrange
+                    color: failed == 0 ? KlikProBrand.green : .systemOrange,
+                    revealPaths: failedPaths,
+                    onReveal: Self.revealInFinder
                 )
                 self.refreshAppProfileHealth()
                 self.needsDisplay = true

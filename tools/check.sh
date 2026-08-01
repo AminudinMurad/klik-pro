@@ -90,8 +90,8 @@ for product_plist in \
 do
   product_version="$(plutil -extract CFBundleShortVersionString raw -o - "$product_plist")"
   product_build="$(plutil -extract CFBundleVersion raw -o - "$product_plist")"
-  if [[ "$product_version" != "1.5.6" || "$product_build" != "29" ]]; then
-    echo "$(basename "$product_plist") must remain version 1.5.6 build 29; found version $product_version build $product_build" >&2
+  if [[ "$product_version" != "1.5.7" || "$product_build" != "30" ]]; then
+    echo "$(basename "$product_plist") must remain version 1.5.7 build 30; found version $product_version build $product_build" >&2
     exit 1
   fi
 done

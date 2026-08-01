@@ -2,6 +2,11 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.5.7
+
+- **Reveal remaining data in Finder.** Deep Scan cleanup now provides a Finder
+  action when items remain on disk after a partial Trash or permanent-delete operation.
+
 ## 1.5.6
 
 - **One stable dashboard width.** Every MacBook preset now keeps the proven
