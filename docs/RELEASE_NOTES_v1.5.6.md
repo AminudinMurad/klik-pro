@@ -23,6 +23,8 @@ MacBook by making responsiveness vertical-only.
 - Mapping-slide dots now surround the current profile name according to sequence:
   two on the right for the first slide, one on each side for the second, and two
   on the left for the third.
+- Dashboard Height cards no longer flash a blue native radio-button circle when
+  pressed; their custom green selection and accessible radio behavior remain.
 - A previously saved wider frame is normalized to 940 points while preserving
   its valid height and approximate horizontal centre.
 - Mouse routing, saved configuration, App Profiles, authenticated installation,

@@ -426,7 +426,7 @@ grep -q 'defaultCandidatePaths: \[\]' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'advancedTabRect' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'final class AdvancedSettingsContentView' "$ROOT/Sources/AppProfilesUI.swift"
 grep -q 'let bottomCardHeight = bounds.height - 196' "$ROOT/Sources/AppProfilesUI.swift"
-grep -q 'statusField.frame = NSRect(x: 28, y: 520, width: width - 56, height: 30)' \
+grep -q 'statusField.frame = NSRect(x: 28, y: 520, width: width - 260, height: 30)' \
   "$ROOT/Sources/AppProfilesUI.swift"
 grep -q 'chooseButton.frame = NSRect(x: 28, y: 140, width: 132, height: 28)' \
   "$ROOT/Sources/AppProfilesUI.swift"
@@ -1756,6 +1756,10 @@ require_source_literal \
   'setButtonType(.radio)' \
   "$ROOT/Sources/KlikProApp.swift" \
   "Each visual Best Fit tile must retain radio-button semantics"
+require_source_literal \
+  '(cell as? NSButtonCell)?.highlightsBy = []' \
+  "$ROOT/Sources/KlikProApp.swift" \
+  "Best Fit tiles must suppress AppKit's blue radio press artwork"
 require_source_literal \
   'private func drawMacBookIcon(' \
   "$ROOT/Sources/KlikProApp.swift" \

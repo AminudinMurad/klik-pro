@@ -23,6 +23,9 @@ All notable changes to Klik PRO are documented here.
 - **Positional slide dots.** The current mapping name now occupies its sequence
   position: slide one has two dots on the right, slide two has one on each side,
   and slide three has two on the left.
+- **Clean Dashboard Height clicks.** The custom MacBook cards no longer flash
+  AppKit's native blue radio-button artwork when pressed; their green selected,
+  hover, keyboard, and accessibility behavior remains intact.
 - Existing saved wider frames migrate to the fixed width while retaining their
   valid height and approximate horizontal centre.
 - Mouse routing, configuration schema, App Profiles, and the v1.6

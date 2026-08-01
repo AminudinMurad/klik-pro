@@ -3653,6 +3653,10 @@ final class DashboardPresetTileButton: NSButton {
         title = ""
         isBordered = false
         setButtonType(.radio)
+        // The tile draws its own hover, selected, and keyboard-focus states. Disable
+        // AppKit's native radio press highlight, which otherwise flashes as a blue
+        // circle beneath the custom MacBook icon while the mouse is held down.
+        (cell as? NSButtonCell)?.highlightsBy = []
         target = self
         action = #selector(pressed)
         setAccessibilityLabel(preset.controlTitle)
@@ -6108,7 +6112,7 @@ final class ToggleView: NSView {
             self?.confirmDeleteOrphanData(orphan)
         }
         advancedView.onRevealOrphan = { orphan in
-            NSWorkspace.shared.activateFileViewerSelecting(orphan.dataPaths)
+            Self.revealInFinder(orphan.dataPaths)
         }
         contentView.mappingProfilesView.onOpen = { [weak self] instance in
             self?.launchAppProfile(instance)
@@ -7195,7 +7199,12 @@ final class ToggleView: NSView {
                     self.appProfilesView.setInstances(result.config.instances)
                     self.advancedView.setStatus(
                         self.dataRemovalStatusMessage(result, label: statusLabel, applied: applied),
-                        color: result.allRemoved ? KlikProBrand.green : .systemOrange
+                        color: result.allRemoved ? KlikProBrand.green : .systemOrange,
+                        revealPaths: result.perArtifact.compactMap { artifact in
+                            if case .failed = artifact.outcome { return artifact.url }
+                            return nil
+                        },
+                        onReveal: Self.revealInFinder
                     )
                     self.refreshAppProfileHealth()
                 }
@@ -7209,6 +7218,16 @@ final class ToggleView: NSView {
                 DispatchQueue.main.async { self.finishAppProfileLifecycle() }
             }
         }
+    }
+
+    private static func revealInFinder(_ paths: [URL]) {
+        let fileManager = FileManager.default
+        let existing = paths.filter { fileManager.fileExists(atPath: $0.path) }
+        let targets = existing.isEmpty
+            ? paths.map { $0.deletingLastPathComponent() }
+            : existing
+        guard !targets.isEmpty else { return }
+        NSWorkspace.shared.activateFileViewerSelecting(targets)
     }
 
     // MARK: Deep scan for leftovers
