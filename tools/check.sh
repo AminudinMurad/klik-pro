@@ -90,8 +90,8 @@ for product_plist in \
 do
   product_version="$(plutil -extract CFBundleShortVersionString raw -o - "$product_plist")"
   product_build="$(plutil -extract CFBundleVersion raw -o - "$product_plist")"
-  if [[ "$product_version" != "1.5.7" || "$product_build" != "30" ]]; then
-    echo "$(basename "$product_plist") must remain version 1.5.7 build 30; found version $product_version build $product_build" >&2
+  if [[ "$product_version" != "1.5.8" || "$product_build" != "31" ]]; then
+    echo "$(basename "$product_plist") must remain version 1.5.8 build 31; found version $product_version build $product_build" >&2
     exit 1
   fi
 done
@@ -426,7 +426,7 @@ grep -q 'defaultCandidatePaths: \[\]' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'advancedTabRect' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'final class AdvancedSettingsContentView' "$ROOT/Sources/AppProfilesUI.swift"
 grep -q 'let bottomCardHeight = bounds.height - 196' "$ROOT/Sources/AppProfilesUI.swift"
-grep -q 'statusField.frame = NSRect(x: 28, y: 520, width: width - 260, height: 30)' \
+grep -q 'statusField.frame = NSRect(x: 28, y: 520, width: width - 56, height: 30)' \
   "$ROOT/Sources/AppProfilesUI.swift"
 grep -q 'chooseButton.frame = NSRect(x: 28, y: 140, width: 132, height: 28)' \
   "$ROOT/Sources/AppProfilesUI.swift"

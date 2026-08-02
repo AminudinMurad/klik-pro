@@ -2,6 +2,11 @@
 
 All notable changes to Klik PRO are documented here.
 
+## 1.5.8
+
+- **No overlapping cleanup actions.** After an orphaned-data deletion fails,
+  its row now replaces **Delete Data…** with **Reveal in Finder**.
+
 ## 1.5.7
 
 - **Reveal remaining data in Finder.** Deep Scan cleanup now provides a Finder

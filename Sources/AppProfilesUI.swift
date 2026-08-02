@@ -2669,7 +2669,9 @@ final class AdvancedSettingsContentView: NSView {
     private let maintenanceScrollbar: FixedAppCardScrollbarView
 
     private let statusField = NSTextField(wrappingLabelWithString: "")
-    private let revealStatusButton = AppProfileButton(title: "Reveal Remaining in Finder", frame: .zero)
+    /// Paths that survived a cleanup attempt. Their orphan rows offer Finder
+    /// review instead of repeating a delete action that just failed.
+    private var failedRevealPaths: Set<String> = []
 
     var onUnlock: (() -> Void)?
     var onChooseFolder: (() -> Void)?
@@ -2698,8 +2700,7 @@ final class AdvancedSettingsContentView: NSView {
     private var unlockedViews: [NSView] {
         [dataRootLabel, dataRootBody, dataRootValueField, chooseButton, clearButton,
          scanButton, maintenanceLabel, maintenanceBody, maintenanceScroll,
-         maintenanceScrollbar, cleanupLabel, cleanupBody, deepScanButton, statusField,
-         revealStatusButton]
+         maintenanceScrollbar, cleanupLabel, cleanupBody, deepScanButton, statusField]
     }
 
     override var isFlipped: Bool { true }
@@ -2777,14 +2778,10 @@ final class AdvancedSettingsContentView: NSView {
             + "copies, lock files, and data folders from profiles you've removed."
         deepScanButton.onPress = { [weak self] in self?.onDeepScan?() }
 
-        revealStatusButton.frame = NSRect(x: width - 218, y: 518, width: 190, height: 28)
-        revealStatusButton.toolTip = "Show cleanup items that remain on disk in Finder."
-        revealStatusButton.isHidden = true
-
         // Keep transient feedback inside the maintenance card. The card reaches
         // almost to the bottom of this tab, avoiding a detached blank band above
         // the window's fixed Save / Close footer.
-        statusField.frame = NSRect(x: 28, y: 520, width: width - 260, height: 30)
+        statusField.frame = NSRect(x: 28, y: 520, width: width - 56, height: 30)
         statusField.font = .systemFont(ofSize: 12)
         statusField.textColor = .appTextSecondary
 
@@ -2900,19 +2897,10 @@ final class AdvancedSettingsContentView: NSView {
     func setStatus(_ message: String, color: NSColor = .appTextSecondary) {
         statusField.stringValue = message
         statusField.textColor = color
-        revealStatusButton.isHidden = true
     }
 
-    func setStatus(
-        _ message: String,
-        color: NSColor = .appTextSecondary,
-        revealPaths: [URL],
-        onReveal: @escaping ([URL]) -> Void
-    ) {
-        statusField.stringValue = message
-        statusField.textColor = color
-        revealStatusButton.isHidden = revealPaths.isEmpty
-        revealStatusButton.onPress = { onReveal(revealPaths) }
+    func setFailedRevealPaths(_ paths: [URL]) {
+        failedRevealPaths = Set(paths.map { $0.standardizedFileURL.path })
     }
 
     func setMaintenanceInstances(
@@ -2972,10 +2960,14 @@ final class AdvancedSettingsContentView: NSView {
             let path = orphan.dataPaths.first?.path ?? orphan.instanceID.uuidString
             let size = ByteCountFormatter.string(fromByteCount: orphan.sizeBytes, countStyle: .file)
             let detail = "\(orphan.state.displayName) · \(size) · \(path)"
-            let primary: (title: String, action: () -> Void)? = orphan.state == .needsManualReview
+            let revealFailedOrphan = orphan.dataPaths.contains {
+                failedRevealPaths.contains($0.standardizedFileURL.path)
+            }
+            let primary: (title: String, action: () -> Void)? =
+                orphan.state == .needsManualReview || revealFailedOrphan
                 ? ("Reveal in Finder", { [weak self] in self?.onRevealOrphan?(orphan) })
                 : nil
-            let delete: (title: String, action: () -> Void)? = orphan.state == .orphanedData
+            let delete: (title: String, action: () -> Void)? = orphan.state == .orphanedData && !revealFailedOrphan
                 ? ("Delete Data…", { [weak self] in self?.onDeleteOrphan?(orphan) })
                 : nil
             addMaintenanceRow(

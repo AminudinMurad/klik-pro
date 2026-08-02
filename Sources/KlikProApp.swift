@@ -7179,6 +7179,7 @@ final class ToggleView: NSView {
         }
         guard beginAppProfileLifecycle() else { return }
         let currentConfig = persistedConfig
+        advancedView.setFailedRevealPaths([])
         advancedView.setStatus(
             mode == .trash ? "Moving \(statusLabel) data to Trash…" : "Deleting \(statusLabel) data…"
         )
@@ -7197,14 +7198,13 @@ final class ToggleView: NSView {
                     self.config = result.config
                     self.persistedConfig = result.config
                     self.appProfilesView.setInstances(result.config.instances)
+                    self.advancedView.setFailedRevealPaths(result.perArtifact.compactMap { artifact in
+                        if case .failed = artifact.outcome { return artifact.url }
+                        return nil
+                    })
                     self.advancedView.setStatus(
                         self.dataRemovalStatusMessage(result, label: statusLabel, applied: applied),
-                        color: result.allRemoved ? KlikProBrand.green : .systemOrange,
-                        revealPaths: result.perArtifact.compactMap { artifact in
-                            if case .failed = artifact.outcome { return artifact.url }
-                            return nil
-                        },
-                        onReveal: Self.revealInFinder
+                        color: result.allRemoved ? KlikProBrand.green : .systemOrange
                     )
                     self.refreshAppProfileHealth()
                 }
@@ -7421,6 +7421,7 @@ final class ToggleView: NSView {
         config: KlikProConfig
     ) {
         guard beginAppProfileLifecycle() else { return }
+        advancedView.setFailedRevealPaths([])
         advancedView.setStatus(mode == .trash ? "Moving leftovers to Trash…" : "Deleting leftovers…")
         appProfileQueue.async { [weak self] in
             guard let self else { return }
@@ -7475,14 +7476,13 @@ final class ToggleView: NSView {
                 self.config = working
                 self.persistedConfig = working
                 self.appProfilesView.setInstances(working.instances)
+                self.advancedView.setFailedRevealPaths(failedPaths)
                 let verb = mode == .trash ? "moved to Trash" : "deleted"
                 self.advancedView.setStatus(
                     failed == 0
                         ? "\(removed) leftover item(s) \(verb)."
                         : "\(removed) \(verb); \(failed) could not be removed and remain on disk — Klik PRO either could not verify them as its own or the disk refused. Check those paths in Finder, then scan again.",
-                    color: failed == 0 ? KlikProBrand.green : .systemOrange,
-                    revealPaths: failedPaths,
-                    onReveal: Self.revealInFinder
+                    color: failed == 0 ? KlikProBrand.green : .systemOrange
                 )
                 self.refreshAppProfileHealth()
                 self.needsDisplay = true
