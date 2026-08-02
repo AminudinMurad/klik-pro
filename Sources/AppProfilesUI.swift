@@ -2669,6 +2669,9 @@ final class AdvancedSettingsContentView: NSView {
     private let maintenanceScrollbar: FixedAppCardScrollbarView
 
     private let statusField = NSTextField(wrappingLabelWithString: "")
+    /// Paths that survived a cleanup attempt. Their orphan rows offer Finder
+    /// review instead of repeating a delete action that just failed.
+    private var failedRevealPaths: Set<String> = []
 
     var onUnlock: (() -> Void)?
     var onChooseFolder: (() -> Void)?
@@ -2896,6 +2899,10 @@ final class AdvancedSettingsContentView: NSView {
         statusField.textColor = color
     }
 
+    func setFailedRevealPaths(_ paths: [URL]) {
+        failedRevealPaths = Set(paths.map { $0.standardizedFileURL.path })
+    }
+
     func setMaintenanceInstances(
         _ instances: [AppProfileInstance],
         health: [UUID: AppProfileMaintenanceHealth],
@@ -2953,10 +2960,14 @@ final class AdvancedSettingsContentView: NSView {
             let path = orphan.dataPaths.first?.path ?? orphan.instanceID.uuidString
             let size = ByteCountFormatter.string(fromByteCount: orphan.sizeBytes, countStyle: .file)
             let detail = "\(orphan.state.displayName) · \(size) · \(path)"
-            let primary: (title: String, action: () -> Void)? = orphan.state == .needsManualReview
+            let revealFailedOrphan = orphan.dataPaths.contains {
+                failedRevealPaths.contains($0.standardizedFileURL.path)
+            }
+            let primary: (title: String, action: () -> Void)? =
+                orphan.state == .needsManualReview || revealFailedOrphan
                 ? ("Reveal in Finder", { [weak self] in self?.onRevealOrphan?(orphan) })
                 : nil
-            let delete: (title: String, action: () -> Void)? = orphan.state == .orphanedData
+            let delete: (title: String, action: () -> Void)? = orphan.state == .orphanedData && !revealFailedOrphan
                 ? ("Delete Data…", { [weak self] in self?.onDeleteOrphan?(orphan) })
                 : nil
             addMaintenanceRow(

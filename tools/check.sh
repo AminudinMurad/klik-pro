@@ -90,8 +90,8 @@ for product_plist in \
 do
   product_version="$(plutil -extract CFBundleShortVersionString raw -o - "$product_plist")"
   product_build="$(plutil -extract CFBundleVersion raw -o - "$product_plist")"
-  if [[ "$product_version" != "1.5.5" || "$product_build" != "28" ]]; then
-    echo "$(basename "$product_plist") must remain version 1.5.5 build 28; found version $product_version build $product_build" >&2
+  if [[ "$product_version" != "1.5.8" || "$product_build" != "31" ]]; then
+    echo "$(basename "$product_plist") must remain version 1.5.8 build 31; found version $product_version build $product_build" >&2
     exit 1
   fi
 done
@@ -1245,7 +1245,26 @@ grep -Eq 'static let mappingBottomCard += NSRect\(x: 0, y: 388,' \
 grep -q 'scrollView.frame = NSRect(x: 34, y: 82, width: 872, height: 636)' \
   "$ROOT/Sources/KlikProApp.swift"
 grep -q 'func applyCompactCardLayout()' "$ROOT/Sources/KlikProApp.swift"
-grep -q 'static let thumbWheelCard = NSRect(x: 296, y: 48, width: 280, height: 82)' \
+grep -q 'static let thumbWheelCard = NSRect(x: 304, y: 30, width: 264, height: 44)' \
+  "$ROOT/Sources/KlikProApp.swift"
+grep -q 'static let middleButtonCard = NSRect(x: 44, y: 81, width: 250, height: 82)' \
+  "$ROOT/Sources/KlikProApp.swift"
+grep -q 'static let backButtonCard = NSRect(x: 578, y: 81, width: 250, height: 82)' \
+  "$ROOT/Sources/KlikProApp.swift"
+grep -q 'static let forwardButtonCard = NSRect(x: 44, y: 211, width: 250, height: 82)' \
+  "$ROOT/Sources/KlikProApp.swift"
+grep -q 'static let gestureButtonCard = NSRect(x: 578, y: 211, width: 250, height: 82)' \
+  "$ROOT/Sources/KlikProApp.swift"
+grep -q 'drawCompactMappingCard(in: card)' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'y: card.midY - drawHeight / 2' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'thumbWheelBrowsers.useCompactIconPresentation()' \
+  "$ROOT/Sources/KlikProApp.swift"
+grep -q 'frame: NSRect(x: thumbCard.maxX - 44, y: thumbCard.minY + 10, width: 26, height: 24)' \
+  "$ROOT/Sources/KlikProApp.swift"
+grep -q 'if c.title != "Horizontal Thumb Wheel"' \
+  "$ROOT/Sources/KlikProApp.swift"
+grep -q 'let leftDotCount = viewedIndex' "$ROOT/Sources/KlikProApp.swift"
+grep -q 'let rightDotCount = profileIDs.count - viewedIndex - 1' \
   "$ROOT/Sources/KlikProApp.swift"
 grep -q 'let cx = pill.minX + hpad' "$ROOT/Sources/KlikProApp.swift"
 grep -q 'scrollView.hasVerticalScroller = false' "$ROOT/Sources/KlikProApp.swift"
@@ -1688,15 +1707,27 @@ grep -q 'responsive-advanced-16.png' "$ROOT/tools/render-previews.sh"
 require_source_literal \
   'styleMask: [.titled, .closable, .miniaturizable, .resizable]' \
   "$ROOT/Sources/KlikProApp.swift" \
-  "The v1.5.5 dashboard window must remain normally resizable"
+  "The v1.5.6 dashboard window must remain vertically resizable"
 require_source_literal \
   'static let minimumContentSize = NSSize(width: 940, height: 738)' \
   "$ROOT/Sources/KlikProApp.swift" \
   "The released 13-inch content size must remain the responsive minimum"
 require_source_literal \
-  'static let maximumContentSize = NSSize(width: 1_280, height: 928)' \
+  'static let maximumContentSize = NSSize(width: 940, height: 928)' \
   "$ROOT/Sources/KlikProApp.swift" \
-  "The 16-inch Best Fit content size must remain the responsive maximum"
+  "The dashboard maximum must retain the fixed width and 16-inch height"
+for fixedWidthPreset in \
+  'case .air13M1: return NSSize(width: 940, height: 770)' \
+  'case .air13Modern: return NSSize(width: 940, height: 820)' \
+  'case .pro14: return NSSize(width: 940, height: 860)' \
+  'case .air15: return NSSize(width: 940, height: 900)' \
+  'case .pro16: return NSSize(width: 940, height: 960)'
+do
+  require_source_literal \
+    "$fixedWidthPreset" \
+    "$ROOT/Sources/KlikProApp.swift" \
+    "Every Dashboard Height preset must retain the fixed 940-point width"
+done
 require_source_literal \
   'private func persistWindowFrame()' \
   "$ROOT/Sources/KlikProApp.swift" \
@@ -1718,15 +1749,23 @@ require_source_literal \
   "$ROOT/Sources/KlikProApp.swift" \
   "The visual Best Fit panel must remain a radio group"
 require_source_literal \
+  'setAccessibilityLabel("Dashboard Height")' \
+  "$ROOT/Sources/KlikProApp.swift" \
+  "The fixed-width presets must use the Dashboard Height label"
+require_source_literal \
   'setButtonType(.radio)' \
   "$ROOT/Sources/KlikProApp.swift" \
   "Each visual Best Fit tile must retain radio-button semantics"
+require_source_literal \
+  '(cell as? NSButtonCell)?.highlightsBy = []' \
+  "$ROOT/Sources/KlikProApp.swift" \
+  "Best Fit tiles must suppress AppKit's blue radio press artwork"
 require_source_literal \
   'private func drawMacBookIcon(' \
   "$ROOT/Sources/KlikProApp.swift" \
   "Best Fit tiles must keep their MacBook screen-size silhouettes"
 require_source_literal \
-  'The window remains freely resizable with a 940 × 770 minimum outer frame.' \
+  'Width stays fixed at 940; the window remains vertically resizable.' \
   "$ROOT/Sources/KlikProApp.swift" \
   "Best Fit guidance must describe the actual Klik PRO minimum"
 if grep -q 'dashboardSizeControl = NSSegmentedControl' \
@@ -1741,6 +1780,13 @@ require_source_literal \
 
 previewRunOne="$(mktemp -d "${TMPDIR:-/tmp}/klik-pro-check-preview-one-$STAMP.XXXXXX")"
 previewRunTwo="$(mktemp -d "${TMPDIR:-/tmp}/klik-pro-check-preview-two-$STAMP.XXXXXX")"
+xcrun swiftc \
+  -sdk "$SDK" \
+  -module-cache-path "$MODULE_CACHE" \
+  -target "$HOST_ARCH-apple-macosx13.0" \
+  -warnings-as-errors \
+  "$ROOT/tools/ComparePreviewPixels.swift" \
+  -o "$OUT/compare-preview-pixels"
 KLIK_PRO_PREVIEW_WORK_DIRECTORY="$previewRunOne" \
   "$ROOT/tools/render-previews.sh" --fixtures-only > "$OUT/preview-fixtures-one.log"
 KLIK_PRO_PREVIEW_WORK_DIRECTORY="$previewRunTwo" \
@@ -1779,7 +1825,7 @@ do
     echo "Preview fixture must be opaque: $fixtureName" >&2
     exit 1
   }
-  cmp "$firstFixture" "$secondFixture"
+  "$OUT/compare-preview-pixels" "$firstFixture" "$secondFixture"
 done
 
 # Every Best Fit fixture is Retina-rendered from the content rect. Exact
@@ -1788,10 +1834,10 @@ done
 responsiveFixturePixels() {
   case "$1" in
     responsive-mappings-13-m1.png) echo "1880 1476" ;;
-    responsive-profiles-13-modern.png) echo "2000 1576" ;;
-    responsive-profiles-14.png) echo "2160 1656" ;;
-    responsive-profiles-15.png) echo "2360 1736" ;;
-    responsive-profiles-16.png|responsive-mappings-16.png|responsive-settings-16.png|responsive-advanced-16.png) echo "2560 1856" ;;
+    responsive-profiles-13-modern.png) echo "1880 1576" ;;
+    responsive-profiles-14.png) echo "1880 1656" ;;
+    responsive-profiles-15.png) echo "1880 1736" ;;
+    responsive-profiles-16.png|responsive-mappings-16.png|responsive-settings-16.png|responsive-advanced-16.png) echo "1880 1856" ;;
     *) echo "0 0" ;;
   esac
 }
@@ -1824,7 +1870,7 @@ do
     echo "Responsive preview fixture must be opaque: $fixtureName" >&2
     exit 1
   }
-  cmp "$firstFixture" "$secondFixture"
+  "$OUT/compare-preview-pixels" "$firstFixture" "$secondFixture"
 done
 
 # Step pages have different heights; each fixture pins its own expected height.

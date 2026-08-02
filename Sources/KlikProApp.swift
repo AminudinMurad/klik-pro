@@ -8,9 +8,8 @@ import UniformTypeIdentifiers
 // NOTE: LaunchAgent identifiers and installer helpers live in KlikProConfig.swift,
 // shared with the combined background helper.
 
-/// Responsive dashboard contract. The smallest preset is the v1.5.1 frame that
-/// already fits a 13-inch MacBook. Larger presets add useful list height while
-/// keeping the 872-point card canvas at a readable maximum width.
+/// Responsive dashboard contract. Every MacBook preset keeps the proven
+/// 940-point outer width; larger models add only useful list height.
 enum KlikProDashboardPreset: Int, CaseIterable {
     case air13M1
     case air13Modern
@@ -33,10 +32,10 @@ enum KlikProDashboardPreset: Int, CaseIterable {
     var frameSize: NSSize {
         switch self {
         case .air13M1: return NSSize(width: 940, height: 770)
-        case .air13Modern: return NSSize(width: 1_000, height: 820)
-        case .pro14: return NSSize(width: 1_080, height: 860)
-        case .air15: return NSSize(width: 1_180, height: 900)
-        case .pro16: return NSSize(width: 1_280, height: 960)
+        case .air13Modern: return NSSize(width: 940, height: 820)
+        case .pro14: return NSSize(width: 940, height: 860)
+        case .air15: return NSSize(width: 940, height: 900)
+        case .pro16: return NSSize(width: 940, height: 960)
         }
     }
 
@@ -75,7 +74,7 @@ enum KlikProDashboardMetrics {
     // without raising the proven 13-inch minimum window size.
     static let footerHeight: CGFloat = 20
     static let minimumContentSize = NSSize(width: 940, height: 738)
-    static let maximumContentSize = NSSize(width: 1_280, height: 928)
+    static let maximumContentSize = NSSize(width: 940, height: 928)
     static let framePreferenceKey = "klikpro.dashboardWindowFrame.v1"
 }
 
@@ -396,6 +395,7 @@ final class ThumbWheelBrowsersButton: NSPopUpButton {
         }
     }
     var onToggle: ((Browser, Bool) -> Void)?
+    private var displaysCompactIcon = false
     private var states: [Browser: Bool] = [
         .chrome: false, .brave: false, .firefox: false, .safari: false,
     ]
@@ -444,6 +444,14 @@ final class ThumbWheelBrowsersButton: NSPopUpButton {
         updateSummary()
     }
 
+    func useCompactIconPresentation() {
+        displaysCompactIcon = true
+        setAccessibilityLabel("Choose thumb-wheel browsers")
+        setAccessibilityHelp("Quickly enable or disable browsers for thumb-wheel tab switching.")
+        toolTip = "Choose browsers"
+        updateSummary()
+    }
+
     private func menuItem(for browser: Browser) -> NSMenuItem? {
         menu?.items.first { ($0.representedObject as? String) == browser.rawValue }
     }
@@ -470,7 +478,18 @@ final class ThumbWheelBrowsersButton: NSPopUpButton {
         } else {
             text = "\(on.count) browsers"
         }
-        menu?.item(at: 0)?.title = text
+        if displaysCompactIcon {
+            menu?.item(at: 0)?.title = ""
+            menu?.item(at: 0)?.image = NSImage(
+                systemSymbolName: "globe",
+                accessibilityDescription: "Choose browsers"
+            )?.withSymbolConfiguration(
+                NSImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+            )
+        } else {
+            menu?.item(at: 0)?.title = text
+            menu?.item(at: 0)?.image = nil
+        }
         synchronizeTitleAndSelectedItem()
     }
 }
@@ -978,7 +997,7 @@ final class HeaderActionButton: NSButton {
     }
 }
 
-private func drawCompactMappingCard(in rect: NSRect, dividerY: CGFloat) {
+private func drawCompactMappingCard(in rect: NSRect, dividerY: CGFloat? = nil) {
     let path = NSBezierPath(
         roundedRect: rect.insetBy(dx: 1.5, dy: 1.5),
         xRadius: 8,
@@ -1011,12 +1030,14 @@ private func drawCompactMappingCard(in rect: NSRect, dividerY: CGFloat) {
     path.lineWidth = 1
     path.stroke()
 
-    let divider = NSBezierPath()
-    divider.move(to: NSPoint(x: rect.minX + 12, y: rect.minY + dividerY))
-    divider.line(to: NSPoint(x: rect.maxX - 12, y: rect.minY + dividerY))
-    NSColor.separatorColor.withAlphaComponent(0.22).setStroke()
-    divider.lineWidth = 1
-    divider.stroke()
+    if let dividerY {
+        let divider = NSBezierPath()
+        divider.move(to: NSPoint(x: rect.minX + 12, y: rect.minY + dividerY))
+        divider.line(to: NSPoint(x: rect.maxX - 12, y: rect.minY + dividerY))
+        NSColor.separatorColor.withAlphaComponent(0.22).setStroke()
+        divider.lineWidth = 1
+        divider.stroke()
+    }
 }
 
 private enum ShortcutRowLayout {
@@ -2734,8 +2755,12 @@ final class MouseProfileHeaderView: NSView {
               let profile = profiles.first(where: { $0.id == viewedProfileID }) else { return }
         let dotSize: CGFloat = 6
         let gap: CGFloat = 6
-        let dotsWidth = CGFloat(profileIDs.count) * dotSize
-            + CGFloat(max(0, profileIDs.count - 1)) * gap
+        let leftDotCount = viewedIndex
+        let rightDotCount = profileIDs.count - viewedIndex - 1
+        func dotsWidth(_ count: Int) -> CGFloat {
+            guard count > 0 else { return 0 }
+            return CGFloat(count) * dotSize + CGFloat(count - 1) * gap
+        }
         let nameAttributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
             .foregroundColor: NSColor.appTextPrimary,
@@ -2751,24 +2776,31 @@ final class MouseProfileHeaderView: NSView {
         let activeWidth = activeTextSize.width + 12
         let groupGap: CGFloat = 12
         let badgeGap: CGFloat = 8
-        let totalWidth = dotsWidth + groupGap + nameSize.width
-            + (isActive ? badgeGap + activeWidth : 0)
+        let labelWidth = nameSize.width + (isActive ? badgeGap + activeWidth : 0)
+        let totalWidth = dotsWidth(leftDotCount)
+            + (leftDotCount > 0 ? groupGap : 0)
+            + labelWidth
+            + (rightDotCount > 0 ? groupGap : 0)
+            + dotsWidth(rightDotCount)
         var x = bounds.midX - totalWidth / 2
         let centerY = bounds.height - 19
-        for index in profileIDs.indices {
-            (index == viewedIndex ? NSColor.controlAccentColor : NSColor.tertiaryLabelColor)
-                .setFill()
-            NSBezierPath(
-                ovalIn: NSRect(
-                    x: x,
-                    y: centerY - dotSize / 2,
-                    width: dotSize,
-                    height: dotSize
-                )
-            ).fill()
-            x += dotSize + gap
+        func drawDots(_ count: Int) {
+            for index in 0..<count {
+                NSColor.tertiaryLabelColor.setFill()
+                NSBezierPath(
+                    ovalIn: NSRect(
+                        x: x,
+                        y: centerY - dotSize / 2,
+                        width: dotSize,
+                        height: dotSize
+                    )
+                ).fill()
+                x += dotSize
+                if index < count - 1 { x += gap }
+            }
         }
-        x += groupGap - gap
+        drawDots(leftDotCount)
+        if leftDotCount > 0 { x += groupGap }
         (profile.name as NSString).draw(
             at: NSPoint(x: x, y: centerY - nameSize.height / 2),
             withAttributes: nameAttributes
@@ -2795,7 +2827,10 @@ final class MouseProfileHeaderView: NSView {
                 ),
                 withAttributes: activeAttributes
             )
+            x = badgeRect.maxX
         }
+        if rightDotCount > 0 { x += groupGap }
+        drawDots(rightDotCount)
     }
 }
 
@@ -2847,8 +2882,8 @@ final class SettingsContentView: NSView {
         frame: .zero
     )
     let mappingProfilesView: MappingAppProfilesView
-    // Thumb Wheel tab-switching callout (top-centre above the mouse): a master toggle plus a
-    // browsers pull-down that stays in sync with the Settings tab's four browser checkboxes.
+    // Thumb Wheel callout (top-centre above the mouse): the compact Mappings card
+    // shows only the master toggle and title. Browser choices remain in Settings.
     let thumbWheelToggle: ToggleSwitchView
     let thumbWheelBrowsers: ThumbWheelBrowsersButton
     let thumbWheelResetButton: ShortcutResetButton
@@ -2899,11 +2934,11 @@ final class SettingsContentView: NSView {
     // Five selected v1.5.3 mapping cards. Their fixed geometry keeps the
     // reference composition stable inside the centred 872pt canvas at every
     // dashboard preset; responsive height continues to flow into the lists below.
-    static let thumbWheelCard = NSRect(x: 296, y: 48, width: 280, height: 82)
-    static let middleButtonCard = NSRect(x: 44, y: 126, width: 250, height: 82)
-    static let backButtonCard = NSRect(x: 578, y: 126, width: 250, height: 82)
-    static let forwardButtonCard = NSRect(x: 44, y: 256, width: 250, height: 82)
-    static let gestureButtonCard = NSRect(x: 578, y: 256, width: 250, height: 82)
+    static let thumbWheelCard = NSRect(x: 304, y: 30, width: 264, height: 44)
+    static let middleButtonCard = NSRect(x: 44, y: 81, width: 250, height: 82)
+    static let backButtonCard = NSRect(x: 578, y: 81, width: 250, height: 82)
+    static let forwardButtonCard = NSRect(x: 44, y: 211, width: 250, height: 82)
+    static let gestureButtonCard = NSRect(x: 578, y: 211, width: 250, height: 82)
 
     private static func previewAppIcon(for target: QuickLaunchTarget) -> NSImage {
         let label = target == .chatGPT ? "G" : "C"
@@ -3095,18 +3130,19 @@ final class SettingsContentView: NSView {
             frame: SettingsContentView.mappingBottomCard
         )
         mouseSlideContainer = MouseSlideContainerView(frame: SettingsContentView.deviceCard)
-        // Thumb Wheel uses the same two-row card treatment as the four physical
-        // button mappings: enabled/title/status above, browsers/reset below.
+        // Keep the Mappings callout to one compact title row. The browser picker
+        // and reset behavior remain available through the Settings controls/model.
         let thumbCard = SettingsContentView.thumbWheelCard
         thumbWheelToggle = ToggleSwitchView(
             isOn: config.thumbWheel.enabled,
-            frame: NSRect(x: thumbCard.minX + 14, y: thumbCard.minY + 9, width: 40, height: 22)
+            frame: NSRect(x: thumbCard.minX + 14, y: thumbCard.minY + 11, width: 40, height: 22)
         )
         thumbWheelBrowsers = ThumbWheelBrowsersButton(
-            frame: NSRect(x: thumbCard.minX + 14, y: thumbCard.minY + 46, width: 224, height: 28)
+            frame: NSRect(x: thumbCard.maxX - 44, y: thumbCard.minY + 10, width: 26, height: 24)
         )
         thumbWheelBrowsers.controlSize = .small
         thumbWheelBrowsers.font = .systemFont(ofSize: 11)
+        thumbWheelBrowsers.useCompactIconPresentation()
         thumbWheelResetButton = ShortcutResetButton(
             title: "Horizontal Thumb Wheel",
             frame: NSRect(x: thumbCard.maxX - 34, y: thumbCard.minY + 46, width: 20, height: 28)
@@ -3126,8 +3162,7 @@ final class SettingsContentView: NSView {
         addSubview(mouseSlideContainer)
         [
             middleButtonRow, gestureButtonRow, forwardRow, backRow,
-            thumbWheelToggle, thumbWheelBrowsers,
-            thumbWheelResetButton, mouseProfileHeader,
+            thumbWheelToggle, thumbWheelBrowsers, mouseProfileHeader,
         ].forEach { mouseSlideContainer.addSubview($0) }
         addSubview(mappingProfilesView)
         mouseProfileHeader.onBrowseAnimation = { [weak self] direction in
@@ -3387,7 +3422,7 @@ final class SettingsContentView: NSView {
         let drawWidth = drawHeight * imageAspect
         let rect = NSRect(
             x: card.midX - drawWidth / 2,
-            y: 134,
+            y: card.midY - drawHeight / 2,
             width: drawWidth,
             height: drawHeight
         )
@@ -3428,9 +3463,9 @@ final class SettingsContentView: NSView {
 
     private func drawThumbWheelCard() {
         let card = SettingsContentView.thumbWheelCard
-        drawCompactMappingCard(in: card, dividerY: 40)
+        drawCompactMappingCard(in: card)
         ("Horizontal Thumb Wheel" as NSString).draw(
-            at: NSPoint(x: card.minX + 62, y: card.minY + 13),
+            at: NSPoint(x: card.minX + 62, y: card.minY + 14),
             withAttributes: [
                 .font: NSFont.systemFont(ofSize: 12, weight: .medium),
                 .foregroundColor: NSColor.appTextPrimary,
@@ -3492,7 +3527,9 @@ final class SettingsContentView: NSView {
 
             let path = NSBezierPath()
             path.move(to: anchor)
-            path.line(to: NSPoint(x: (anchor.x + target.x) / 2, y: anchor.y))
+            if c.title != "Horizontal Thumb Wheel" {
+                path.line(to: NSPoint(x: (anchor.x + target.x) / 2, y: anchor.y))
+            }
             path.line(to: target)
             teal.setStroke()
             path.lineWidth = 1.5
@@ -3616,6 +3653,10 @@ final class DashboardPresetTileButton: NSButton {
         title = ""
         isBordered = false
         setButtonType(.radio)
+        // The tile draws its own hover, selected, and keyboard-focus states. Disable
+        // AppKit's native radio press highlight, which otherwise flashes as a blue
+        // circle beneath the custom MacBook icon while the mouse is held down.
+        (cell as? NSButtonCell)?.highlightsBy = []
         target = self
         action = #selector(pressed)
         setAccessibilityLabel(preset.controlTitle)
@@ -3816,17 +3857,16 @@ final class DashboardPresetTileButton: NSButton {
     }
 }
 
-/// Sistem PRO-style Best Fit panel adapted to Klik PRO's existing five outer-frame
-/// presets. The panel owns presentation and accessibility; the window controller
-/// remains the sole owner of actual resize behavior.
+/// Five height presets for the fixed-width dashboard. The panel owns presentation
+/// and accessibility; the window controller remains the sole owner of resizing.
 final class DashboardBestFitControl: NSView {
     var onChange: ((KlikProDashboardPreset) -> Void)?
 
     private var presetButtons: [DashboardPresetTileButton] = []
     private let statusField = NSTextField(labelWithString: "")
     private let helperField = NSTextField(wrappingLabelWithString:
-        "Choose the MacBook screen size to apply its predicted best-fit outer frame. "
-            + "The window remains freely resizable with a 940 × 770 minimum outer frame."
+        "Choose a MacBook model to apply its best-fit dashboard height. "
+            + "Width stays fixed at 940; the window remains vertically resizable."
     )
     private var selectedPreset: KlikProDashboardPreset?
 
@@ -3835,7 +3875,7 @@ final class DashboardBestFitControl: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         setAccessibilityRole(.radioGroup)
-        setAccessibilityLabel("Dashboard Best Fit")
+        setAccessibilityLabel("Dashboard Height")
 
         statusField.font = .systemFont(ofSize: 11, weight: .semibold)
         statusField.textColor = .appTextSecondary
@@ -3903,9 +3943,9 @@ final class DashboardBestFitControl: NSView {
             )
         } else {
             statusField.stringValue =
-                "Custom size · \(Int(size.width.rounded())) × \(Int(size.height.rounded()))"
+                "Custom height · 940 × \(Int(size.height.rounded()))"
             statusField.textColor = .appTextSecondary
-            setAccessibilityValue("Custom size")
+            setAccessibilityValue("Custom height")
         }
         for button in presetButtons {
             button.state = button.preset == selectedPreset ? .on : .off
@@ -4338,7 +4378,7 @@ final class PreferencesContentView: NSView {
         let rxi = PreferencesContentView.rightX + PreferencesContentView.pad
         drawSectionLabel("General", x: ix, y: PreferencesContentView.generalCard.minY + 16)
         drawSectionLabel("Thumb Wheel Tab Switching", x: ix, y: PreferencesContentView.thumbWheelCard.minY + 16)
-        ("Best Fit" as NSString).draw(
+        ("Dashboard Height" as NSString).draw(
             at: NSPoint(x: PreferencesContentView.pad, y: 430),
             withAttributes: [
                 .font: NSFont.systemFont(ofSize: 14, weight: .semibold),
@@ -4841,13 +4881,17 @@ final class ToggleWindowController: NSWindowController, NSWindowDelegate {
               frame.origin.y.isFinite,
               frame.width.isFinite,
               frame.height.isFinite,
-              frame.width >= KlikProDashboardPreset.air13M1.frameSize.width,
               frame.height >= KlikProDashboardPreset.air13M1.frameSize.height,
-              frame.width <= KlikProDashboardPreset.pro16.frameSize.width,
               frame.height <= KlikProDashboardPreset.pro16.frameSize.height else {
             return nil
         }
-        return frame
+        let fixedWidth = KlikProDashboardPreset.air13M1.frameSize.width
+        return NSRect(
+            x: frame.midX - fixedWidth / 2,
+            y: frame.origin.y,
+            width: fixedWidth,
+            height: frame.height
+        )
     }
 
     init() {
@@ -6068,7 +6112,7 @@ final class ToggleView: NSView {
             self?.confirmDeleteOrphanData(orphan)
         }
         advancedView.onRevealOrphan = { orphan in
-            NSWorkspace.shared.activateFileViewerSelecting(orphan.dataPaths)
+            Self.revealInFinder(orphan.dataPaths)
         }
         contentView.mappingProfilesView.onOpen = { [weak self] instance in
             self?.launchAppProfile(instance)
@@ -7135,6 +7179,7 @@ final class ToggleView: NSView {
         }
         guard beginAppProfileLifecycle() else { return }
         let currentConfig = persistedConfig
+        advancedView.setFailedRevealPaths([])
         advancedView.setStatus(
             mode == .trash ? "Moving \(statusLabel) data to Trash…" : "Deleting \(statusLabel) data…"
         )
@@ -7153,6 +7198,10 @@ final class ToggleView: NSView {
                     self.config = result.config
                     self.persistedConfig = result.config
                     self.appProfilesView.setInstances(result.config.instances)
+                    self.advancedView.setFailedRevealPaths(result.perArtifact.compactMap { artifact in
+                        if case .failed = artifact.outcome { return artifact.url }
+                        return nil
+                    })
                     self.advancedView.setStatus(
                         self.dataRemovalStatusMessage(result, label: statusLabel, applied: applied),
                         color: result.allRemoved ? KlikProBrand.green : .systemOrange
@@ -7169,6 +7218,16 @@ final class ToggleView: NSView {
                 DispatchQueue.main.async { self.finishAppProfileLifecycle() }
             }
         }
+    }
+
+    private static func revealInFinder(_ paths: [URL]) {
+        let fileManager = FileManager.default
+        let existing = paths.filter { fileManager.fileExists(atPath: $0.path) }
+        let targets = existing.isEmpty
+            ? paths.map { $0.deletingLastPathComponent() }
+            : existing
+        guard !targets.isEmpty else { return }
+        NSWorkspace.shared.activateFileViewerSelecting(targets)
     }
 
     // MARK: Deep scan for leftovers
@@ -7362,11 +7421,13 @@ final class ToggleView: NSView {
         config: KlikProConfig
     ) {
         guard beginAppProfileLifecycle() else { return }
+        advancedView.setFailedRevealPaths([])
         advancedView.setStatus(mode == .trash ? "Moving leftovers to Trash…" : "Deleting leftovers…")
         appProfileQueue.async { [weak self] in
             guard let self else { return }
             var removed = 0
             var failed = 0
+            var failedPaths: [URL] = []
             var working = config
             for lo in leftovers {
                 do {
@@ -7375,6 +7436,7 @@ final class ToggleView: NSView {
                     removed += 1
                 } catch {
                     failed += 1
+                    failedPaths.append(lo.url)
                 }
             }
             for orphan in orphans {
@@ -7384,9 +7446,18 @@ final class ToggleView: NSView {
                         target: target, config: working, mode: mode
                     )
                     working = result.config
-                    if result.allRemoved { removed += 1 } else { failed += 1 }
+                    if result.allRemoved {
+                        removed += 1
+                    } else {
+                        failed += 1
+                        failedPaths.append(contentsOf: result.perArtifact.compactMap { artifact in
+                            if case .failed = artifact.outcome { return artifact.url }
+                            return nil
+                        })
+                    }
                 } catch {
                     failed += 1
+                    failedPaths.append(contentsOf: orphan.dataPaths)
                 }
             }
             for path in staleDockPaths {
@@ -7396,6 +7467,7 @@ final class ToggleView: NSView {
                     removed += 1
                 } else {
                     failed += 1
+                    failedPaths.append(URL(fileURLWithPath: path, isDirectory: true))
                 }
             }
             _ = applySavedConfig()
@@ -7404,6 +7476,7 @@ final class ToggleView: NSView {
                 self.config = working
                 self.persistedConfig = working
                 self.appProfilesView.setInstances(working.instances)
+                self.advancedView.setFailedRevealPaths(failedPaths)
                 let verb = mode == .trash ? "moved to Trash" : "deleted"
                 self.advancedView.setStatus(
                     failed == 0
