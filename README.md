@@ -742,9 +742,11 @@ Gatekeeper, LaunchAgent, Accessibility, logging, and config details.
 Behavior on a programmable mouse is hardware- and macOS-dependent, so these are the
 setups Klik PRO has been tested against:
 
+The latest compatibility check passed on macOS 27 Public Beta 3.
+
 | | |
 |---|---|
-| macOS | 26.5.2 (build 25F84) |
+| macOS | 27 Public Beta 3 |
 | Klik PRO | v1.5.8 (build 31), universal Apple Silicon + Intel build |
 | Primary mouse | Logitech MX Master 3 (Mac edition), firmware `MPM19.01_0015`, connected over Bluetooth (BLE) |
 | Additional tested mouse | Logi M650, firmware `RBM16.10_0014` |
