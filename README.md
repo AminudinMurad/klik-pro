@@ -751,9 +751,9 @@ The latest compatibility checks passed on macOS 26.6.1 and macOS 27 Public Beta 
 | Primary mouse | Logitech MX Master 3 (Mac edition), firmware `MPM19.01_0015`, connected over Bluetooth (BLE) |
 | Additional tested mouse | Logi M650, firmware `RBM16.10_0014` |
 | Vendor software / driver | None — no mouse driver or manufacturer software installed |
-| ChatGPT / Codex desktop app (Special Feature target) | `/Applications/ChatGPT.app` — version `26.715.72359` (build `5718`), bundle ID `com.openai.codex` |
-| Claude Desktop app (Special Feature target) | `/Applications/Claude.app` — version/build `1.24012.1`, bundle ID `com.anthropic.claudefordesktop` |
-| Browsers (thumb-wheel tab switching) | Google Chrome `150.0.7871.115`, Brave `150.1.92.139`, Firefox `152.0.5`, Safari `26.5.2` |
+| ChatGPT / Codex desktop app (Special Feature target) | `/Applications/ChatGPT.app` — version `26.803.61601` (build `6396`), bundle ID `com.openai.codex` |
+| Claude Desktop app (Special Feature target) | `/Applications/Claude.app` — version/build `1.26832.0`, bundle ID `com.anthropic.claudefordesktop` |
+| Browsers (thumb-wheel tab switching) | Google Chrome `151.0.7922.109`, Brave `150.1.92.141`, Safari `27.0`; Firefox `152.0.5` was previously tested but is not installed for this check |
 | Browser Back/Forward routing | Native side-button navigation in Chrome, Brave, and Firefox; Safari fallback uses Back `⌘[` and Forward `⌘]` |
 
 The Special Feature validates those exact standard desktop-app paths and bundle IDs.
