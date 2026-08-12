@@ -45,7 +45,9 @@ mapping-specific colour and depth to the carousel. v1.5.5 hardens authenticated
 upgrades by requiring the staged and installed main/helper executables to match
 the verified DMG byte for byte before the rollback copy is discarded. v1.5.6
 locks manual resizing to the same 940-point width and renames Best Fit to
-Dashboard Height. The
+Dashboard Height. v1.5.7 adds a Finder action for cleanup items left behind
+after a partial deletion, and v1.5.8 removes the overlapping cleanup-status
+action while preserving that Reveal in Finder recovery path. The
 sender-aware,
 mouse-independent profile work remains reserved for v1.6.
 
@@ -67,6 +69,20 @@ appear only while its Accessibility input tap is operational. Optional native-ap
 launchers add separate icons, user-recorded hotkeys for ChatGPT / Codex, Claude, and
 Gemini, and temporary mouse-button launch actions where supported. Actual button and
 wheel support varies by hardware.
+
+## v1.5.8 highlights
+
+- **No overlapping cleanup actions** — when orphaned-data deletion cannot finish,
+  the row now replaces **Delete Data…** with **Reveal in Finder**.
+- **Safe cleanup recovery remains visible** — the v1.5.7 Finder action stays
+  available for items left on disk after a partial Trash or permanent-delete
+  operation.
+
+## v1.5.7 highlights
+
+- **Reveal remaining data in Finder** — Deep Scan cleanup provides a Finder
+  action when items remain on disk after a partial Trash or permanent-delete
+  operation.
 
 ## v1.5.6 highlights
 
@@ -286,10 +302,10 @@ Once unlocked, point new App Profiles at a durable data folder so their logins s
 
 ## Install (pre-built release)
 
-The current release is **Klik PRO v1.5.6 (build 29)**, provided as one universal
+The current release is **Klik PRO v1.5.8 (build 31)**, provided as one universal
 macOS app for Apple Silicon and Intel Macs. The DMG is the recommended download;
 the ZIP contains the same app as an alternative.
-**[Download Klik PRO v1.5.6](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.5.6).**
+**[Download Klik PRO v1.5.8](https://github.com/AminudinMurad/klik-pro/releases/tag/v1.5.8).**
 
 > [!IMPORTANT]
 > **Since version 1.5.0, fresh/reset defaults are quieter.** Existing setups keep their saved
@@ -729,7 +745,7 @@ setups Klik PRO has been tested against:
 | | |
 |---|---|
 | macOS | 26.5.2 (build 25F84) |
-| Klik PRO | v1.5.6 (build 29), universal Apple Silicon + Intel build |
+| Klik PRO | v1.5.8 (build 31), universal Apple Silicon + Intel build |
 | Primary mouse | Logitech MX Master 3 (Mac edition), firmware `MPM19.01_0015`, connected over Bluetooth (BLE) |
 | Additional tested mouse | Logi M650, firmware `RBM16.10_0014` |
 | Vendor software / driver | None — no mouse driver or manufacturer software installed |
